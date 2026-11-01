@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSpinBox, QTabWidget, QVBoxLayout, QWidget)
@@ -135,7 +136,7 @@ class SettingsPage(QWidget):
                 f"Backend: <span style='color:{P.neon}'>{ctx.backend.core_version}</span><br>"
                 f"Tema: ABYSS NEON (Navy + Monster-neon #00FF5F)<br>Versi: {ver}")
         lbl = QLabel(info)
-        lbl.setTextFormat(1)  # RichText
+        lbl.setTextFormat(Qt.TextFormat.RichText)
         lbl.setWordWrap(True)
         f.addRow(lbl)
         tabs.addTab(w, "About")

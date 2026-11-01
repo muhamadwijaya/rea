@@ -173,14 +173,17 @@ class AggregatePage(QWidget):
         if not rows:
             self.ctx.toast.push("Tidak ada unit tersisa utk diagregasi.", "info")
             return
-        case = f"CASE-{self.con.execute('SELECT COUNT(DISTINCT \'case\') c FROM aggregation_map').fetchone()[chr(99)] + 1:05d}" if False else f"CASE-{self.con.execute(chr(34)+chr(83)+chr(69)+chr(76)).fetchone()}" 
+        n_case = self.con.execute(
+            'SELECT COUNT(DISTINCT "case") FROM aggregation_map').fetchone()[0]
+        case = f"CASE-{n_case + 1:05d}"
         with db._LOCK:
             for i, r in enumerate(rows):
                 self.con.execute(
-                    "INSERT OR IGNORE INTO aggregation_map(unit,pack,"case") VALUES(?,?,?)",
+                    'INSERT OR IGNORE INTO aggregation_map(unit,pack,"case") VALUES(?,?,?)',
                     (r["serial"], f"{case}-P{i // 6 + 1}", case))
-            self.con.execute("INSERT OR IGNORE INTO aggregation_map(unit,pack,"case",pallet) "
-                             "VALUES(?,'','',?)", (case, "PLT-0001"))
+            self.con.execute(
+                'INSERT OR IGNORE INTO aggregation_map(unit,pack,"case",pallet) '
+                "VALUES(?,'','',?)", (case, "PLT-0001"))
             db.audit(self.con, self.ctx.user, "AGG_AUTO", "aggregation_map", "", case,
                      f"{len(rows)} unit")
             self.con.commit()

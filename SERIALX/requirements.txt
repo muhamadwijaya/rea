@@ -1,0 +1,10 @@
+# SERIALX — dependensi UI (semuanya gratis/open-source)
+PySide6>=6.6
+openpyxl>=3.1        # ekspor XLSX laporan
+pytest>=7.0          # smoke test
+pytest-qt>=4.2       # test widget Qt (opsional)
+
+# Opsional (aplikasi tetap jalan tanpanya):
+# pyserial>=3.5      # kirim label ke printer via COM/USB
+# qrcode>=7.0        # render QR cepat (fallback: encoder internal ui/qr.py)
+# pytesseract        # OCR kamera vision nyata (fallback: simulator)

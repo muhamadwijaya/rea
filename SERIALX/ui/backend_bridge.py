@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -102,10 +103,10 @@ class _PyEngine:
 
         now = _dt.datetime.now()
         markers = {"\u0001": "luhn", "\u0002": "crc1", "\u0003": "crc2", "\u0004": "mod10"}
-        p = pattern
-        for k, v in (("luhncheck", "\u0001"), ("checksum", "\u0001"), ("crc1", "\u0002"),
-                     ("crc2", "\u0003"), ("mod10", "\u0004")):
-            p = p.replace("{" + k.upper() + "}", v).replace("{" + k.capitalize() + "}", v)
+        p = re.sub(r"\{\s*(LUHNCHECK|CHECKSUM)\s*\}", "\u0001", pattern, flags=re.I)
+        p = re.sub(r"\{\s*CRC1\s*\}", "\u0002", p, flags=re.I)
+        p = re.sub(r"\{\s*CRC2\s*\}", "\u0003", p, flags=re.I)
+        p = re.sub(r"\{\s*MOD10\s*\}", "\u0004", p, flags=re.I)
         rng = _random.Random()
         out: list[str] = []
         i = 0
@@ -311,6 +312,22 @@ def _py_dispatch(method: str, prm: dict[str, Any]) -> Any:
                                  prm.get("lot", ""), prm.get("exp", ""))}
     if method == "tspl_label":
         return {"tspl": TSPL.build(prm.get("serial", ""), prm.get("sku", ""))}
+    if method == "license_verify":
+        # Fallback: terima hanya token "PAYLOAD~BASE64SIG" yang sig-nya HMAC dgn pubkey sbg secret.
+        import base64 as _b64
+        import hashlib as _hl
+        import hmac as _hm
+        tok = prm.get("token", "")
+        try:
+            payload_b64, sig_b64 = tok.split("~", 1)
+            want = _b64.b64encode(_hm.new(
+                prm.get("public_key_pem", "").encode(),
+                payload_b64.encode(), _hl.sha256).digest()).decode()
+            ok = _hm.compare_digest(want, sig_b64)
+            payload = _b64.b64decode(payload_b64).decode() if ok else ""
+            return {"valid": bool(ok), "payload": payload}
+        except Exception:
+            return {"valid": False, "payload": ""}
     raise BackendError(f"Method butuh state/tidak ada di fallback: {method}")
 
 

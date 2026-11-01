@@ -169,8 +169,8 @@ class ReportsPage(QWidget):
         colors = {"ISSUED": P.info, "PRINTED": P.neon, "VERIFIED": P.neon_bright,
                   "VOID": P.err}
         self.donut.set_data([(r["status"], r["n"], colors.get(r["status"], P.text_dim)) for r in st])
-        html = ("<table width='100%'><tr><td align='left' style='color:%s'>DAY</td>"
-                "<td>PRODUCED</td><td>PRINTED</td><td>REJECTED</td></tr>" % P.neon_bright)
+        html = (f"<table width='100%'><tr><td align='left' style='color:{P.neon_bright}'>DAY</td>"
+                "<td>PRODUCED</td><td>PRINTED</td><td>REJECTED</td></tr>")
         for r in rows[-10:]:
             html += (f"<tr><td>{r['day']}</td><td align='center'>{r['produced']}</td>"
                      f"<td align='center'>{r['printed']}</td>"
