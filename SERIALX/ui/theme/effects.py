@@ -1,6 +1,7 @@
 """Efek visual ABYSS NEON: glow, LED, animated border, scanline, toast, splash."""
 from __future__ import annotations
 
+import math
 import random
 
 from PySide6.QtCore import (QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt,
@@ -70,7 +71,7 @@ class LedIndicator(QWidget):
 
     def _tick(self) -> None:
         self._t += 0.18
-        self._pulse = 0.75 + 0.25 * abs(random.Random(int(self._t * 10)).sin(self._t))
+        self._pulse = 0.75 + 0.25 * abs(math.sin(self._t))
         self.update()
 
     def update_state(self, state: str) -> None:
@@ -257,16 +258,17 @@ def draw_claw(painter: QPainter, rect: QRectF, color: str = P.neon, scale: float
     p.save()
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     c = QColor(color)
-    pen = QPen(c, max(2.0, 3.2 * scale), cap=Qt.PenCapStyle.RoundCap)
+    pen = QPen(c, max(2.0, 3.2 * scale))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     w, h = rect.width(), rect.height()
     for i, (dx, dw) in enumerate([(0.12, 0.16), (0.34, 0.22), (0.58, 0.28)]):
         pen.setWidthF(max(2.0, (2.2 + i * 1.4) * scale))
         p.setPen(pen)
         x0 = rect.left() + w * dx
-        p.drawLine(QRectF(x0, rect.top() + h * 0.78, 1, 1).topLeft().toPoint().__class__(
-            int(x0), int(rect.top() + h * 0.78)),
-            QPoint_(int(x0 + w * dw), int(rect.top() + h * 0.15)))
+        p.drawLine(QPoint_(int(x0), int(rect.top() + h * 0.78)),
+                   QPoint_(int(x0 + w * dw), int(rect.top() + h * 0.15)))
     p.restore()
 
 

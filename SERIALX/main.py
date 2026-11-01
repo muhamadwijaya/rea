@@ -71,8 +71,13 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtGui import QShortcut, QKeySequence
     from PySide6.QtWidgets import QApplication
 
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+    try:
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except Exception:
+        pass
     app = QApplication(sys.argv[:1] + rest)
     app.setApplicationName("SERIALX")
     app.setOrganizationName("SerialX Industries")
@@ -133,7 +138,10 @@ def main(argv: list[str] | None = None) -> int:
         }
         for seq, fn in sc.items():
             s = QShortcut(QKeySequence(seq), win)
-            s.setContext(Qt.ContextWidgetContext.WidgetWithChildrenShortcut)
+            try:  # Qt >= 6.8 memindahkan enum ini ke QtCore.Qt.ShortcutContext
+                s.setContext(Qt.ContextWidgetContext.WidgetWithChildrenShortcut)
+            except AttributeError:
+                s.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             s.activated.connect(fn)
         if splash is None and not ctx.user:
             pass
