@@ -55,7 +55,7 @@ def migrate(con: sqlite3.Connection) -> None:
             CREATE INDEX idx_sr_parent ON serial_records(parent_id);
             CREATE INDEX idx_sr_printed ON serial_records(printed_at);
             CREATE TABLE aggregation_map(
-              id INTEGER PRIMARY KEY, unit TEXT NOT NULL, pack TEXT, case TEXT, pallet TEXT,
+              id INTEGER PRIMARY KEY, unit TEXT NOT NULL, pack TEXT, "case" TEXT, pallet TEXT,
               job_id INTEGER, UNIQUE(unit));
             CREATE TABLE print_queue(
               id INTEGER PRIMARY KEY, job_id INTEGER, serial TEXT, zpl TEXT,
@@ -182,7 +182,8 @@ def seed_demo(con: sqlite3.Connection, backend: Any) -> None:
             tstamp = (datetime.now() - timedelta(minutes=k)).strftime("%Y-%m-%d %H:%M:%S")
             rows.append((s, jid, pid, lot, 1, sig, status, "ST01",
                          tstamp if status == "PRINTED" else None,
-                         tstamp if status == "PRINTED" and k % 3 == 0 else None))
+                         tstamp if status == "PRINTED" and k % 3 == 0 else None,
+                         tstamp))
         cur.execute("UPDATE counters SET last_seq=? WHERE job_id=?", (n, jid))
         cur.execute("UPDATE jobs SET last_seq=? WHERE id=?", (n, jid))
     con.executemany(

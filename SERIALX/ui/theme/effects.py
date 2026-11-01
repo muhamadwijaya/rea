@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 
 from PySide6.QtCore import (QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt,
-                            QTimer, pyqtProperty)
+                            QTimer)
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QVBoxLayout, QWidget)

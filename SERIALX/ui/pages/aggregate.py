@@ -28,7 +28,7 @@ class TreeModel(QAbstractItemModel):
         self.beginResetModel()
         self.children.clear(); self.nodes.clear()
         with db._LOCK:
-            rows = self.con.execute("SELECT unit,pack,case,pallet FROM aggregation_map").fetchall()
+            rows = self.con.execute("SELECT unit,pack,' + "'case'" + ',pallet FROM aggregation_map").fetchall()
         for r in rows:
             chain = [x for x in (r["pallet"], r["case"], r["pack"], r["unit"]) if x]
             for a, b in zip(chain, chain[1:]):
@@ -173,13 +173,13 @@ class AggregatePage(QWidget):
         if not rows:
             self.ctx.toast.push("Tidak ada unit tersisa utk diagregasi.", "info")
             return
-        case = f"CASE-{self.con.execute('SELECT COUNT(DISTINCT case) c FROM aggregation_map').fetchone()['c'] + 1:05d}"
+        case = f"CASE-{self.con.execute('SELECT COUNT(DISTINCT \'case\') c FROM aggregation_map').fetchone()[chr(99)] + 1:05d}" if False else f"CASE-{self.con.execute(chr(34)+chr(83)+chr(69)+chr(76)).fetchone()}" 
         with db._LOCK:
             for i, r in enumerate(rows):
                 self.con.execute(
-                    "INSERT OR IGNORE INTO aggregation_map(unit,pack,case) VALUES(?,?,?)",
+                    "INSERT OR IGNORE INTO aggregation_map(unit,pack,"case") VALUES(?,?,?)",
                     (r["serial"], f"{case}-P{i // 6 + 1}", case))
-            self.con.execute("INSERT OR IGNORE INTO aggregation_map(unit,pack,case,pallet) "
+            self.con.execute("INSERT OR IGNORE INTO aggregation_map(unit,pack,"case",pallet) "
                              "VALUES(?,'','',?)", (case, "PLT-0001"))
             db.audit(self.con, self.ctx.user, "AGG_AUTO", "aggregation_map", "", case,
                      f"{len(rows)} unit")
@@ -207,7 +207,7 @@ class AggregatePage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Ekspor CSV", "agg.csv", "CSV (*.csv)")
         if not path:
             return
-        rows = self.con.execute("SELECT unit,pack,case,pallet FROM aggregation_map").fetchall()
+        rows = self.con.execute("SELECT unit,pack,' + "'case'" + ',pallet FROM aggregation_map").fetchall()
         lines = ["unit,pack,case,pallet"] + [
             ",".join([r["unit"], r["pack"] or "", r["case"] or "", r["pallet"] or ""]) for r in rows]
         Path(path).write_text("\n".join(lines), encoding="utf-8")

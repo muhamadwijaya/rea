@@ -11,6 +11,9 @@ from PySide6.QtWidgets import (QFrame, QGraphicsBlurEffect, QHBoxLayout, QLabel,
                                QLineEdit, QMainWindow, QPushButton, QStackedWidget,
                                QVBoxLayout, QWidget)
 
+import logging
+from pathlib import Path
+
 from ui import db
 from ui.theme.effects import LedIndicator, ToastHost, apply_glow
 from ui.theme.icons import icon
@@ -281,6 +284,40 @@ class MainWindow(QMainWindow):
 
     def set_running_led(self, on: bool) -> None:
         self.led_run.update_state("RUNNING" if on else "IDLE")
+
+    # ---------------------------------------------------------------- console
+    def show_console(self, visible: bool) -> None:
+        """Pane log di bawah statusbar (Ctrl+`) — tail serialx.log."""
+        from PySide6.QtWidgets import QPlainTextEdit
+        if not hasattr(self, "_console"):
+            ed = QPlainTextEdit()
+            ed.setObjectName("ConsolePane")
+            ed.setReadOnly(True)
+            ed.setMaximumHeight(160)
+            ed.setStyleSheet("background:#04070E;color:#8FA6C2;border-top:1px solid #16305A;"
+                             "font-family:Consolas,monospace;font-size:11px;")
+            central = self.centralWidget().layout()
+            central.addWidget(ed)
+            self._console = ed
+        self._console.setVisible(visible)
+        if visible:
+            try:
+                logf = Path(__file__).resolve().parent.parent / "data" / "logs" / "serialx.log"
+                txt = logf.read_text(errors="ignore")[-4000:] if logf.is_file() else "(log kosong)"
+                self._console.setPlainText(txt)
+                self._console.moveCursor(__import__("PySide6.QtGui", fromlist=["QTextCursor"]).QTextCursor.MoveOperation.End)
+            except OSError as exc:
+                self._console.setPlainText(f"Gagal baca log: {exc}")
+
+    def refresh_current(self) -> None:
+        page = self.stack.currentWidget()
+        for name in ("refresh", "_auto_refresh", "_refresh_bl"):
+            fn = getattr(page, name, None)
+            if callable(fn):
+                fn()
+        d = getattr(page, "refresh", None)
+        if callable(d):
+            d()
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)

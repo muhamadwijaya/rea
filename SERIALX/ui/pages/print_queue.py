@@ -6,7 +6,8 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QAbstractTableModel, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtCore import QAbstractTableModel
+from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
                                QMessageBox, QPushButton, QSpinBox, QTableView,
                                QVBoxLayout, QWidget)
 
