@@ -6,13 +6,25 @@ rem ============================================================
 cd /d "%~dp0"
 title SERIALX
 
+rem --- segarkan PATH (supaya Python hasil install barusan langsung dikenali) ---
+set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts;%LOCALAPPDATA%\Programs\Python\Launcher"
+
 rem --- cari Python ---
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+if not defined PY where py >nul 2>nul && set "PY=py -3"
 if not defined PY where python >nul 2>nul && set "PY=python"
+if not defined PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 if not defined PY (
-    echo [SERIALX] Python TIDAK ditemukan. Install Python 3.11+ dari https://python.org
-    echo           (jangan lupa centang "Add python.exe to PATH" saat install).
+    echo ============================================================
+    echo [SERIALX] ERROR: Python belum terinstall di komputer ini.
+    echo.
+    echo   Solusi otomatis : double-click  install_python.bat
+    echo                     ^(akan mengunduh ^& menginstal Python sendiri^)
+    echo.
+    echo   Solusi manual   : download dari https://www.python.org/downloads/
+    echo                     dan WAJIB centang "Add python.exe to PATH".
+    echo ============================================================
     pause
     exit /b 1
 )
