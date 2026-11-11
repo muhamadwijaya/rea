@@ -8,4 +8,4 @@ __pycache__/
 logs/
 desktop/bin/
 desktop/obj/
-app/
+/app/
