@@ -35,12 +35,19 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
         }
     }
 
-    public async Task<EngineResponse> PostJsonAsync(string path, object payload, CancellationToken ct)
+    public async Task<EngineResponse> PostJsonAsync(string path, object payload, CancellationToken ct, IDictionary<string, string>? headers = null)
     {
         try
         {
-            using var content = new StringContent(JsonSerializer.Serialize(payload, JsonDefaults.Web), Encoding.UTF8, "application/json");
-            using var response = await http.PostAsync(path, content, ct);
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload, JsonDefaults.Web), Encoding.UTF8, "application/json"),
+            };
+            foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
+            using var response = await http.SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
             MarkOk();
             return new EngineResponse((int)response.StatusCode, body);
@@ -54,7 +61,7 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
     /// <summary>Scores headlines through the engine; returns an empty map when the engine is unavailable.</summary>
     public async Task<Dictionary<string, SentimentScore>> ScoreSentimentAsync(IEnumerable<SmcTerminal.Gateway.Models.NewsItem> items, CancellationToken ct)
     {
-        var batch = items.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary }).ToList();
+        var batch = items.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary, lang = i.Lang, category = i.Category }).ToList();
         var scores = new Dictionary<string, SentimentScore>();
         if (batch.Count == 0)
         {
@@ -76,7 +83,11 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
                 e.GetProperty("score").GetDouble(),
                 e.GetProperty("label").GetString() ?? "neutral",
                 e.GetProperty("terms").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
-                e.GetProperty("assets").EnumerateArray().Select(x => x.GetString() ?? "").ToList());
+                e.GetProperty("assets").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
+                e.TryGetProperty("symbols", out var tags)
+                    ? tags.EnumerateArray().Select(t => new SmcTerminal.Gateway.Models.SymbolTag(
+                        t.GetProperty("symbol").GetString() ?? "", t.GetProperty("market").GetString() ?? "", t.GetProperty("sign").GetInt32())).ToList()
+                    : new List<SmcTerminal.Gateway.Models.SymbolTag>());
         }
         return scores;
     }

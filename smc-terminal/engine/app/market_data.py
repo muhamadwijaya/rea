@@ -40,7 +40,7 @@ TIMEFRAMES: dict[str, Timeframe] = {
     "15m": Timeframe("15m", "15M", "15m", "30d", None, 60, 15, 4),
     "1h": Timeframe("1h", "1H", "60m", "120d", None, 120, 12, 4),
     "4h": Timeframe("4h", "4H", "60m", "300d", "4h", 300, 10, 3),
-    "1d": Timeframe("1d", "1D", "1d", "4y", None, 900, 10, 3),
+    "1d": Timeframe("1d", "1D", "1d", "2y", None, 900, 10, 3),
     "1w": Timeframe("1w", "1W", "1wk", "15y", None, 3600, 8, 3),
 }
 
@@ -174,8 +174,8 @@ def load(inst: Instrument, tf_key: str) -> Bars:
         return bars
 
 
-def load_many(instruments: list[Instrument], tf_key: str) -> dict[str, Bars | Exception]:
-    """Load many instruments with one batched download for the cache misses."""
+def load_many(instruments: list[Instrument], tf_key: str, chunk: int = 150) -> dict[str, Bars | Exception]:
+    """Load many instruments; cache misses are downloaded in batches of `chunk` tickers."""
     tf = timeframe(tf_key)
     out: dict[str, Bars | Exception] = {}
     missing: list[Instrument] = []
@@ -185,18 +185,24 @@ def load_many(instruments: list[Instrument], tf_key: str) -> dict[str, Bars | Ex
             out[inst.symbol] = bars
         else:
             missing.append(inst)
-    if not missing:
-        return out
+    for start in range(0, len(missing), chunk):
+        part = missing[start:start + chunk]
+        _download_part(part, tf, out)
+        if start + chunk < len(missing):
+            time.sleep(0.5)  # be gentle with Yahoo between batches
+    return out
 
-    tickers = sorted({i.yahoo for i in missing})
+
+def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | Exception]) -> None:
+    tickers = sorted({i.yahoo for i in part})
     started = time.perf_counter()
     try:
         data = _download(tickers, tf)
     except UpstreamError as exc:
-        for inst in missing:
+        for inst in part:
             out[inst.symbol] = exc
-        return out
-    for inst in missing:
+        return
+    for inst in part:
         frame = _slice(data, inst.yahoo)
         try:
             if frame is None:
@@ -207,4 +213,3 @@ def load_many(instruments: list[Instrument], tf_key: str) -> dict[str, Bars | Ex
         except NoData as exc:
             out[inst.symbol] = exc
     log.info("batch %s: %d tickers in %.2fs", tf.key, len(tickers), time.perf_counter() - started)
-    return out

@@ -15,6 +15,8 @@ export const store = {
   alerts: [],
   headlines: [],
   instruments: [],
+  quotes: new Map(), // symbol -> full quote row (all assets of the universe)
+  recentNews: [],
   connected: false,
 };
 
@@ -149,6 +151,17 @@ async function connectRealtime() {
   });
   conn.on('newsReset', () => { loadHeadlines(); emit('newsReset'); });
   conn.on('screener', (snap) => { store.screener = snap; emit('screener', snap); });
+  conn.on('quotes', (msg) => {
+    let missing = false;
+    for (const [symbol, last, open, changePct, openChangePct] of msg.rows) {
+      const q = store.quotes.get(symbol);
+      if (q) Object.assign(q, { last, open, changePct, openChangePct });
+      else missing = true;
+    }
+    emit('quotes', msg);
+    if (missing) loadQuotes(); // new symbols in the sweep: fetch their names/decimals once
+  });
+  conn.on('fundamental', (msg) => emit('fundamental', msg));
   conn.on('direction', async () => { await loadDirection(); });
   conn.on('stats', (s) => { store.stats = s; updateLiveLabel(); emit('stats', s); });
   conn.on('calendar', () => emit('calendar'));
@@ -220,6 +233,27 @@ function renderMarquee() {
   track.innerHTML = html + html;
 }
 
+let quotesLoading = false;
+async function loadQuotes() {
+  if (quotesLoading) return;
+  quotesLoading = true;
+  try {
+    const res = await api('/api/quotes?market=all');
+    for (const r of res.rows) store.quotes.set(r.symbol, { ...store.quotes.get(r.symbol), ...r });
+    emit('quotesFull', res.rows);
+  } catch { /* engine still sweeping */ } finally {
+    quotesLoading = false;
+  }
+}
+
+async function loadRecentNews() {
+  try {
+    const res = await api('/api/news?sinceMinutes=60&limit=500');
+    store.recentNews = res.items;
+    emit('recentNews', res.items);
+  } catch { /* ignore */ }
+}
+
 async function loadAnalyses() {
   try { store.analyses = await api('/api/analyses'); emit('analyses', store.analyses); } catch { /* ignore */ }
 }
@@ -238,7 +272,7 @@ async function loadInstruments() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshStats(), loadScreener(), loadDirection(), loadHeadlines(), loadAnalyses(), loadAlerts()]);
+  await Promise.all([refreshStats(), loadScreener(), loadDirection(), loadHeadlines(), loadAnalyses(), loadAlerts(), loadQuotes(), loadRecentNews()]);
   if (!store.instruments.length) loadInstruments();
 }
 
@@ -375,6 +409,7 @@ function boot() {
   loadInstruments();
   // Safety net: periodic refresh even if a realtime message was missed.
   setInterval(() => { refreshStats(); if (!store.connected) refreshAll(); }, 60_000);
+  setInterval(loadQuotes, 5 * 60_000); // full rows (names, sessions) — realtime prices arrive via SignalR
   on('needInstruments', loadInstruments);
 }
 

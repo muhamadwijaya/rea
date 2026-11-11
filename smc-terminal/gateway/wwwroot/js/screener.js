@@ -80,7 +80,7 @@ export class ScreenerView {
         <div class="pane active" data-t="smc">
           <div class="toolbar" style="padding:8px 10px;border-bottom:1px solid var(--line)">
             <div class="seg scr-bias"><button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button></div>
-            <div class="seg scr-tf"><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button></div>
+            <div class="seg scr-tf"><button data-v="1h">1H · INTI</button><button data-v="4h">4H · INTI</button><button data-v="1d">1D · INTI</button><button data-v="all">1D · SEMUA ASET</button></div>
             <input class="input scr-search" placeholder="cari simbol…">
             <span class="sub scr-sub muted"></span>
             <span class="grow"></span><span class="time scr-updated"></span><span class="live-label">LIVE</span>
@@ -104,7 +104,7 @@ export class ScreenerView {
       const tr = e.target.closest('tr[data-sym]');
       if (tr) window.SMC.go(cfg.key, 'analisa', tr.dataset.sym, this.filters.tf);
     });
-    on('screener', (snap) => { if (snap.tf === this.filters.tf) { this.snapshot = snap; this.render(); } });
+    on('screener', (snap) => { if (snap.tf === this.filters.tf && this.filters.tf !== 'all') { this.snapshot = snap; this.render(); } });
     // TradingView widget is mounted the first time its tab is opened (it needs a visible, sized container).
     el.querySelector('.pane[data-t="tv"]').addEventListener('tabshow', () => {
       if (!this.tvMounted) { this.tvMounted = true; screenerWidget($('.tv-screener'), cfg.tvScreener); }
@@ -142,17 +142,30 @@ export class ScreenerView {
     const ok = rowsOf(this.snapshot, this.cfg.key).filter((r) => !r.error);
     const bull = ok.filter((r) => r.direction?.includes('bullish')).length;
     const bear = ok.filter((r) => r.direction?.includes('bearish')).length;
-    this.el.querySelector('.scr-sub').innerHTML = `· ${rows.length} instrumen · TF ${esc(this.snapshot.tf.toUpperCase())} · <span class="up">▲${bull}</span> <span class="down">▼${bear}</span>`;
+    this.el.querySelector('.scr-sub').innerHTML = `· ${rows.length} instrumen${this.snapshot.scope === 'all' ? ' (semua aset)' : ''} · TF ${esc(this.snapshot.tf.toUpperCase())} · <span class="up">▲${bull}</span> <span class="down">▼${bear}</span>`;
     this.el.querySelector('.scr-updated').textContent = `update ${fmtTime(this.snapshot.generatedAt)} · ${this.snapshot.elapsedMs} ms`;
   }
 
   async loadTf(tf) {
+    clearTimeout(this.retry);
     if (tf === this.store.screener?.tf) { this.snapshot = this.store.screener; this.render(); return; }
     this.snapshot = null;
     this.loadingTf = tf;
     this.render();
     try {
-      this.snapshot = await api(`/api/screener?market=${encodeURIComponent(this.cfg.key)}&tf=${tf}`);
+      if (tf === 'all') {
+        // Full universe (hundreds of assets) comes from the engine's background 1D scan.
+        const res = await api(`/api/screener?market=${encodeURIComponent(this.cfg.key)}&scope=all`);
+        if (res.status === 'warming') {
+          const p = res.progress || {};
+          this.el.querySelector('.scr-table').innerHTML = `<tbody><tr><td class="loading">Engine sedang memindai seluruh aset (${p.done ?? 0}/${p.total ?? 0} pasar) — otomatis dimuat ulang</td></tr></tbody>`;
+          this.retry = setTimeout(() => { if (this.filters.tf === 'all') this.loadTf('all'); }, 15000);
+          return;
+        }
+        this.snapshot = res;
+      } else {
+        this.snapshot = await api(`/api/screener?market=${encodeURIComponent(this.cfg.key)}&tf=${tf}`);
+      }
     } catch (e) {
       this.el.querySelector('.scr-table').innerHTML = `<tbody><tr><td><div class="error-box">${esc(e.message)}</div></td></tr></tbody>`;
       return;

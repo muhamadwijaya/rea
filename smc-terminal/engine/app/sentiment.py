@@ -103,8 +103,14 @@ def score_text(text: str) -> dict:
 
 
 def score_items(items: list[dict]) -> list[dict]:
+    from .tagger import tag
+
     out = []
     for item in items:
-        text = f"{item.get('title', '')}. {item.get('summary', '')}"
-        out.append({"id": item.get("id"), **score_text(text)})
+        title = item.get("title", "")
+        text = f"{title}. {item.get('summary', '')}"
+        scored = score_text(text)
+        # Symbols come from the headline only: summaries mention many side assets.
+        tags = tag(title, item.get("lang", "en"), item.get("category", ""))
+        out.append({"id": item.get("id"), **scored, "symbols": [t.to_json() for t in tags]})
     return out

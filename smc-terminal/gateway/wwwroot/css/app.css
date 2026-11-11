@@ -224,7 +224,7 @@ main { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 10px 16px; }
 .kpi .t { font-size: 10px; letter-spacing: .14em; color: var(--muted); }
 .kpi .v { font-size: 21px; font-weight: 800; line-height: 1.2; }
 .kpi .s { font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dash-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 2.1fr) minmax(320px, 1fr); gap: var(--gap); }
+.dash-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(270px, .8fr) minmax(0, 2.6fr) minmax(300px, .95fr); gap: var(--gap); }
 .dash-col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
 .hero-card { padding: 14px 16px; flex: 0 0 auto; }
 .hero-card h1 { font-size: clamp(18px, 1.5vw, 26px); line-height: 1.2; margin: 8px 0 12px; font-weight: 800; }
@@ -506,7 +506,7 @@ table.data td.r, table.data th.r { text-align: right; }
 }
 @media (max-width: 1280px) {
   .brand-sub, .chip-status .lbl { display: none; }
-  .dash-grid { grid-template-columns: minmax(260px, 1fr) minmax(0, 1.8fr); }
+  .dash-grid { grid-template-columns: minmax(240px, .8fr) minmax(0, 2.2fr); }
   .dash-tabs { display: none; }
   .mkt-stat:nth-child(n+4) { display: none; }
   .an-wrap { grid-template-columns: 160px minmax(0, 1fr) 320px; }
@@ -536,3 +536,39 @@ table.data td.r, table.data th.r { text-align: right; }
   .countdown { min-width: 0; }
   .cal-top { flex-direction: column; }
 }
+
+/* ------------------------------------------------------------------ fundamental & AI */
+.fd-table td { white-space: normal; vertical-align: top; }
+.fd-table td small, .fd-call small { display: block; color: var(--dim); font-size: 10px; margin-top: 2px; }
+.fd-sep td { background: var(--panel-2); color: var(--accent-2); font-size: 10px; letter-spacing: .14em; font-weight: 700; cursor: default; }
+.fd-notes { white-space: normal !important; color: var(--muted); font-size: 10.5px; max-width: 320px; }
+.acc-hero { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
+.acc-big { font-size: 40px; font-weight: 800; color: var(--accent-2); line-height: 1.1; }
+.acc-cur { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ai-panel { display: flex; flex-direction: column; gap: 10px; }
+.ai-result p { color: var(--text-2); margin: 6px 0; font-size: 12.5px; }
+.ai-result h5 { margin: 10px 0 4px; font-size: 10px; letter-spacing: .14em; color: var(--muted); }
+.ai-result ul { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 12px; }
+.ai-top { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.ai-dir { font-size: 22px; font-weight: 800; letter-spacing: .06em; }
+.ai-conf b { font-size: 18px; }
+.ai-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.conf-bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.conf-bar i { display: block; height: 100%; }
+.ai-settings summary { cursor: pointer; color: var(--muted); font-size: 10.5px; letter-spacing: .12em; }
+.btn-primary:disabled { opacity: .5; cursor: wait; }
+hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
+
+/* ------------------------------------------------------------------ market orbs */
+.checks-panel { flex: 1; min-height: 0; display: flex; }
+.checks-panel .engine-left { flex: 1; }
+.orbs-panel { display: flex; flex-direction: column; min-height: 0; }
+.orbs-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.orbs-stage canvas { position: absolute; inset: 0; }
+.orb-heads { position: absolute; inset: 0; pointer-events: none; }
+.orb-head { position: absolute; font-size: 10.5px; color: var(--text-2); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orb-head b[data-go] { pointer-events: auto; cursor: pointer; letter-spacing: .12em; color: var(--accent-2); }
+.orb-news { font-size: 10px; color: var(--muted); letter-spacing: .06em; }
+.orb-tip { position: absolute; pointer-events: none; background: var(--panel-3); border: 1px solid var(--line-2); padding: 7px 9px; font-size: 11px; border-radius: 3px; box-shadow: var(--shadow); display: none; z-index: 3; line-height: 1.55; max-width: 260px; }
+.verdict-stack { gap: 5px; padding: 6px; display: flex; flex-direction: column; }
+.watch-scope button { padding: 2px 7px; font-size: 9.5px; }

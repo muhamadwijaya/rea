@@ -39,7 +39,7 @@ public static class GatewayHost
         builder.Services.AddHttpClient<EngineClient>(client =>
         {
             client.BaseAddress = new Uri(options.EngineUrl.TrimEnd('/') + "/");
-            client.Timeout = TimeSpan.FromSeconds(120);
+            client.Timeout = TimeSpan.FromSeconds(240); // AI analysis can take a few minutes
         });
         builder.Services.AddHttpClient(NewsWorker.HttpName, client =>
             {
@@ -61,9 +61,12 @@ public static class GatewayHost
         builder.Services.AddSingleton<CalendarStore>();
         builder.Services.AddSingleton<StatsService>();
         builder.Services.AddSingleton<SymbolNewsService>();
+        builder.Services.AddSingleton<SecretStore>();
         builder.Services.AddHostedService<NewsWorker>();
         builder.Services.AddHostedService<CalendarWorker>();
         builder.Services.AddHostedService<ScreenerWorker>();
+        builder.Services.AddHostedService<QuotesWorker>();
+        builder.Services.AddHostedService<FundamentalWorker>();
 
         var app = builder.Build();
         app.UseDefaultFiles();

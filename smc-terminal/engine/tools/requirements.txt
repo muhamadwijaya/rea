@@ -1,0 +1,5 @@
+# Only needed to regenerate config/universe.json (python tools/build_universe.py).
+requests>=2.31
+lxml>=5
+pandas>=2.1
+yfinance>=0.2.54

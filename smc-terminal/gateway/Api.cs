@@ -30,13 +30,30 @@ public static class Api
 
         api.MapGet("/stats", (StatsService stats) => Results.Json(stats.Build()));
 
-        api.MapGet("/screener", async (string? market, string? tf, MarketState state, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/quotes", async (string? market, EngineClient engine, CancellationToken ct) =>
+        {
+            var m = string.IsNullOrWhiteSpace(market) ? "all" : market.ToLowerInvariant();
+            if (!MarketKeys.Contains(m))
+            {
+                return Results.BadRequest(new { error = "invalid_argument", message = "market tidak dikenal" });
+            }
+            var response = await engine.GetAsync($"quotes?market={m}", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapGet("/screener", async (string? market, string? tf, string? scope, MarketState state, EngineClient engine, CancellationToken ct) =>
         {
             market = string.IsNullOrWhiteSpace(market) ? "all" : market.ToLowerInvariant();
             tf = string.IsNullOrWhiteSpace(tf) ? state.ScreenerTf : tf.ToLowerInvariant();
             if (!MarketKeys.Contains(market) || !Timeframes.Contains(tf))
             {
                 return Results.BadRequest(new { error = "invalid_argument", message = "market/tf tidak dikenal" });
+            }
+            if (scope == "all")
+            {
+                // Full universe (1D) is scanned in the engine's background job and served from its cache.
+                var universe = await engine.GetAsync($"screener?market={market}&tf=1d&scope=all", ct);
+                return Results.Content(universe.Body, "application/json", statusCode: universe.Status);
             }
             // The worker keeps the default snapshot warm; other combinations go straight to the engine cache.
             if (market == "all" && tf == state.ScreenerTf && state.ScreenerJson is { } cached)
@@ -75,10 +92,11 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/instruments", async (string? market, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/instruments", async (string? market, string? scope, EngineClient engine, CancellationToken ct) =>
         {
             var m = string.IsNullOrWhiteSpace(market) ? "all" : market;
-            var response = await engine.GetAsync($"instruments?market={Uri.EscapeDataString(m)}", ct);
+            var sc = scope == "all" ? "all" : "core";
+            var response = await engine.GetAsync($"instruments?market={Uri.EscapeDataString(m)}&scope={sc}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -100,13 +118,15 @@ public static class Api
             return Results.Content(root.ToJsonString(), "application/json");
         });
 
-        api.MapGet("/news", (string? market, string? category, string? asset, string? sentiment, string? q, int? limit, int? offset, NewsStore news) =>
+        api.MapGet("/news", (string? market, string? category, string? asset, string? sentiment, string? q, string? symbol,
+                int? limit, int? offset, int? sinceMinutes, NewsStore news) =>
             Results.Json(new
             {
                 total = news.Total,
                 market,
                 updated = news.LastUpdate,
-                items = news.Query(market, category, asset, sentiment, q, limit ?? 80, offset ?? 0),
+                items = news.Query(market, category, asset, sentiment, q, limit ?? 80, offset ?? 0,
+                    sinceMinutes is > 0 ? DateTimeOffset.UtcNow.AddMinutes(-sinceMinutes.Value) : null, symbol),
             }));
 
         api.MapGet("/news/sources", (string? market) => Results.Json(NewsWorker.Statuses
@@ -135,7 +155,58 @@ public static class Api
         }));
 
         api.MapGet("/alerts", (int? limit, MarketState state) => Results.Json(state.Alerts(limit ?? 50)));
+
+        // ------------------------------------------------------------ fundamentals, outlook, AI
+        api.MapGet("/fundamental", () => FundamentalWorker.LatestJson is { } json
+            ? Results.Content(json, "application/json")
+            : Results.Json(new { status = "warming", events = Array.Empty<object>() }));
+
+        api.MapGet("/outlook", async (string symbols, NewsStore news, EngineClient engine, CancellationToken ct) =>
+        {
+            var list = symbols.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(60).ToList();
+            var since = DateTimeOffset.UtcNow.AddHours(-24);
+            var byNews = list.ToDictionary(s => s, s => news.Query(null, null, null, null, null, 30, 0, since, s));
+            var response = await engine.PostJsonAsync("outlook", new { symbols = list, news = byNews }, ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapPost("/ai/analyze", async (AiRequest body, NewsStore news, SecretStore secrets, EngineClient engine, CancellationToken ct) =>
+        {
+            var items = news.Query(null, null, null, null, null, 25, 0, DateTimeOffset.UtcNow.AddHours(-48), body.Symbol);
+            var headers = secrets.AnthropicKey is { } key ? new Dictionary<string, string> { ["X-Anthropic-Key"] = key } : null;
+            var response = await engine.PostJsonAsync("ai/analyze", new { symbol = body.Symbol, news = items }, ct, headers);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapGet("/settings/ai", (SecretStore secrets) => Results.Json(new
+        {
+            configured = secrets.AnthropicKey is not null || SecretStore.EnvironmentKeyPresent,
+            source = secrets.AnthropicKey is not null ? "saved" : SecretStore.EnvironmentKeyPresent ? "environment" : null,
+            encrypted = OperatingSystem.IsWindows(),
+            model = "claude-opus-5-5",
+        }));
+
+        api.MapPost("/settings/ai", (AiKeyRequest body, SecretStore secrets) =>
+        {
+            var key = body.ApiKey?.Trim() ?? "";
+            if (!key.StartsWith("sk-ant-", StringComparison.Ordinal) || key.Length < 20 || key.Any(char.IsWhiteSpace))
+            {
+                return Results.BadRequest(new { error = "invalid_key", message = "Format API key tidak dikenali (harus diawali sk-ant-)." });
+            }
+            secrets.SaveAnthropicKey(key);
+            return Results.Json(new { configured = true, source = "saved" });
+        });
+
+        api.MapDelete("/settings/ai", (SecretStore secrets) =>
+        {
+            secrets.DeleteAnthropicKey();
+            return Results.Json(new { configured = SecretStore.EnvironmentKeyPresent });
+        });
     }
+
+    public sealed record AiRequest(string Symbol);
+
+    public sealed record AiKeyRequest(string? ApiKey);
 
     private static AnalysisRecord? ToRecord(string body)
     {

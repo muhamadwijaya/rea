@@ -5,9 +5,10 @@ import { AnalysisView } from './analysis.js';
 import { ScreenerView } from './screener.js';
 import { NewsView } from './news.js';
 import { OverviewView } from './overview.js';
+import { FundamentalView } from './fundamental.js';
 
-const SUBS = [['analisa', 'ANALISA SMC'], ['screener', 'SCREENER'], ['berita', 'BERITA'], ['arah', 'ARAH MARKET']];
-const VIEWS = { analisa: AnalysisView, screener: ScreenerView, berita: NewsView, arah: OverviewView };
+const SUBS = [['analisa', 'ANALISA SMC'], ['screener', 'SCREENER'], ['berita', 'BERITA'], ['arah', 'ARAH MARKET'], ['fundamental', 'FUNDAMENTAL & AI']];
+const VIEWS = { analisa: AnalysisView, screener: ScreenerView, berita: NewsView, arah: OverviewView, fundamental: FundamentalView };
 
 export function marketPage(key) {
   const cfg = MARKETS[key];

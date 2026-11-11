@@ -4,12 +4,13 @@ import { api, esc, on, badge, dirHex, dirClass, fmtPct, fmtPrice, fmtScore, fmtT
 import { SmcChart } from './smc-chart.js';
 import { advancedChart, technicalGauge } from './tv.js';
 import { rowsOf } from './markets.js';
+import { mountAiPanel } from './ai-panel.js';
 
 const LAYERS = [
   ['swing', 'Struktur swing'], ['internal', 'Internal'], ['pivots', 'HH/HL/LH/LL'], ['ob', 'Order block'],
   ['fvg', 'FVG'], ['eq', 'EQH/EQL'], ['liquidity', 'Likuiditas'], ['zones', 'Premium/Discount'], ['ema', 'EMA 50/200'], ['plan', 'Trade plan'],
 ];
-const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['tv', 'TV'], ['berita', 'BERITA']];
+const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['tv', 'TV'], ['berita', 'BERITA'], ['ai', 'AI']];
 const LEGEND = [
   ['#2fd28c', 'bull'], ['#ff4d5e', 'bear'], ['#38d3f5', 'FVG bull'], ['#ff9f43', 'FVG bear'], ['#6b9bff', 'EMA50'], ['#f2c94c', 'EMA200 · likuiditas'],
 ];
@@ -41,6 +42,7 @@ export class AnalysisView {
     this.sideTab = 'bias';
     this.render();
     on('screener', () => this.renderWatch());
+    on('quotes', () => { if (this.watchScope === 'all' && this.visible()) this.renderWatch(); });
     setInterval(() => {
       if (this.visible() && this.data && !document.hidden) this.load(this.current.symbol, this.current.tf, { silent: true });
     }, 60_000);
@@ -53,8 +55,8 @@ export class AnalysisView {
     this.el.innerHTML = `
       <div class="an-wrap">
         <aside class="panel an-watch">
-          <div class="panel-head"><span class="diamond">◆</span> WATCHLIST <span class="right live-label">LIVE</span></div>
-          <form class="watch-form" autocomplete="off"><input class="input an-input" list="symbol-list" placeholder="simbol lain…"><button class="btn" type="submit">MUAT</button></form>
+          <div class="panel-head"><span class="diamond">◆</span> WATCHLIST <span class="right"><span class="seg watch-scope"><button data-v="core" class="active">INTI</button><button data-v="all">SEMUA</button></span></span></div>
+          <form class="watch-form" autocomplete="off"><input class="input an-input" list="symbol-list" placeholder="cari / simbol lain…"><button class="btn" type="submit">MUAT</button></form>
           <div class="watch-list"></div>
         </aside>
         <div class="an-center">
@@ -91,6 +93,9 @@ export class AnalysisView {
       const v = this.$('.an-input').value.trim();
       if (v) this.load(v, this.current.tf);
     });
+    this.watchScope = 'core';
+    segmented(this.$('.watch-scope'), (v) => { this.watchScope = v; this.renderWatch(); });
+    this.$('.an-input').addEventListener('input', () => this.renderWatch());
     this.$('.watch-list').addEventListener('click', (e) => {
       const row = e.target.closest('[data-sym]');
       if (row) this.load(row.dataset.sym, this.current.tf);
@@ -112,16 +117,22 @@ export class AnalysisView {
   }
 
   renderWatch() {
-    const rows = rowsOf(this.store.screener, this.cfg.key);
     const active = this.data?.instrument.symbol || this.current.symbol;
-    this.$('.watch-list').innerHTML = rows.length ? rows.map((r) => {
-      const d = r.instrument.decimals;
-      return `<div class="watch-row ${r.instrument.symbol === active ? 'active' : ''}" data-sym="${esc(r.instrument.symbol)}" title="${esc(r.instrument.name)}">
-        <span class="w-sym"><span class="w-dot" style="background:${r.error ? 'var(--dim)' : dirHex(r.direction)}"></span>${esc(r.instrument.symbol)}</span>
-        <span class="w-px num">${r.error ? '–' : fmtPrice(r.price, d)}</span>
+    const q = (this.$('.an-input')?.value || '').trim().toUpperCase();
+    // INTI: core watchlist with SMC bias dots. SEMUA: every asset of this market (live quotes), searchable.
+    const rows = this.watchScope === 'all'
+      ? [...this.store.quotes.values()].filter((r) => r.market === this.cfg.key)
+        .map((r) => ({ symbol: r.symbol, name: r.name, price: r.last, changePct: r.changePct, decimals: r.decimals, dot: r.changePct > 0 ? 'bull' : r.changePct < 0 ? 'bear' : '' }))
+        .sort((a, b) => (a.symbol < b.symbol ? -1 : 1))
+      : rowsOf(this.store.screener, this.cfg.key).map((r) => ({ symbol: r.instrument.symbol, name: r.instrument.name, price: r.error ? null : r.price,
+        changePct: r.changePct, decimals: r.instrument.decimals, dot: r.error ? '' : r.direction }));
+    const shown = (q ? rows.filter((r) => r.symbol.includes(q) || (r.name || '').toUpperCase().includes(q)) : rows).slice(0, 400);
+    this.$('.watch-list').innerHTML = shown.length ? shown.map((r) => `
+      <div class="watch-row ${r.symbol === active ? 'active' : ''}" data-sym="${esc(r.symbol)}" title="${esc(r.name)}">
+        <span class="w-sym"><span class="w-dot" style="background:${r.dot ? dirHex(r.dot) : 'var(--dim)'}"></span>${esc(r.symbol)}</span>
+        <span class="w-px num">${r.price == null ? '–' : fmtPrice(r.price, r.decimals)}</span>
         <span class="w-ch num ${r.changePct > 0 ? 'up' : r.changePct < 0 ? 'down' : ''}">${fmtPct(r.changePct)}</span>
-      </div>`;
-    }).join('') : '<div class="empty">Menunggu data screener…</div>';
+      </div>`).join('') : `<div class="empty">${this.watchScope === 'all' ? 'Harga seluruh aset sedang dimuat…' : 'Menunggu data screener…'}</div>`;
   }
 
   ensureChart() {
@@ -155,7 +166,6 @@ export class AnalysisView {
   async load(symbol, tf, { silent = false } = {}) {
     this.current = { symbol, tf };
     this.tfSeg.set(tf);
-    this.$('.an-input').value = '';
     this.controller?.abort();
     this.controller = new AbortController();
     if (!silent) {
@@ -254,9 +264,28 @@ export class AnalysisView {
       </div><div class="note">${esc(d.source)}. Chart SMC diperbarui tiap 60 detik; mode TRADINGVIEW LIVE / SPLIT untuk harga tick realtime.</div>`);
     pane('tv', '<div class="tv-gauge" style="height:100%;min-height:380px"></div>');
     pane('berita', '<div class="sym-news"><div class="loading">Memuat berita</div></div>');
+    pane('ai', '<div class="an-outlook"><div class="loading">Menghitung outlook gabungan</div></div><div class="an-ai"></div>');
+    mountAiPanel(this.$('.an-ai'), { initial: inst.symbol });
+    this.loadOutlook(inst.symbol);
 
     technicalGauge(this.$('.tv-gauge'), inst.tv, this.current.tf);
     this.loadSymbolNews(inst.symbol);
+  }
+
+  async loadOutlook(symbol) {
+    const target = () => this.$('.an-outlook');
+    try {
+      const res = await api(`/api/outlook?symbols=${encodeURIComponent(symbol)}`);
+      const o = res.rows[0];
+      if (!target() || !o || o.error) { if (target()) target().innerHTML = `<div class="empty">${esc(o?.error || 'Outlook tidak tersedia')}</div>`; return; }
+      const part = (name, v) => `<div class="comp"><span class="n">${name}</span>${divBar(v ?? 0, 100)}<span class="v" style="color:${v > 0 ? 'var(--bull)' : v < 0 ? 'var(--bear)' : 'var(--dim)'}">${v == null ? '–' : fmtScore(v)}</span></div>`;
+      target().innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center"><b>OUTLOOK GABUNGAN (ATURAN)</b>${badge(o.direction, o.label)}</div>
+        ${part('SMC multi-timeframe', o.components.smc)}${part('Fundamental rilis data', o.components.fundamental)}${part(`Berita (${o.newsCount})`, o.components.news)}
+        <div class="note">Skor ${fmtScore(o.score)} · keyakinan ${esc(o.confidence)} · ${esc(o.notes.join(' · '))}</div><hr class="sep">`;
+    } catch (e) {
+      if (target()) target().innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
   }
 
   async loadSymbolNews(symbol) {

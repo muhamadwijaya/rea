@@ -80,33 +80,22 @@
             </form>
             <div class="quick" id="quick"></div>
           </div>
-          <div class="market-tiles" id="market-tiles"></div>
+          <div class="panel checks-panel"><div class="engine-left" id="engine-checks"></div></div>
         </div>
 
-        <div class="panel engine" id="engine">
-          <div class="panel-head"><span class="diamond">◆</span> SMC ENGINE <span class="sub">· STRUKTUR → ZONA → LIKUIDITAS → BIAS</span><span class="right"><span class="time" id="engine-updated"></span></span></div>
-          <div class="engine-left" id="engine-checks"></div>
-          <div class="engine-center">
-            <canvas id="radar"></canvas>
-            <div class="legend">WATCHLIST · TIAP SINAR = 1 INSTRUMEN<span>PANJANG = KEKUATAN BIAS · WARNA = ARAH</span></div>
-            <div class="hover-tip" id="radar-tip"></div>
-          </div>
-          <div class="engine-right">
-            <div class="cap">VERDICT STACK<span>ANALISA TERAKHIR · TERBARU DI ATAS</span></div>
-            <div class="verdict-stack" id="verdict-stack"></div>
-          </div>
-          <div class="engine-bottom">
-            <div class="checks-row" id="checks-row"></div>
-          </div>
+        <div class="panel orbs-panel">
+          <div class="panel-head"><span class="diamond">◆</span> MARKET ORBS <span class="sub">· tiap jarum = 1 aset · panjang = besar perubahan hari ini · warna = arah · tag berita mengambang 3 menit</span><span class="right"><span class="time" id="orbs-status"></span></span></div>
+          <div class="orbs-stage" id="orbs-stage"><canvas></canvas><div class="orb-heads"></div><div class="orb-tip hover-tip"></div></div>
         </div>
 
         <div class="panel tabbed dash-tabs">
           <div class="ptabs">
-            <button data-t="arah" class="active">ARAH MARKET</button><button data-t="sinyal">SINYAL</button><button data-t="alert">ALERT <span id="alert-count"></span></button><button data-t="recent">ANALISA</button>
+            <button data-t="arah" class="active">ARAH</button><button data-t="sinyal">SINYAL</button><button data-t="alert">ALERT <span id="alert-count"></span></button><button data-t="verdict">VERDICT</button><button data-t="recent">ANALISA</button>
           </div>
           <div class="pane active" data-t="arah"><div class="scroll" id="dir-strip"><div class="loading">Menghitung arah market</div></div></div>
           <div class="pane" data-t="sinyal"><div class="scroll" id="signal-list"></div></div>
           <div class="pane" data-t="alert"><div class="scroll" id="alert-list"></div></div>
+          <div class="pane" data-t="verdict"><div class="scroll verdict-stack" id="verdict-stack"></div></div>
           <div class="pane" data-t="recent">
             <div class="list-head cols-4"><span>Simbol</span><span>Verdict</span><span>Skor</span><span>Waktu</span></div>
             <div class="scroll" id="recent-list"></div>

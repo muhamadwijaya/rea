@@ -46,18 +46,28 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 
 | Halaman | Isi |
 | --- | --- |
-| **Dashboard** | KPI, pencarian simbol, kartu FOREX / SAHAM AS / SAHAM IDX / KRIPTO, radar SMC + *verdict stack*, tab ARAH MARKET · SINYAL · ALERT · ANALISA |
+| **Dashboard** | KPI, pencarian, lima cek SMC, **market orbs** (satu orb per pasar, tiap jarum = 1 aset dari universe penuh, label open → harga sekarang & %, hover/klik aset, tag berita mengambang 3 menit dengan sentimen naik/netral/turun + tally "condong ke mana" 60 menit), tab ARAH · SINYAL · ALERT · VERDICT · ANALISA |
 | **Forex** · **Saham AS** · **Saham IDX** · **Kripto** | Tiap pasar punya 4 sub-tab sendiri ↓ |
 | ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP; layer lewat menu LAYER SMC) atau chart TradingView live / split; panel kanan bertab BIAS · MTF · PLAN · NARASI · LEVEL · TV · BERITA |
 | ↳ Screener | Tab SMC SCREENER (filter bias, TF 1H/4H/1D, sortir) · tab TRADINGVIEW SCREENER realtime pasar itu |
 | ↳ Berita | Berita realtime khusus pasar itu (push SignalR), sentimen per aset, filter, TradingView News pasar itu, status sumber |
+| ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI Claude** (opsional, butuh API key) |
 | ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
 
-Watchlist bawaan: 13 forex + emas/perak/minyak + DXY (FOREX), 12 saham AS + SPX/NDX/DJI/VIX/US10Y
-(SAHAM AS), 12 saham BEI + IHSG (SAHAM IDX), 10 koin (KRIPTO). Berita dari 28 sumber RSS dibagi per pasar
-berdasarkan kategori feed dan aset yang disebut di judul.
+**Aset**: 57 aset inti (`config/watchlist.json`, dipindai SMC 1H/4H/1D) + **universe ±1.600 aset**
+(`config/universe.json`): seluruh S&P 500 + saham AS populer & ETF, seluruh saham BEI yang tersedia di Yahoo
+(±880), ±80 kripto teratas (identitas ticker dicek dengan harga CoinGecko), 44 pair forex mayor/cross/eksotis
+dan komoditas. Universe dipindai SMC 1D tiap 20 menit dan harga open/last-nya diperbarui bergiliran tiap ±2
+menit. Perbarui daftar dengan `python engine/tools/build_universe.py` (butuh `engine/tools/requirements.txt`).
+Berita dari 28 sumber RSS dibagi per pasar dan ditautkan ke aset (ticker, nama perusahaan/koin, alias mata uang).
+
+**Analisa AI (opsional)**: buka FUNDAMENTAL & AI › Pengaturan AI, masukkan Anthropic API key (disimpan lokal,
+terenkripsi DPAPI di Windows) atau set `ANTHROPIC_API_KEY`. Model: `claude-opus-5-5` dengan fallback server-side
+otomatis bila permintaan ditolak. Setiap analisa memakai kuota akun Anthropic Anda. Keyakinan yang ditampilkan
+adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di pasar; karena itu
+aplikasi menampilkan akurasi nyata model aturan yang diverifikasi dengan reaksi harga setelah rilis data.
 
 ## Arsitektur
 
@@ -101,6 +111,11 @@ Engine Python — FastAPI (engine/)
 | `GET /api/direction` | Arah market + sentimen berita + event high-impact |
 | `GET /api/news?market=kripto&category=&sentiment=&q=&limit=` | Berita per pasar (terbaru dulu) |
 | `GET /api/news/sentiment?market=forex` | Ringkasan sentimen 12 jam per pasar |
+| `GET /api/quotes?market=all` | Open / last / % seluruh universe |
+| `GET /api/screener?market=saham-idx&scope=all` | SMC 1D seluruh aset suatu pasar |
+| `GET /api/fundamental` | Rilis data + prediksi + reaksi nyata + akurasi |
+| `GET /api/outlook?symbols=EURUSD,NVDA` | Outlook gabungan SMC + fundamental + berita |
+| `POST /api/ai/analyze` `{"symbol":"EURUSD"}` | Analisa AI Claude (butuh API key) |
 | `GET /api/symbol-news?symbol=AAPL` | Berita per simbol |
 | `GET /api/calendar` · `/api/alerts` · `/api/stats` · `/api/health` | Kalender, alert, KPI, status |
 

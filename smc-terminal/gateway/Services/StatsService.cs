@@ -20,6 +20,7 @@ public sealed class StatsService(MarketState state, NewsStore news, CalendarStor
             screenerAt = state.ScreenerAt,
             screenerTf = state.ScreenerTf,
             instruments = rows.Count,
+            universe = QuotesWorker.Count,
             failed = state.ScreenerRows.Count - rows.Count,
             bullish = rows.Count(r => r.Direction?.Contains("bullish") == true),
             bearish = rows.Count(r => r.Direction?.Contains("bearish") == true),

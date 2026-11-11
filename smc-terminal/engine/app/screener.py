@@ -15,10 +15,12 @@ def _change(bars: Bars | Exception | None, lookback: int = 1) -> float | None:
     return round((bars.close[-1] / prev - 1.0) * 100.0, 3) if prev else None
 
 
-def screen(market: str = "all", tf_key: str = "4h") -> dict:
+def screen(market: str = "all", tf_key: str = "4h", scope: str = "core") -> dict:
+    """SMC summary per instrument. scope=core: curated watchlist; scope=all: full universe (use 1D)."""
     started = time.perf_counter()
     tf = market_data.timeframe(tf_key)
-    insts = instruments.by_market(market)
+    insts = instruments.by_market(market, scope)
+    spark_len = 40 if scope == "core" else 20
     bars_map = market_data.load_many(insts, tf.key)
     daily_map = bars_map if tf.key == "1d" else market_data.load_many(insts, "1d")
 
@@ -33,7 +35,7 @@ def screen(market: str = "all", tf_key: str = "4h") -> dict:
             continue
         a = analysis.run_on_bars(inst, tf, bars)
         daily = daily_map.get(inst.symbol)
-        closes = bars.close[-40:]
+        closes = bars.close[-spark_len:]
         rows.append({
             **base,
             **analysis.summary(a),
@@ -45,6 +47,7 @@ def screen(market: str = "all", tf_key: str = "4h") -> dict:
     return {
         "market": market,
         "tf": tf.key,
+        "scope": scope,
         "generatedAt": int(time.time()),
         "elapsedMs": int((time.perf_counter() - started) * 1000),
         "count": len(rows),

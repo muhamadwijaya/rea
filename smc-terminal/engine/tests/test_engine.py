@@ -97,3 +97,66 @@ def test_sentiment_negation_and_assets():
     assert pos["label"] == "bullish" and "IDX" in pos["assets"]
     assert "GOLD" in neg["assets"] and "USD" in neg["assets"]
     assert flipped["score"] > 0
+
+
+@pytest.mark.parametrize(
+    "text,lang,expected",
+    [
+        ("Nvidia shares jump after earnings beat", "en", {("NVDA", 1)}),
+        ("Yen strengthens as BOJ signals rate hike", "en", {("USDJPY", -1)}),
+        ("Saham BBCA dan BBRI menguat", "id", {("BBCA", 1), ("BBRI", 1)}),
+        ("Rupiah melemah ke Rp 18.150", "id", {("USDIDR", -1)}),
+        ("Bitcoin falls below $74,000", "en", {("BTCUSD", 1)}),
+        ("CEO says AI spending is up", "en", set()),
+    ],
+)
+def test_tagger_maps_headlines_to_instruments(text, lang, expected):
+    from app.tagger import tag
+
+    assert {(t.symbol, t.sign) for t in tag(text, lang)} == expected
+
+
+def test_universe_extends_core_watchlist_without_duplicates():
+    uni = instruments.universe()
+    assert len(uni) > len(instruments.watchlist())
+    symbols = [i.symbol for i in uni]
+    assert len(symbols) == len(set(symbols))
+    assert all(i.core for i in uni[: len(instruments.watchlist())])
+
+
+def test_fundamental_extracts_actual_and_direction():
+    from app import fundamental
+
+    ind = fundamental.classify("CPI m/m")
+    assert ind.kind == "inflation" and ind.sign == 1
+    assert fundamental.classify("Unemployment Rate").sign == -1
+    assert fundamental.classify("FOMC Member Waller Speaks").kind == "speech"
+    found = fundamental.extract("US CPI rises 0.4% vs 0.3% expected", 0.3)
+    assert found["actual"] == pytest.approx(0.4) and found["consensus"] == pytest.approx(0.3)
+    claims = fundamental.classify("Unemployment Claims")
+    assert fundamental.extract("Jobless claims fall to 205K, below expectations", 220e3, claims.kind, claims.words)["actual"] == pytest.approx(205e3)
+    # A number about another asset in a CPI headline is not the CPI reading.
+    found = fundamental.extract("Gold climbs 0.74% after hot CPI print", 0.3, ind.kind, ind.words)
+    assert "actual" not in found and found["numeric"] == 1
+    # Years and unrelated numbers are not taken as the actual value.
+    assert "actual" not in fundamental.extract("Fed outlook to 2027 unclear", 0.3)
+    assert fundamental.parse_value("195K") == pytest.approx(195e3)
+
+
+def test_fundamental_release_prediction_without_network(monkeypatch):
+    from app import fundamental
+
+    monkeypatch.setattr(fundamental, "_reaction", lambda currency, t0: {"symbol": "EURUSD", "movePct": -0.2, "currencyMovePct": 0.2})
+    events = [{"id": "1", "title": "CPI m/m", "currency": "USD", "date": "2026-11-10T13:30:00+00:00", "impact": "High",
+               "forecast": "0.3%", "previous": "0.2%"}]
+    news = [{"title": "U.S. CPI rises 0.5% vs 0.3% expected", "published": "2026-11-10T13:31:00+00:00", "source": "x"}]
+    result = fundamental.analyze(events, news)
+    event = result["events"][0]
+    assert event["actual"] == pytest.approx(0.5)
+    assert event["prediction"]["direction"] == 1
+    assert event["verdict"] == "confirmed"
+    assert result["accuracy"]["confirmed"] == 1 and result["accuracy"]["pct"] == 100.0
+    assert result["currencies"]["USD"]["score"] > 0
+    # A second indicator released at the same time shares the reaction and is not counted twice.
+    events.append({**events[0], "id": "2", "title": "Core CPI m/m", "forecast": "0.2%"})
+    assert fundamental.analyze(events, news)["accuracy"]["judged"] == 1

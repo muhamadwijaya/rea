@@ -49,6 +49,9 @@ class Instrument:
     asset_class: str
     decimals: int | None = None
     market_override: str | None = None
+    core: bool = False  # part of the curated watchlist (multi-timeframe screening)
+    sector: str = ""
+    group: str = ""
 
     @property
     def market(self) -> str:
@@ -69,26 +72,31 @@ class Instrument:
         data = asdict(self)
         data["assetClass"] = data.pop("asset_class")
         data.pop("market_override")
+        if not self.sector:
+            data.pop("sector")
+        if not self.group:
+            data.pop("group")
         data["market"] = self.market
         data["decimals"] = self.price_decimals()
         return data
 
 
-def _watchlist_path() -> Path:
-    override = os.environ.get("SMC_WATCHLIST")
+def _config_path(env: str, name: str) -> Path:
+    override = os.environ.get(env)
     if override:
         return Path(override)
-    return Path(__file__).resolve().parents[2] / "config" / "watchlist.json"
+    return Path(__file__).resolve().parents[2] / "config" / name
 
 
-@lru_cache(maxsize=1)
-def watchlist() -> tuple[Instrument, ...]:
-    raw = json.loads(_watchlist_path().read_text(encoding="utf-8"))
+def _load(path: Path, core: bool) -> list[Instrument]:
+    if not path.exists():
+        return []
+    raw = json.loads(path.read_text(encoding="utf-8"))
     items: list[Instrument] = []
     for entry in raw.get("instruments", []):
         asset_class = entry.get("class", "us")
         if asset_class not in ASSET_CLASSES:
-            raise ValueError(f"watchlist: kelas aset tidak dikenal {asset_class!r} untuk {entry}")
+            raise ValueError(f"{path.name}: kelas aset tidak dikenal {asset_class!r} untuk {entry}")
         items.append(
             Instrument(
                 symbol=entry["symbol"].upper(),
@@ -98,9 +106,40 @@ def watchlist() -> tuple[Instrument, ...]:
                 asset_class=asset_class,
                 decimals=entry.get("decimals"),
                 market_override=_market(entry.get("market"), entry),
+                core=core,
+                sector=entry.get("sector", "") or "",
+                group=entry.get("group", "") or "",
             )
         )
+    return items
+
+
+@lru_cache(maxsize=1)
+def watchlist() -> tuple[Instrument, ...]:
+    """Core instruments: screened on every timeframe and used by the market-direction model."""
+    return tuple(_load(_config_path("SMC_WATCHLIST", "watchlist.json"), core=True))
+
+
+@lru_cache(maxsize=1)
+def universe() -> tuple[Instrument, ...]:
+    """Every known instrument: the core watchlist first, then config/universe.json (deduplicated)."""
+    items = list(watchlist())
+    seen = {i.symbol for i in items} | {i.yahoo for i in items}
+    for inst in _load(_config_path("SMC_UNIVERSE", "universe.json"), core=False):
+        if inst.symbol in seen or inst.yahoo in seen:
+            continue
+        seen.update((inst.symbol, inst.yahoo))
+        items.append(inst)
     return tuple(items)
+
+
+@lru_cache(maxsize=1)
+def _index() -> dict[str, Instrument]:
+    lookup: dict[str, Instrument] = {}
+    for inst in reversed(universe()):  # core entries win on conflicts
+        for key in (inst.symbol, inst.yahoo.upper(), inst.tv.upper()):
+            lookup[key] = inst
+    return lookup
 
 
 def _market(value: str | None, entry: dict) -> str | None:
@@ -109,20 +148,18 @@ def _market(value: str | None, entry: dict) -> str | None:
     return value
 
 
-def by_market(market: str) -> list[Instrument]:
+def by_market(market: str, scope: str = "core") -> list[Instrument]:
+    """Instruments of one market page (or all). scope: core = watchlist, all = full universe."""
+    pool = universe() if scope == "all" else watchlist()
     if market == "all":
-        return list(watchlist())
+        return list(pool)
     if market not in MARKETS:
         raise InvalidSymbol(f"Market tidak dikenal: {market!r}. Pilihan: all, {', '.join(MARKETS)}")
-    return [i for i in watchlist() if i.market == market]
+    return [i for i in pool if i.market == market]
 
 
 def find(symbol: str) -> Instrument | None:
-    key = symbol.upper()
-    for inst in watchlist():
-        if key in (inst.symbol, inst.yahoo.upper(), inst.tv.upper()):
-            return inst
-    return None
+    return _index().get(symbol.upper())
 
 
 def resolve(query: str) -> Instrument:

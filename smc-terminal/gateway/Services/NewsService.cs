@@ -74,11 +74,20 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         }
     }
 
-    public List<NewsItem> Query(string? market, string? category, string? asset, string? sentiment, string? q, int limit, int offset = 0)
+    public List<NewsItem> Query(string? market, string? category, string? asset, string? sentiment, string? q, int limit,
+        int offset = 0, DateTimeOffset? since = null, string? symbol = null)
     {
         lock (_gate)
         {
             IEnumerable<NewsItem> query = _sorted;
+            if (since is { } from)
+            {
+                query = query.Where(i => i.Published >= from);
+            }
+            if (!string.IsNullOrWhiteSpace(symbol))
+            {
+                query = query.Where(i => i.Symbols.Any(t => t.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)));
+            }
             if (Markets.IsKnown(market))
             {
                 query = query.Where(i => i.Markets.Contains(market!));
@@ -100,7 +109,7 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
                 query = query.Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                                          i.Summary.Contains(q, StringComparison.OrdinalIgnoreCase));
             }
-            return query.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 300)).ToList();
+            return query.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 500)).ToList();
         }
     }
 
@@ -178,7 +187,8 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
 
 public sealed record SentimentBucket(string Key, int Count, double Score, int Bullish, int Bearish, int Neutral);
 
-public sealed record SentimentScore(double Score, string Label, IReadOnlyList<string> Terms, IReadOnlyList<string> Assets);
+public sealed record SentimentScore(
+    double Score, string Label, IReadOnlyList<string> Terms, IReadOnlyList<string> Assets, IReadOnlyList<SymbolTag> Symbols);
 
 public static class NewsItemExtensions
 {
@@ -189,7 +199,8 @@ public static class NewsItemExtensions
         SentimentLabel = s.Label,
         Terms = s.Terms,
         Assets = s.Assets,
-        Markets = Markets.Classify(item.Category, s.Assets),
+        Symbols = s.Symbols,
+        Markets = Markets.Classify(item.Category, s.Assets, s.Symbols),
     };
 }
 

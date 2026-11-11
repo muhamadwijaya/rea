@@ -8,17 +8,24 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import analysis, direction, instruments, market_data, screener, sentiment
+from . import ai, analysis, background, direction, fundamental, instruments, market_data, outlook, screener, sentiment
 from .errors import EngineError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="SMC Terminal Engine", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    background.start()
+    yield
+
+
+app = FastAPI(title="SMC Terminal Engine", version="2.2.0", lifespan=lifespan)
 STARTED = time.time()
 
 
@@ -33,13 +40,21 @@ def health() -> dict:
         "status": "ok",
         "uptime": int(time.time() - STARTED),
         "instruments": len(instruments.watchlist()),
+        "universe": len(instruments.universe()),
         "timeframes": list(market_data.TIMEFRAMES),
     }
 
 
 @app.get("/instruments")
-def list_instruments(market: str = "all") -> dict:
-    return {"market": market, "instruments": [i.to_json() for i in instruments.by_market(market)]}
+def list_instruments(market: str = "all", scope: str = "core") -> dict:
+    return {"market": market, "scope": scope, "instruments": [i.to_json() for i in instruments.by_market(market, scope)]}
+
+
+@app.get("/quotes")
+def quotes(market: str = "all") -> dict:
+    if market != "all":
+        instruments.by_market(market)  # validates the market name
+    return background.quotes(market)
 
 
 @app.get("/resolve")
@@ -68,7 +83,11 @@ def multi_timeframe(symbol: str) -> dict:
 
 
 @app.get("/screener")
-def screen(market: str = "all", tf: str = "4h") -> dict:
+def screen(market: str = "all", tf: str = "4h", scope: str = "core") -> dict:
+    if scope == "all":
+        # Full universe: served from the background 1D scan (never blocks on hundreds of downloads).
+        instruments.by_market(market, "all")
+        return background.universe_screen(market)
     return screener.screen(market, tf)
 
 
@@ -81,6 +100,8 @@ class NewsItem(BaseModel):
     id: str
     title: str = ""
     summary: str = ""
+    lang: str = "en"
+    category: str = ""
 
 
 class SentimentRequest(BaseModel):
@@ -90,3 +111,40 @@ class SentimentRequest(BaseModel):
 @app.post("/sentiment")
 def score_sentiment(body: SentimentRequest) -> dict:
     return {"items": sentiment.score_items([i.model_dump() for i in body.items])}
+
+
+class FundamentalRequest(BaseModel):
+    events: list[dict] = Field(default_factory=list, max_length=2000)
+    news: list[dict] = Field(default_factory=list, max_length=5000)
+
+
+@app.post("/fundamental")
+def analyze_fundamentals(body: FundamentalRequest) -> dict:
+    result = fundamental.analyze(body.events, body.news)
+    outlook.set_fundamentals(result)
+    return result
+
+
+@app.get("/fundamental")
+def latest_fundamentals() -> dict:
+    return outlook.fundamentals() or {"events": [], "accuracy": None, "currencies": {}, "status": "warming"}
+
+
+class OutlookRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=200)
+    news: dict[str, list[dict]] = Field(default_factory=dict)
+
+
+@app.post("/outlook")
+def asset_outlook(body: OutlookRequest) -> dict:
+    return {"generatedAt": int(time.time()), "rows": outlook.batch(body.symbols, body.news)}
+
+
+class AiRequest(BaseModel):
+    symbol: str
+    news: list[dict] = Field(default_factory=list, max_length=200)
+
+
+@app.post("/ai/analyze")
+def ai_analyze(body: AiRequest, x_anthropic_key: str | None = Header(default=None)) -> dict:
+    return ai.analyze(body.symbol, body.news, x_anthropic_key)

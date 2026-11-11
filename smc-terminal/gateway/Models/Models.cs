@@ -47,7 +47,11 @@ public sealed record NewsItem
     public IReadOnlyList<string> Terms { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Assets { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Markets { get; init; } = Array.Empty<string>();
+    /// <summary>Instruments the headline is about (engine tagger); sign -1 means good news for the subject is bad for the instrument.</summary>
+    public IReadOnlyList<SymbolTag> Symbols { get; init; } = Array.Empty<SymbolTag>();
 }
+
+public sealed record SymbolTag(string Symbol, string Market, int Sign);
 
 public sealed class FeedStatus
 {
