@@ -66,7 +66,7 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 | ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI** (OpenRouter model gratis dengan rotasi otomatis, Claude, atau API lain): AI menilai arah dari berita, kalender ekonomi, laporan keuangan nyata, kinerja harga dan rencana ke depan, lalu **dicocokkan dengan SMC** → sinyal BELI / JUAL / NETRAL |
 | ↳ Dividen & Benefit | Jadwal ex-dividen (diumumkan emiten, atau **perkiraan** dari ritme pembayaran), jumlah & yield 12 bulan, halving kripto (BTC/LTC/BCH dari tinggi blok), keputusan suku bunga bank sentral untuk forex, serta headline benefit/aksi korporasi (dividen, buyback, split, rights, RUPS; airdrop, staking, token unlock, burn, listing, upgrade); tiap event dengan **hype** (volume 5 hari vs 20 hari + berita terkait 7 hari + gerak harga 5 hari) |
 | ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
-| **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample vs target 70% dan tujuan 99%, kurva ekuitas (R), papan akurasi per aset & timeframe, jurnal sinyal (muncul → terdeteksi → entry → hasil), log upgrade SMC otomatis |
+| **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
 
@@ -159,12 +159,24 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   harga close menembus stop, atau kedaluwarsa (mis. 30 bar).
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
-- **Akurasi**: trade live yang selesai + backtest walk-forward pada riwayat.
-- **Upgrade otomatis**: per aset & timeframe, ±1.150 kombinasi parameter SMC (panjang pivot, scope, CHoCH/BOS, entry,
-  stop, target, filter premium/discount & tren, kedaluwarsa) diuji pada 70% riwayat lalu diverifikasi pada 30%
-  terakhir. Parameter baru dipakai hanya bila **lower bound win rate (90%) out-of-sample lebih tinggi**, ekspektasi
-  tetap positif dan jumlah trade cukup. Diulang tiap 6 jam per aset, sehingga terus membaik seiring data bertambah.
-  Panjang pivot hasil upgrade juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
+- **Belajar per grup pasar**: riwayat hingga 150 aset satu pasar & timeframe (mis. SAHAM IDX 1D) digabung dan dibagi
+  menurut waktu: 60% awal untuk mengurutkan ±1.150 kombinasi parameter SMC (panjang pivot, scope, CHoCH/BOS, entry,
+  stop, target, filter premium/discount & tren, kedaluwarsa), 20% berikutnya (validasi) untuk memilih, dan 20% terakhir
+  (data uji yang tidak ikut memilih) untuk melaporkan hasil. Aset yang datanya sedikit memakai parameter grupnya.
+- **Upgrade per aset**: kombinasi yang sama diuji pada 70% riwayat aset lalu diverifikasi pada 30% terakhir. Parameter
+  aset dipakai hanya bila **lower bound win rate (90%) out-of-sample lebih tinggi** daripada parameter yang diwarisi,
+  ekspektasi tetap positif dan jumlah trade cukup; bila parameter grup kemudian lebih baik untuk aset itu, aset kembali
+  ke parameter grup. Urutan pewarisan: upgrade aset → grup pasar → default. Diulang tiap 6 jam; panjang pivot yang
+  dipakai juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
+- **Trade terkualifikasi vs bayangan**: sinyal dihitung sebagai trade AI hanya bila parameter di baliknya sudah terbukti
+  out-of-sample (cukup trade, batas bawah win rate ≥ 50%, ekspektasi positif). Sinyal lain tetap dijalankan secara virtual
+  sebagai **trade bayangan** untuk belajar dan dilaporkan terpisah.
+- **Akurasi**: halaman AI Training menampilkan win rate live & backtest dari pasangan terkualifikasi, angka semua
+  pasangan, dan rincian per asal parameter (upgrade aset / grup / default) serta per pasar. Karena itu angka "semua"
+  bisa turun saat banyak aset baru yang belum terbukti mulai dilatih — itu pengenceran oleh data yang belum terbukti,
+  bukan berarti sinyal yang terbukti memburuk. Backtest terkualifikasi ikut dipakai untuk memilih pasangan sehingga bisa
+  sedikit optimistis; bukti yang benar-benar ke depan adalah trade live terkualifikasi (statusnya ditetapkan saat sinyal
+  muncul, sebelum hasilnya diketahui).
 - **Tujuan 99%** ditampilkan sebagai arah perbaikan, tetapi yang dilaporkan selalu hasil terukur. Win rate setinggi itu
   tidak dapat dijamin dan tidak dikejar dengan cara yang menipu (target sangat kecil / stop sangat jauh / overfitting).
 

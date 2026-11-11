@@ -8,6 +8,9 @@ const STATUS = {
   timeout: ['DITUTUP WAKTU', 'ghost'], cancelled: ['BATAL OTOMATIS', 'ghost'],
 };
 const MARKET_NAME = { forex: 'FOREX', 'saham-as': 'SAHAM AS', 'saham-idx': 'SAHAM IDX', kripto: 'KRIPTO' };
+const SOURCE = { asset: ['UPGRADE ASET', 'bull'], group: ['PARAMETER GRUP', 'info'], default: ['DEFAULT', 'ghost'] };
+const paramText = (p) => `pivot ${p.swing}/${p.internal} · ${p.scope} ${p.kinds} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
+const qualifiedTag = (q) => (q ? '<span class="tag bull">TERKUALIFIKASI</span>' : '<span class="tag ghost">BAYANGAN</span>');
 
 const dt = (t) => (t ? new Date(t * 1000).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '–');
 const pct = (v) => (v == null ? '–' : `${(v * 100).toFixed(1)}%`);
@@ -32,7 +35,7 @@ function signalCard(s, rules, decimals) {
   const f = (v) => fmtPrice(v, decimals);
   const risk = Math.abs(s.entry - s.stop);
   return `<div class="tr-signal">
-    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span> <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
+    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${qualifiedTag(s.qualified)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
     <div class="tr-times">
       <div><span>SINYAL MUNCUL</span><b>${dt(s.created_t)}</b></div>
       <div><span>TERDETEKSI SISTEM</span><b>${s.first_seen ? dt(s.first_seen) : 'riwayat (backtest)'}</b></div>
@@ -64,16 +67,22 @@ export function mountPlanTraining(el) {
         const current = live.find((s) => s.status === 'pending' || s.status === 'open') || live[0] || d.latest?.[0];
         const others = (live.length ? live : d.latest || []).filter((s) => s !== current).slice(0, 6);
         const bt = d.backtest?.outOfSample;
+        const ev = d.evidence || {};
+        const [srcLabel, srcCls] = SOURCE[d.source] || SOURCE.default;
         el.innerHTML = `
           <h5>SINYAL VIRTUAL TRADING · ${esc(tf.toUpperCase())} · SMC v${d.version}</h5>
+          <div class="tr-sig-top">${qualifiedTag(ev.qualified)} <span class="tag ${srcCls}">${srcLabel}</span>
+            <span class="dim">bukti ${pct(ev.winRate)} dari ${ev.trades ?? 0} trade (batas bawah ${pct(ev.winRateLow)})</span></div>
+          ${ev.qualified ? '' : '<div class="note">Belum terkualifikasi: sinyal tetap dicatat sebagai trade bayangan untuk belajar, tetapi tidak dihitung sebagai trade AI sampai buktinya cukup (batas bawah win rate ≥ 50% dengan ekspektasi positif).</div>'}
           ${current ? signalCard({ ...current, tf }, d.cancelRules, decimals) : '<div class="empty">Belum ada sinyal untuk aset & timeframe ini.</div>'}
           ${others.length ? `<h5>SINYAL SEBELUMNYA</h5><table class="co-table"><thead><tr><th>Muncul</th><th>Arah</th><th>Status</th><th>Hasil</th></tr></thead><tbody>
             ${others.map((s) => `<tr><td>${dt(s.created_t)}</td><td>${s.direction > 0 ? 'BUY' : 'SELL'}</td><td>${esc((STATUS[s.status] || [s.status])[0])}</td><td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}</td></tr>`).join('')}</tbody></table>` : ''}
           <h5>AKURASI ASET INI</h5>
-          <div class="tr-stats">${statBlock('LIVE (VIRTUAL)', d.live)}${statBlock('BACKTEST OUT-OF-SAMPLE', bt)}</div>
+          <div class="tr-stats">${statBlock('LIVE TERKUALIFIKASI', d.live)}${statBlock('BACKTEST OUT-OF-SAMPLE', bt)}</div>
           ${progress(d.live?.trades ? d.live.winRate : bt?.winRate, d.target, d.goal)}
+          ${d.liveAll?.trades ? `<div class="note">Termasuk trade bayangan: ${pct(d.liveAll.winRate)} dari ${d.liveAll.trades} trade.</div>` : ''}
           ${d.upgrades?.length ? `<h5>UPGRADE SMC</h5>${d.upgrades.map((u) => `<div class="note">v${u.from} → v${u.to} · ${dt(u.created)} · win rate out-of-sample ${pct(u.before?.winRate)} (${u.before?.trades ?? 0} trade) → <b class="up">${pct(u.after?.winRate)}</b> (${u.after?.trades} trade)</div>`).join('')}` : ''}
-          <div class="note">Parameter aktif: pivot ${d.params.swing}/${d.params.internal} · ${esc(d.params.scope)} ${esc(d.params.kinds)} · entry ${esc(d.params.entry)} · SL ${d.params.sl_atr}×ATR · target ${d.params.target === 'liq' ? 'likuiditas impuls' : `${d.params.rr}R`}${d.params.pd_filter ? ' · filter premium/discount' : ''}${d.params.trend_filter ? ' · searah tren swing' : ''}.</div>`;
+          <div class="note">Parameter aktif (${srcLabel.toLowerCase()}): ${esc(paramText(d.params))}.</div>`;
       } catch (e) {
         if (key === k) el.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
       }
@@ -120,7 +129,7 @@ export const trainingPage = {
           <div class="tr-equity"><canvas></canvas></div>
         </div>
         <div class="panel tabbed col-panel">
-          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button></div>
+          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="groups">GRUP PASAR</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button></div>
           <div class="scroll tr-body"></div>
         </div>
       </div>`;
@@ -150,21 +159,27 @@ export const trainingPage = {
     const d = this.data;
     const live = d.live, bt = d.backtest;
     this.el.querySelector('.tr-kpis').innerHTML = [
-      ['WIN RATE LIVE', pct(live.winRate), live.winRate >= d.target ? 'up' : ''], ['WIN RATE BACKTEST (OOS)', pct(bt.winRate), bt.winRate >= d.target ? 'up' : ''],
-      ['TRADE LIVE SELESAI', live.trades, ''], ['EKSPEKTASI LIVE', rr(live.expectancyR), live.expectancyR > 0 ? 'up' : live.expectancyR < 0 ? 'down' : ''],
-      ['POSISI / MENUNGGU', `${live.open} / ${live.pending}`, ''], ['UPGRADE SMC', d.upgradesTotal, 'up'],
-      ['ASET×TF DIPANTAU / DILATIH', `${d.tracked} / ${d.tuned}`, ''],
+      ['WIN RATE LIVE (TERKUALIFIKASI)', pct(live.winRate), live.winRate >= d.target ? 'up' : ''],
+      ['WIN RATE BACKTEST (TERKUALIFIKASI)', pct(bt.winRate), bt.winRate >= d.target ? 'up' : ''],
+      ['SEMUA PASANGAN (BACKTEST)', pct(d.backtestAll.winRate), ''],
+      ['TRADE LIVE SELESAI', `${live.trades} / ${d.liveAll.trades}`, ''],
+      ['EKSPEKTASI LIVE', rr(live.expectancyR), live.expectancyR > 0 ? 'up' : live.expectancyR < 0 ? 'down' : ''],
+      ['TERKUALIFIKASI', `${d.qualifiedPairs} / ${d.evaluatedPairs}`, 'up'],
+      ['UPGRADE SMC', d.upgradesTotal, 'up'],
     ].map(([l, v, c]) => `<div><span>${l}</span><b class="${c}">${v}</b></div>`).join('');
     const markets = Object.entries(d.markets || {});
+    const sources = Object.entries(d.sources || {});
     this.el.querySelector('.tr-overview').innerHTML = `
-      <h5>LIVE (TRADE VIRTUAL SETELAH SINYAL MUNCUL)</h5>${progress(live.winRate, d.target, d.goal)}
-      <h5>BACKTEST OUT-OF-SAMPLE (30% DATA TERAKHIR, PARAMETER AKTIF)</h5>${progress(bt.winRate, d.target, d.goal)}
-      ${markets.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>Live</th><th>Trade</th><th>Backtest</th><th>Trade</th></tr></thead><tbody>
-        ${markets.map(([m, v]) => `<tr><td>${esc(MARKET_NAME[m] || m)}</td><td>${pct(v.live.winRate)}</td><td>${v.live.trades}</td><td>${pct(v.backtest.winRate)}</td><td>${v.backtest.trades}</td></tr>`).join('')}</tbody></table>` : ''}
-      <div class="note">Sinyal SMC dibuat otomatis, dieksekusi secara virtual (tanpa uang sungguhan) dan dicatat. Bila akurasi suatu aset
-        bisa ditingkatkan, parameter SMC-nya di-upgrade otomatis: dipilih dari ${'±'}1.150 kombinasi pada 70% riwayat, lalu harus terbukti
-        lebih baik di 30% riwayat terakhir (lower bound win rate) dengan ekspektasi tetap positif dan target minimal 1:1. Tujuan 99%
-        ditampilkan sebagai arah perbaikan; angka di sini selalu hasil terukur, bukan janji.
+      <h5>LIVE — TRADE TERKUALIFIKASI (${live.trades} selesai; semua termasuk bayangan: ${pct(d.liveAll.winRate)} dari ${d.liveAll.trades})</h5>${progress(live.winRate, d.target, d.goal)}
+      <h5>BACKTEST OUT-OF-SAMPLE — PASANGAN TERKUALIFIKASI (${bt.trades} trade; semua pasangan: ${pct(d.backtestAll.winRate)} dari ${d.backtestAll.trades})</h5>${progress(bt.winRate, d.target, d.goal)}
+      ${sources.length ? `<table class="co-table"><thead><tr><th>Asal parameter</th><th>Pasangan</th><th>Win OOS</th><th>Trade</th><th>Ekspektasi</th></tr></thead><tbody>
+        ${sources.map(([k, v]) => `<tr><td><span class="tag ${(SOURCE[k] || SOURCE.default)[1]}">${(SOURCE[k] || SOURCE.default)[0]}</span></td><td>${v.pairs}</td><td>${pct(v.winRate)}</td><td>${v.trades}</td><td>${rr(v.expectancyR)}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${markets.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>Live terkualifikasi</th><th>Trade</th><th>Backtest terkualifikasi</th><th>Semua</th></tr></thead><tbody>
+        ${markets.map(([m, v]) => `<tr><td>${esc(MARKET_NAME[m] || m)}</td><td>${pct(v.live.winRate)}</td><td>${v.live.trades}</td><td>${pct(v.backtest.winRate)} <span class="dim">(${v.backtest.trades})</span></td><td>${pct(v.backtestAll.winRate)} <span class="dim">(${v.backtestAll.trades})</span></td></tr>`).join('')}</tbody></table>` : ''}
+      <div class="note">Angka "semua" bisa turun saat banyak aset baru dilatih: aset yang belum terbukti ikut dihitung (pengenceran).
+        Aset dengan data sedikit memakai parameter grup pasarnya. Hanya pasangan yang terbukti (batas bawah win rate ≥ ${Math.round((d.qualifyLow || 0.5) * 100)}%,
+        ekspektasi positif) dihitung sebagai trade AI; sisanya trade bayangan untuk belajar. Backtest terkualifikasi ikut dipakai
+        memilih pasangan, jadi bisa sedikit optimistis — bukti ke depan adalah trade live terkualifikasi. Tujuan 99% adalah arah; angka di sini selalu terukur.
         ${d.progress?.tuning ? `<br>Sedang melatih: <b>${esc(d.progress.tuning)}</b>` : ''}</div>`;
     equityChart(this.el.querySelector('.tr-equity canvas'), d.equity || []);
     this.el.querySelector('.tr-updated').textContent = `diperbarui ${new Date(d.generatedAt * 1000).toLocaleTimeString('id-ID')}`;
@@ -175,23 +190,31 @@ export const trainingPage = {
     if (!d) return;
     const body = this.el.querySelector('.tr-body');
     if (this.tab === 'board') {
-      body.innerHTML = d.leaderboard.length ? `<table class="co-table tr-table"><thead><tr><th>Aset</th><th>TF</th><th>v</th><th>Backtest win</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
-        ${d.leaderboard.map((b) => `<tr data-sym="${esc(b.symbol)}" data-tf="${esc(b.tf)}"><td><b>${esc(b.symbol)}</b><small class="dim">${esc(MARKET_NAME[b.market] || '')}</small></td><td>${esc(b.tf.toUpperCase())}</td><td>${b.version}</td>
+      body.innerHTML = d.leaderboard.length ? `<table class="co-table tr-table"><thead><tr><th>Aset</th><th>TF</th><th>Status</th><th>Backtest win</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
+        ${d.leaderboard.map((b) => `<tr data-sym="${esc(b.symbol)}" data-tf="${esc(b.tf)}"><td><b>${esc(b.symbol)}</b><small class="dim">${esc(MARKET_NAME[b.market] || '')}</small></td><td>${esc(b.tf.toUpperCase())}</td>
+          <td title="Bukti parameter aktif: ${pct(b.evidence.winRate)} dari ${b.evidence.trades} trade out-of-sample">${qualifiedTag(b.qualified)}<small class="dim">${(SOURCE[b.source] || SOURCE.default)[0].toLowerCase()} v${b.version} · bukti ${pct(b.evidence.winRate)}/${b.evidence.trades}</small></td>
           <td class="${b.backtest.winRate >= d.target ? 'up' : ''}">${pct(b.backtest.winRate)}</td><td>${b.backtest.trades ?? 0}</td><td>${rr(b.backtest.expectancyR)}</td>
           <td class="${b.live.winRate >= d.target ? 'up' : ''}">${pct(b.live.winRate)}</td><td>${b.live.trades}</td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Pelatihan dimulai ±2 menit setelah aplikasi dibuka, setelah data harga terkumpul.</div>';
+    } else if (this.tab === 'groups') {
+      body.innerHTML = d.groups.length ? `<table class="co-table tr-table"><thead><tr><th>Grup</th><th>Aset</th><th>Win data uji</th><th>Trade</th><th>Ekspektasi</th><th>Win validasi</th><th>Parameter</th></tr></thead><tbody>
+        ${d.groups.map((g) => `<tr><td><b>${esc(MARKET_NAME[g.market] || g.market)}</b><small class="dim">${esc(g.tf.toUpperCase())} · v${g.version}</small></td><td>${g.pairs ?? '–'}</td>
+          <td class="${(g.test?.winRate || 0) >= d.target ? 'up' : ''}">${pct(g.test?.winRate)}</td><td>${g.test?.trades ?? 0}</td><td>${rr(g.test?.expectancyR)}</td>
+          <td>${pct(g.valid?.winRate)} <span class="dim">(${g.valid?.trades ?? 0})</span></td><td><small>${esc(paramText(g.params))}</small></td></tr>`).join('')}</tbody></table>
+        <div class="note">Parameter grup dipelajari dari gabungan aset satu pasar & timeframe: diurutkan di 60% awal riwayat, dipilih di 20% berikutnya (validasi), dan dilaporkan di 20% terakhir (data uji yang tidak ikut memilih).</div>`
+        : '<div class="empty">Pelatihan grup berjalan otomatis setelah data harga terkumpul.</div>';
     } else if (this.tab === 'journal') {
       body.innerHTML = d.recent.length ? `<table class="co-table tr-table"><thead><tr><th>Muncul</th><th>Aset</th><th>Arah</th><th>Entry / SL / TP</th><th>Status</th><th>Hasil</th></tr></thead><tbody>
         ${d.recent.map((s) => `<tr data-sym="${esc(s.symbol)}" data-tf="${esc(s.tf)}"><td>${dt(s.created_t)}<small class="dim">terdeteksi ${dt(s.first_seen)}</small></td>
           <td><b>${esc(s.symbol)}</b><small class="dim">${esc(s.tf.toUpperCase())}</small></td><td>${s.direction > 0 ? 'BUY' : 'SELL'}</td>
           <td>${fmtPrice(s.entry)} / ${fmtPrice(s.stop)} / ${fmtPrice(s.target)}</td><td>${esc((STATUS[s.status] || [s.status])[0])}<small class="dim">${esc(s.reason || '')}</small></td>
-          <td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}</td></tr>`).join('')}</tbody></table>`
+          <td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}<small class="dim">${s.qualified ? 'trade AI' : 'bayangan'}</small></td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Belum ada sinyal live. Sinyal baru dicatat sejak aset mulai dipantau.</div>';
     } else {
       body.innerHTML = d.upgrades.length ? `<table class="co-table tr-table"><thead><tr><th>Waktu</th><th>Aset</th><th>Versi</th><th>Win OOS sebelum → sesudah</th><th>Trade</th><th>Parameter baru</th></tr></thead><tbody>
         ${d.upgrades.map((u) => `<tr data-sym="${esc(u.symbol)}" data-tf="${esc(u.tf)}"><td>${dt(u.created)}</td><td><b>${esc(u.symbol)}</b><small class="dim">${esc(u.tf.toUpperCase())}</small></td>
           <td>v${u.from} → v${u.to}</td><td>${pct(u.before?.winRate)} <small class="dim">(${u.before?.trades ?? 0} trade${(u.before?.trades ?? 0) < 5 ? ', bukti kurang' : ''})</small> → <b class="up">${pct(u.after?.winRate)}</b></td><td>${u.after?.trades ?? 0}</td>
-          <td><small>pivot ${u.params.swing}/${u.params.internal} · ${esc(u.params.scope)} · ${esc(u.params.entry)} · ${u.params.target === 'liq' ? 'TP likuiditas' : `TP ${u.params.rr}R`} · SL ${u.params.sl_atr}×ATR</small></td></tr>`).join('')}</tbody></table>`
+          <td><small>${esc(paramText(u.params))}</small></td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Belum ada upgrade: parameter baru hanya dipakai bila terbukti lebih akurat di data out-of-sample.</div>';
     }
   },
