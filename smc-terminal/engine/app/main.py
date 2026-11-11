@@ -223,6 +223,12 @@ def training_asset(symbol: str, tf: str = "1h") -> dict:
     return training.asset(symbol, tf)
 
 
+@app.get("/training/chart")
+def training_chart(symbol: str, tf: str = "1h") -> dict:
+    market_data.timeframe(tf)  # validates the timeframe
+    return training.chart(symbol, tf)
+
+
 @app.get("/benefits")
 def benefit_calendar(market: str = "all") -> dict:
     return benefits.view(market)

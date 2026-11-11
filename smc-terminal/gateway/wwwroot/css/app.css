@@ -756,6 +756,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   color: var(--text); background: transparent; border: 1px solid var(--line-2); }
 .tr-modes button.active { color: #002644; background: var(--go); border-color: var(--go); }
 .co-table tr.sel td { background: var(--accent-bg); }
+.tr-live { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.tr-live-bar { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; font-size: 10.5px; }
+.tr-live-bar select { width: auto; max-width: 280px; }
+.tr-live-bar button { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+  color: var(--text); background: transparent; border: 1px solid var(--line-2); }
+.tr-live-bar button.active { color: #002644; background: var(--go); border-color: var(--go); }
+.tr-live-info { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tr-live-chart { flex: 1 1 auto; min-height: 220px; }
+.tr-live-foot { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 6px 10px; border-top: 1px solid var(--line); font-size: 10.5px; color: var(--text-2); }
+.tr-legend { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); margin-left: auto; }
+.tr-legend i { display: inline-block; width: 12px; height: 9px; border-radius: 1px; margin-left: 6px; }
+.tr-legend .lg-tp { background: rgba(47, 210, 140, .35); }
+.tr-legend .lg-sl { background: rgba(255, 77, 94, .35); }
+.tr-legend .lg-1r { height: 0; border-top: 1px dashed #2fd28c; }
+.tr-legend .lg-live { border: 1.5px solid #99ff00; }
+.tr-legend .lg-is { background: rgba(0, 10, 22, .6); border: 1px solid var(--line-2); }
 .tr-sig-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: 10.5px; }
 .tr-times { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-bottom: 6px; }
 .tr-times div { display: flex; flex-direction: column; }

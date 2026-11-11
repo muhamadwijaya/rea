@@ -220,3 +220,37 @@ def test_precision_modes_count_quality_stamped_when_the_signal_appeared(store):
     db.commit()
     modes = {m["key"]: m["live"]["trades"] for m in training.summary()["modes"]}
     assert modes == {"normal": 4, "ketat": 2, "sangat": 1}  # shadow trade "e" never counts; "d" predates quality stamps
+
+
+# ------------------------------------------------------------------ live training chart
+
+
+def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch):
+    from types import SimpleNamespace
+
+    inst = SimpleNamespace(symbol="EURUSD", market="forex", yahoo="EURUSD=X")
+    b = bars([(1.0, 1.1, 0.9, 1.0)] * 100)
+    early = training.simulate(b, sig(created=10, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
+    late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
+    monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
+    monkeypatch.setattr(training.market_data, "load", lambda i, tf: b)
+    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None: [early, late])
+    db = training._db()
+    db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
+               "VALUES ('x', 'EURUSD', 'forex', '1h', 1, ?, 1.0, 0.9, 1.2, 'open', 0)", (int(b.time[90]),))
+    db.commit()
+    d = training.chart("EURUSD", "1h")
+    assert d["split"] == int(b.time[0] + (b.time[-1] - b.time[0]) * training.SPLIT)
+    assert [(t["created_t"], t["sample"], t["live"]) for t in d["trades"]] == [
+        (int(b.time[10]), "is", False),
+        (int(b.time[90]), "live", True),  # the journal row replaces its re-simulated twin
+    ]
+
+
+def test_activity_lists_the_latest_stage_of_each_signal_newest_first():
+    rows = [
+        {"symbol": "A", "tf": "1h", "market": "forex", "status": "win", "closed_t": 300, "opened_t": 200, "first_seen": 100},
+        {"symbol": "B", "tf": "4h", "market": "kripto", "status": "open", "closed_t": None, "opened_t": 400, "first_seen": 150},
+        {"symbol": "C", "tf": "1d", "market": "saham-as", "status": "pending", "closed_t": None, "opened_t": None, "first_seen": 350},
+    ]
+    assert [(e["symbol"], e["event"]) for e in training._activity(rows)] == [("B", "open"), ("C", "signal"), ("A", "win")]

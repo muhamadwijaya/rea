@@ -66,7 +66,7 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 | ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI** (OpenRouter model gratis dengan rotasi otomatis, Claude, atau API lain): AI menilai arah dari berita, kalender ekonomi, laporan keuangan nyata, kinerja harga dan rencana ke depan, lalu **dicocokkan dengan SMC** → sinyal BELI / JUAL / NETRAL |
 | ↳ Dividen & Benefit | Jadwal ex-dividen (diumumkan emiten, atau **perkiraan** dari ritme pembayaran), jumlah & yield 12 bulan, halving kripto (BTC/LTC/BCH dari tinggi blok), keputusan suku bunga bank sentral untuk forex, serta headline benefit/aksi korporasi (dividen, buyback, split, rights, RUPS; airdrop, staking, token unlock, burn, listing, upgrade); tiap event dengan **hype** (volume 5 hari vs 20 hari + berita terkait 7 hari + gerak harga 5 hari) |
 | ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
-| **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis |
+| **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis, live chart trade virtual per aset |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
 
@@ -173,6 +173,11 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   ekspektasi tetap positif dan jumlah trade cukup; bila parameter grup kemudian lebih baik untuk aset itu, aset kembali
   ke parameter grup. Urutan pewarisan: upgrade aset → grup pasar → default. Diulang tiap 6 jam; panjang pivot yang
   dipakai juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
+- **Live chart training** (tab LIVE CHART): candle aset yang dilatih (diperbarui tiap 3 detik dari bar 1 menit) dengan
+  setiap trade virtual sebagai kotak posisi — zona TP hijau, zona SL merah, garis TP1 +1R, hasil dalam R; trade live
+  diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis LIMIT/SL/TP. Area sebelum garis
+  "DATA UJI" adalah data latih (redup); tombol DATA UJI memperbesar ke seluruh periode out-of-sample. IKUTI AKTIVITAS
+  memindahkan chart otomatis ke aset dengan aktivitas trade virtual terbaru.
 - **Mode presisi**: NORMAL (batas bawah win rate ≥ 50%), KETAT (≥ 65%), SANGAT KETAT (≥ 80%). Mode lebih ketat hanya
   menghitung setting dengan bukti terkuat: win rate lebih tinggi, sinyal lebih jarang. Batas bawah tiap sinyal live
   dicap saat sinyal muncul, jadi hasil live per mode tidak dipilih setelah hasilnya diketahui.
@@ -234,7 +239,7 @@ Engine Python — FastAPI (engine/)
 | `GET /api/live?symbol=BTCUSD` | Bar 1 menit hari ini (cache 3 detik) untuk candle realtime |
 | `GET /api/company?symbol=BBRI` | Laporan perusahaan: valuasi, analis, laba rugi/neraca/arus kas, pemegang saham |
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
-| `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade |
+| `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade, trade untuk live chart |
 | `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["id","en","stt"]}`) |
 | `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"persona":"jarvis","mixed":true}` | Suara Piper (audio/wav); `mixed` = kata Inggris dibaca suara Inggris |
 | `POST /api/voice/stt` (audio/wav 16 kHz) | Kenali jawaban singkat → `{"text","intent":"yes|no|null"}` |

@@ -181,7 +181,106 @@ export class SmcChart {
       if ((b.scope === 'swing' && this.layers.swing) || (b.scope === 'internal' && this.layers.internal)) this.drawBreak(b, X, Y);
     }
     if (this.layers.pivots) for (const p of smc.pivots) this.drawPivot(p, X, Y);
+    if (this.trades) this.drawTrades(this.trades, Y, right, paneH);
     ctx.restore();
+  }
+
+  /** Virtual-trading trades drawn as position boxes (AI TRAINING live chart); null removes them. */
+  setTrades(trades) {
+    this.trades = trades;
+    this.requestDraw();
+  }
+
+  // x of any timestamp: its candle, the candle it falls in (gaps such as weekends), or extrapolated past the last one
+  timeX(t) {
+    const candles = this.data?.candles;
+    if (!candles?.length || t == null) return null;
+    const ts = this.chart.timeScale();
+    const i = this.index.get(t);
+    if (i !== undefined) return ts.logicalToCoordinate(i);
+    const n = candles.length;
+    if (t > candles[n - 1].t) {
+      const step = n > 1 ? Math.max(1, candles[n - 1].t - candles[n - 2].t) : 60;
+      return ts.logicalToCoordinate(n - 1 + (t - candles[n - 1].t) / step);
+    }
+    if (t < candles[0].t) return null;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const m = (lo + hi + 1) >> 1;
+      if (candles[m].t <= t) lo = m; else hi = m - 1;
+    }
+    return ts.logicalToCoordinate(lo);
+  }
+
+  drawTrades(tr, Y, right, paneH) {
+    const { ctx } = this;
+    const X = (t) => this.timeX(t);
+    const xs = X(tr.split);
+    if (xs !== null && xs > 0 && xs < right) {
+      ctx.fillStyle = 'rgba(0, 10, 22, .32)';
+      ctx.fillRect(0, 0, xs, paneH);
+      ctx.strokeStyle = rgba(C.neu, 0.7); ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, paneH); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = rgba(C.neu, 0.95);
+      ctx.textAlign = 'left'; ctx.fillText('DATA UJI (OUT-OF-SAMPLE) →', xs + 6, 12);
+      ctx.textAlign = 'right'; ctx.fillText('← DATA LATIH', xs - 6, 12);
+    }
+    const lastT = this.data.candles[this.data.candles.length - 1].t;
+    const labels = [];  // result labels already drawn: skip one that would overlap
+    for (const s of tr.trades) {
+      if (s.status === 'cancelled') continue;
+      const pending = s.status === 'pending';
+      const x1 = X(pending ? s.created_t : s.opened_t);
+      let x2 = pending ? X(Math.min(s.expiry_t, lastT)) : s.closed_t ? X(s.closed_t) : X(lastT);
+      if (x1 === null || x2 === null || x2 < 0 || x1 > right) continue;
+      x2 = Math.max(x2, x1 + 5) + (s.closed_t ? 0 : 6);
+      const yE = Y(s.entry), yS = Y(s.stop), yT = Y(s.target);
+      if ([yE, yS, yT].some((v) => v === null)) continue;
+      const faint = s.sample === 'is' ? 0.45 : 1;
+      if (pending) {
+        const end = Math.min(right, Math.max(x2, x1 + 60));  // a signal of the last candle still shows its levels
+        ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
+        for (const [y, c, tag] of [[yE, C.blue, `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'}${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'], [yT, C.bull, 'TP']]) {
+          ctx.strokeStyle = rgba(c, 0.9); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
+          const fits = end + 6 + tag.length * 6.2 < right;
+          ctx.textAlign = fits ? 'left' : 'right'; ctx.fillStyle = rgba(c, 1);
+          ctx.fillText(tag, fits ? end + 4 : x1 - 4, y);
+        }
+        ctx.setLineDash([]);
+        continue;
+      }
+      ctx.fillStyle = rgba(C.bull, 0.16 * faint); ctx.fillRect(x1, Math.min(yE, yT), x2 - x1, Math.abs(yT - yE));
+      ctx.fillStyle = rgba(C.bear, 0.16 * faint); ctx.fillRect(x1, Math.min(yE, yS), x2 - x1, Math.abs(yS - yE));
+      const color = s.status === 'open' ? C.blue : s.r > 0 ? C.bull : s.r < 0 ? C.bear : C.neu;
+      const top = Math.min(yE, yS, yT), bottom = Math.max(yE, yS, yT);
+      ctx.strokeStyle = s.live ? '#99ff00' : rgba(color, 0.75 * faint);
+      ctx.lineWidth = s.live ? 1.6 : 1;
+      ctx.strokeRect(x1 + 0.5, top + 0.5, x2 - x1 - 1, bottom - top - 1);
+      ctx.strokeStyle = rgba(C.text, 0.55 * faint); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x1, yE); ctx.lineTo(x2, yE); ctx.stroke();
+      if (s.manage === 'partial') {
+        const y1r = Y(s.entry + (s.entry - s.stop));
+        if (y1r !== null && Math.abs(yT - yE) > Math.abs(y1r - yE) + 1) {
+          ctx.setLineDash([2, 3]); ctx.strokeStyle = rgba(C.bull, 0.8 * faint);
+          ctx.beginPath(); ctx.moveTo(x1, y1r); ctx.lineTo(x2, y1r); ctx.stroke(); ctx.setLineDash([]);
+        }
+      }
+      ctx.fillStyle = rgba(s.direction > 0 ? C.bull : C.bear, faint);
+      ctx.beginPath();
+      if (s.direction > 0) { ctx.moveTo(x1, yE + 1); ctx.lineTo(x1 - 4, yE + 8); ctx.lineTo(x1 + 4, yE + 8); }
+      else { ctx.moveTo(x1, yE - 1); ctx.lineTo(x1 - 4, yE - 8); ctx.lineTo(x1 + 4, yE - 8); }
+      ctx.fill();
+      const label = s.status === 'open' ? 'OPEN' : `${s.r > 0 ? '+' : ''}${(s.r ?? 0).toFixed(2)}R ${s.r > 0 ? '✔' : '✘'}`;
+      const text = s.live ? `${label} LIVE` : label;
+      const lw = text.length * 6.2, ly = top - 7 < 8 ? bottom + 8 : top - 7;
+      const lx = x2 + 3 + lw < right ? x2 + 3 : Math.max(0, x1 - 3 - lw);  // keep clear of the price axis
+      if (!s.live && labels.some((b) => lx < b.x + b.w && b.x < lx + lw && Math.abs(ly - b.y) < 11)) continue;
+      labels.push({ x: lx, y: ly, w: lw });
+      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left'; ctx.fillStyle = s.live ? '#99ff00' : rgba(color, faint);
+      ctx.fillText(text, lx, ly);
+      ctx.font = '10px "JetBrains Mono", monospace';
+    }
   }
 
   drawZones(z, X, Y, right) {

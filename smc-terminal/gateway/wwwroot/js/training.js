@@ -1,7 +1,8 @@
 // Virtual trading ("AI training"): the PLAN card of one asset (signal timestamps, auto-cancel rules, virtual
 // position, track record, SMC upgrades) and the AI TRAINING page (overall accuracy, equity, leaderboard,
-// journal, upgrade log). Data: /api/training/asset and /api/training/summary.
+// journal, upgrade log, live chart of virtual trades). Data: /api/training/asset, /summary and /chart.
 import { api, esc, fmtPrice } from './util.js';
+import { SmcChart } from './smc-chart.js';
 
 const STATUS = {
   pending: ['MENUNGGU ENTRY', 'neu'], open: ['POSISI TERBUKA', 'bull'], win: ['PROFIT ✔', 'bull'], loss: ['LOSS ✘', 'bear'],
@@ -123,6 +124,184 @@ function equityChart(canvas, points) {
   ctx.stroke();
 }
 
+// ------------------------------------------------------------------ live training chart
+
+const TF_SECONDS = { '1m': 60, '5m': 300, '10m': 600, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800 };
+const SMC_ON = { swing: true, internal: true, pivots: false, ob: false, fvg: false, eq: false, liquidity: false, zones: false, ema: false, plan: false };
+const SMC_OFF = Object.fromEntries(Object.keys(SMC_ON).map((k) => [k, false]));
+const CHART_KEY = 'sharx.trainingChart';
+const loadChartPrefs = () => { try { return JSON.parse(localStorage.getItem(CHART_KEY)) || {}; } catch { return {}; } };
+const saveChartPrefs = (v) => { try { localStorage.setItem(CHART_KEY, JSON.stringify(v)); } catch { /* per-viewer convenience only */ } };
+const clock = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\./g, ':');
+
+/** LIVE CHART tab: candles of one training asset with its virtual trades, merged with live 1-minute bars. */
+function mountTrainingChart(el) {
+  el.innerHTML = `
+    <div class="tr-live-bar">
+      <select class="input tr-live-pick" title="Aset & timeframe yang dilatih"></select>
+      <button class="tr-follow" title="Pindah otomatis ke aset dengan aktivitas trade virtual terbaru (sinyal, entry, hasil)">IKUTI AKTIVITAS</button>
+      <button class="tr-smc" title="Tampilkan struktur SMC (BOS/CHoCH swing & internal)">SMC</button>
+      <button class="tr-oos" title="Perbesar ke seluruh periode data uji (out-of-sample)">DATA UJI</button>
+      <span class="tr-live-info"></span>
+    </div>
+    <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div></div>
+    <div class="tr-live-foot"></div>`;
+  const $ = (q) => el.querySelector(q);
+  const prefs = { follow: false, smc: true, ...loadChartPrefs() };
+  let chart = null, current = null, summary = null, chartData = null, liveState = null, busy = false, seq = 0;
+  const visible = () => el.offsetParent !== null && !document.hidden;
+  const save = () => saveChartPrefs({ ...prefs, symbol: current?.symbol, tf: current?.tf });
+  const syncButtons = () => {
+    $('.tr-follow').classList.toggle('active', prefs.follow);
+    $('.tr-smc').classList.toggle('active', prefs.smc);
+  };
+
+  function options() {
+    const board = summary?.leaderboard || [];
+    const opt = (b) => `<option value="${esc(b.symbol)}|${esc(b.tf)}">${esc(b.symbol)} · ${esc(b.tf.toUpperCase())} · ${esc(MARKET_NAME[b.market] || b.market)}</option>`;
+    const proven = board.filter((b) => b.qualified), shadow = board.filter((b) => !b.qualified);
+    let html = (proven.length ? `<optgroup label="LOLOS MODE PRESISI">${proven.map(opt).join('')}</optgroup>` : '')
+      + (shadow.length ? `<optgroup label="BAYANGAN (BELUM TERBUKTI)">${shadow.map(opt).join('')}</optgroup>` : '');
+    if (current && !board.some((b) => b.symbol === current.symbol && b.tf === current.tf)) {
+      html = `<option value="${esc(current.symbol)}|${esc(current.tf)}">${esc(current.symbol)} · ${esc(current.tf.toUpperCase())}</option>${html}`;
+    }
+    const pick = $('.tr-live-pick');
+    pick.innerHTML = html || '<option value="">belum ada aset terlatih</option>';
+    if (current) pick.value = `${current.symbol}|${current.tf}`;
+  }
+
+  function followTarget() {
+    const a = summary?.activity?.[0];
+    if (a) return { symbol: a.symbol, tf: a.tf };
+    const t = summary?.progress?.lastTuned;
+    return t ? { symbol: t.symbol, tf: t.tf } : null;
+  }
+
+  async function open(symbol, tf) {
+    current = { symbol, tf };
+    save();
+    options();
+    await load(false);
+  }
+
+  async function load(keepRange) {
+    if (!current) return;
+    const my = ++seq;
+    const { symbol, tf } = current;
+    if (!chart) {
+      chart = new SmcChart($('.chart-host'), $('.tr-live-chart'));
+      chart.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
+    }
+    try {
+      const [a, t] = await Promise.all([
+        api(`/api/analyze?symbol=${encodeURIComponent(symbol)}&tf=${tf}`),
+        api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}`),
+      ]);
+      if (my !== seq) return;
+      chartData = t;
+      chart.setData(a, { keepRange });
+      chart.setTrades(t);
+      if (!keepRange) liveState = null;
+      render();
+      pollLive();
+    } catch (e) {
+      if (my === seq) $('.tr-live-foot').innerHTML = `<span class="down">${esc(e.message)}</span>`;
+    }
+  }
+
+  async function pollLive() {
+    if (!chart?.data || !current || busy || !visible()) return;
+    const { symbol, tf } = current;
+    busy = true;
+    try {
+      const res = await api(`/api/live?symbol=${encodeURIComponent(symbol)}`);
+      if (current?.symbol !== symbol || current?.tf !== tf) return;
+      chart.live(res.bars, TF_SECONDS[tf]);
+      liveState = { asOf: res.asOf, received: Date.now(), error: null };
+    } catch (e) {
+      liveState = { ...(liveState || {}), error: e.message };
+    } finally {
+      busy = false;
+    }
+    renderClock();
+  }
+
+  function renderClock() {
+    const box = $('.chart-live');
+    if (!box || !visible()) return;
+    const now = new Date();
+    const age = liveState?.asOf ? now.getTime() / 1000 - liveState.asOf : null;
+    const fresh = age != null && age < 5 * 60;
+    box.innerHTML = `${liveState?.error ? '<span class="down">● LIVE TERPUTUS</span>'
+      : !liveState ? '<span class="dim">● menghubungkan…</span>'
+      : fresh ? '<span class="live-on">● LIVE</span>'
+      : `<span class="flat">● PASAR TUTUP</span> <span class="dim">data terakhir ${clock(new Date(liveState.asOf * 1000)).slice(0, 5)}</span>`}<b class="num">${clock(now)}</b>`;
+  }
+
+  function render() {
+    const t = chartData;
+    if (!t) return;
+    const ev = t.evidence || {};
+    const [srcLabel, srcCls] = SOURCE[t.source] || SOURCE.default;
+    $('.tr-live-info').innerHTML = `${levelTag(t.modes, ev.qualified, ev.winRateLow)} <span class="tag ${srcCls}">${srcLabel} v${t.version}</span>
+      <span class="dim">${esc(paramText(t.params))}</span>`;
+    const live = t.trades.filter((x) => x.live);
+    const open = t.trades.filter((x) => x.status === 'open' || x.status === 'pending');
+    const oos = t.outOfSample || {};
+    $('.tr-live-foot').innerHTML = `
+      <span>DATA UJI (OOS): <b class="${oos.winRate >= 0.5 ? 'up' : oos.winRate != null ? 'down' : ''}">${pct(oos.winRate)}</b> dari ${oos.trades ?? 0} trade · ekspektasi ${rr(oos.expectancyR)}</span>
+      <span>LIVE: <b>${pct(t.live?.winRate)}</b> dari ${t.live?.trades ?? 0} selesai · ${live.length} sinyal tercatat</span>
+      <span>AKTIF: ${open.length}</span>
+      <span class="tr-legend"><i class="lg-tp"></i>zona TP <i class="lg-sl"></i>zona SL <i class="lg-1r"></i>TP1 +1R <i class="lg-live"></i>LIVE <i class="lg-is"></i>data latih (redup)</span>`;
+  }
+
+  $('.tr-live-pick').addEventListener('change', (e) => {
+    const [symbol, tf] = e.target.value.split('|');
+    if (!symbol) return;
+    prefs.follow = false;
+    syncButtons();
+    open(symbol, tf);
+  });
+  $('.tr-follow').addEventListener('click', () => {
+    prefs.follow = !prefs.follow;
+    syncButtons();
+    save();
+    const target = prefs.follow && followTarget();
+    if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) open(target.symbol, target.tf);
+  });
+  $('.tr-oos').addEventListener('click', () => {
+    const candles = chart?.data?.candles;
+    if (!candles?.length || !chartData) return;
+    const from = Math.max(0, candles.findIndex((c) => c.t >= chartData.split));
+    chart.chart.timeScale().setVisibleLogicalRange({ from: from - 3, to: candles.length + 8 });
+  });
+  $('.tr-smc').addEventListener('click', () => {
+    prefs.smc = !prefs.smc;
+    syncButtons();
+    save();
+    chart?.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
+  });
+  syncButtons();
+  setInterval(pollLive, 3000);
+  setInterval(renderClock, 1000);
+  setInterval(() => { if (visible()) load(true); }, 30_000);
+
+  return {
+    /** Called with every AI TRAINING summary while the tab is shown. */
+    show(d) {
+      summary = d;
+      const target = prefs.follow ? followTarget() : null;
+      if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) { open(target.symbol, target.tf); return; }
+      if (!current) {
+        const first = prefs.symbol ? { symbol: prefs.symbol, tf: prefs.tf } : d.leaderboard?.[0];
+        if (first) { open(first.symbol, first.tf); return; }
+      }
+      options();
+      if (chart && !chart.data) load(false);
+    },
+  };
+}
+
 /** The AI TRAINING page. */
 export const trainingPage = {
   init() {
@@ -139,8 +318,9 @@ export const trainingPage = {
           <div class="tr-equity"><canvas></canvas></div>
         </div>
         <div class="panel tabbed col-panel">
-          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="groups">GRUP PASAR</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button></div>
+          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="groups">GRUP PASAR</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button><button data-v="live">LIVE CHART</button></div>
           <div class="scroll tr-body"></div>
+          <div class="tr-live hidden"></div>
         </div>
       </div>`;
     this.el.querySelector('.tr-tabs').addEventListener('click', (e) => {
@@ -204,6 +384,14 @@ export const trainingPage = {
     const d = this.data;
     if (!d) return;
     const body = this.el.querySelector('.tr-body');
+    const liveEl = this.el.querySelector('.tr-live');
+    body.classList.toggle('hidden', this.tab === 'live');
+    liveEl.classList.toggle('hidden', this.tab !== 'live');
+    if (this.tab === 'live') {
+      this.liveChart ||= mountTrainingChart(liveEl);
+      this.liveChart.show(d);
+      return;
+    }
     if (this.tab === 'board') {
       body.innerHTML = d.leaderboard.length ? `<table class="co-table tr-table"><thead><tr><th>Aset</th><th>TF</th><th>Status</th><th>Backtest win</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
         ${d.leaderboard.map((b) => `<tr data-sym="${esc(b.symbol)}" data-tf="${esc(b.tf)}"><td><b>${esc(b.symbol)}</b><small class="dim">${esc(MARKET_NAME[b.market] || '')}</small></td><td>${esc(b.tf.toUpperCase())}</td>

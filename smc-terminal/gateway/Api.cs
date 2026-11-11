@@ -227,6 +227,17 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
+        api.MapGet("/training/chart", async (string symbol, string? tf, EngineClient engine, CancellationToken ct) =>
+        {
+            tf = string.IsNullOrWhiteSpace(tf) ? "1h" : tf.ToLowerInvariant();
+            if (!Timeframes.Contains(tf))
+            {
+                return Results.BadRequest(new { error = "invalid_timeframe", message = $"Timeframe {tf} tidak dikenal" });
+            }
+            var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
         api.MapGet("/benefits", async (string? market, EngineClient engine, CancellationToken ct) =>
         {
             var m = string.IsNullOrWhiteSpace(market) ? "all" : market.ToLowerInvariant();

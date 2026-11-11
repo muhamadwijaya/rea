@@ -788,6 +788,7 @@ def summary() -> dict:
                       "params": json.loads(pa), "created": cr} for s, tf, a, b, be, af, pa, cr in ups],
         "leaderboard": board[:400],
         "recent": sorted(rows, key=lambda r: r["updated"] or 0, reverse=True)[:80],
+        "activity": _activity([r for r in rows if r["status"] != "cancelled"]),
         "progress": dict(_progress),
     }
 
@@ -815,6 +816,46 @@ def asset(symbol: str, tf: str) -> dict:
                          for a, b, be, af, c in ups],
             "target": TARGET_WIN_RATE, "goal": GOAL_WIN_RATE,
             "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES]}
+
+
+def chart(symbol: str, tf: str) -> dict:
+    """Virtual trades of one pair for the live training chart, on the same bars the chart shows: every signal of
+    the active setting (backtest), with the journal's live rows replacing their re-simulated twins."""
+    inst = instruments.resolve(symbol)
+    source, version, p = active(inst.symbol, tf)
+    bars = market_data.load(inst, tf)
+    tf_sec = TF_SECONDS.get(tf, 3600)
+    t0, t1 = int(bars.time[0]), int(bars.time[-1])
+    split_t = int(t0 + (t1 - t0) * SPLIT)
+    live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0))
+    replaced = {(r["created_t"], r["direction"]) for r in live}
+    sigs = signals(bars, p)
+    trades = []
+    for s in sigs:
+        created_t = int(bars.time[s.created])
+        if (created_t, s.direction) not in replaced:
+            trades.append({**_row(inst, tf, version, s, bars, created_t, None, p, tf_sec), "live": False,
+                           "sample": "oos" if created_t >= split_t else "is"})
+    trades += [{**r, "live": True, "sample": "live"} for r in live]
+    trades.sort(key=lambda r: r["created_t"])
+    return {"symbol": inst.symbol, "tf": tf, "version": version, "source": source, "params": asdict(p),
+            "evidence": evidence(inst.symbol, tf),
+            "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
+            "split": split_t, "outOfSample": metrics([s for s in sigs if bars.time[s.created] >= split_t]),
+            "live": _live_metrics(live), "trades": trades[-600:]}
+
+
+def _activity(rows: list[dict], limit: int = 20) -> list[dict]:
+    """Latest virtual-trading events (signal seen, entry, exit) of the live journal, newest first."""
+    events = []
+    for r in rows:
+        for t, what in ((r["closed_t"] if r["status"] in ("win", "loss", "timeout") else None, r["status"]),
+                        (r["opened_t"], "open"), (r["first_seen"], "signal")):
+            if t:
+                events.append({"t": t, "event": what, "symbol": r["symbol"], "tf": r["tf"], "market": r["market"]})
+                break  # the latest stage of each signal
+    events.sort(key=lambda e: e["t"], reverse=True)
+    return events[:limit]
 
 
 def cancel_rules(p: Params, tf: str) -> list[str]:
@@ -847,7 +888,7 @@ def reliability(symbol: str, tfs: list[str]) -> dict | None:
 
 # ------------------------------------------------------------------ background loop
 
-_progress = {"tracked": 0, "lastPass": None, "tuning": None, "tunedThisRun": 0}
+_progress = {"tracked": 0, "lastPass": None, "tuning": None, "tunedThisRun": 0, "lastTuned": None}
 _seen_bars: dict[tuple[str, str], int] = {}
 
 
@@ -915,6 +956,7 @@ def _tune_next() -> None:
         try:
             tune_pair(inst, tf, bars)
             _progress["tunedThisRun"] += 1
+            _progress["lastTuned"] = {"symbol": inst.symbol, "tf": tf, "market": inst.market, "at": int(time.time())}
         except Exception:
             log.exception("training tune %s %s failed", inst.symbol, tf)
         finally:

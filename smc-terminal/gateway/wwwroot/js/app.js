@@ -165,10 +165,10 @@ async function connectRealtime() {
     emit('quotes', msg);
     if (missing) loadQuotes(); // new symbols in the sweep: fetch their names/decimals once
   });
-  conn.on('fundamental', (msg) => emit('fundamental', msg));
+  conn.on('fundamental', (msg) => { emit('fundamental', msg); });
   conn.on('direction', async () => { await loadDirection(); });
   conn.on('stats', (s) => { store.stats = s; updateLiveLabel(); emit('stats', s); });
-  conn.on('calendar', () => emit('calendar'));
+  conn.on('calendar', () => { emit('calendar'); });
   conn.on('engine', (s) => {
     if (!s.online) toast('Engine Python offline', s.error || 'Analisa tidak tersedia sementara.');
     refreshStats();
