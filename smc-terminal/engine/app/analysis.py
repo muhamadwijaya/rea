@@ -388,7 +388,7 @@ def to_json(a: Analysis, bars_out: int = 500, include_series: bool = True) -> di
              "tappedT": int(t[ob.tapped]) if ob.tapped is not None else None,
              "brokenT": int(t[ob.broken]) if ob.broken is not None else None,
              "active": ob.active}
-            for ob in _visible_blocks(r, first)
+            for ob in _visible_blocks(r, first, a.price)
         ],
         "fvgs": [
             {"direction": DIR_WORD[g.direction], "top": g.top, "bottom": g.bottom, "t": _t(a, g.index, first),
@@ -431,15 +431,16 @@ def to_json(a: Analysis, bars_out: int = 500, include_series: bool = True) -> di
     return out
 
 
-def _visible_blocks(r: smc.SmcResult, first: int) -> list[smc.OrderBlock]:
-    blocks = [ob for ob in r.swing.order_blocks + r.internal.order_blocks if ob.created >= first or ob.active]
-    active = [ob for ob in blocks if ob.active]
-    broken = [ob for ob in blocks if not ob.active][-6:]
-    # Keep the most recent active blocks per scope/direction so the chart stays readable.
+def _visible_blocks(r: smc.SmcResult, first: int, price: float) -> list[smc.OrderBlock]:
+    """Active blocks nearest to price (2 per scope and direction) plus the latest invalidated ones."""
+    blocks = r.swing.order_blocks + r.internal.order_blocks
+    broken = [ob for ob in blocks if not ob.active and ob.created >= first][-4:]
     keep: list[smc.OrderBlock] = []
     for scope in ("swing", "internal"):
         for d in (smc.BULL, smc.BEAR):
-            keep += [ob for ob in active if ob.scope == scope and ob.direction == d][-3:]
+            active = [ob for ob in blocks if ob.active and ob.scope == scope and ob.direction == d]
+            active.sort(key=lambda ob: abs((ob.top + ob.bottom) / 2 - price))
+            keep += active[:2]
     return keep + broken
 
 
