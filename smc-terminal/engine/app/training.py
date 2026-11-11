@@ -3,14 +3,17 @@
 Strategy (causal — every decision uses only bars up to that moment):
   a structure break (CHoCH, optionally BOS) of the chosen scope creates a signal from the order block that
   produced it: limit entry at the block (edge or middle), stop beyond the block ± k·ATR, target = entry +
-  RR × risk. Optional filters: entry in discount/premium of the dealing range known at that bar, and an
-  internal break only when it agrees with the swing trend.
+  RR × risk. Optional filters: entry in discount/premium of the dealing range known at that bar, an
+  internal break only when it agrees with the swing trend, and SMC confluence — a liquidity sweep (the leg's
+  extreme wicked through a known, untouched pivot and closed back) and/or a fair value gap in the leg that
+  broke structure. Optional management: half the position is closed at +1R and the stop moves to entry.
 
 Lifecycle of every signal (bar by bar, with timestamps):
   PENDING → OPEN when price trades into the entry, or CANCELLED when, before entry: the structure breaks the
   other way, price reaches the target first, price closes beyond the stop, or the signal expires.
   OPEN → WIN (target) / LOSS (stop; if a bar touches both, it is counted as a loss) / TIMEOUT (max holding,
-  closed at the bar's close). Result in R (risk units).
+  closed at the bar's close). With partial management, a trade that reached +1R and then returned to entry is
+  a WIN of +0.5R; the moved stop applies from the bar after +1R. Result in R (risk units).
 
 Live journal: signals created after an asset/timeframe starts being tracked are stored (SQLite, in the app
 data folder) with the moment the system first saw them, and advanced as new bars arrive; closed rows are
@@ -27,6 +30,10 @@ Learning happens at two levels, and each asset uses the most specific setting th
     dropped again when the group setting does better on that asset.
   Inheritance: asset override → group setting → default. Every upgrade is versioned and logged.
 
+Precision modes (normal / ketat / sangat ketat) raise that bar: only settings whose proven lower bound reaches
+the mode's threshold count. The lower bound is stamped on every live signal when it appears, so live results
+per mode are never chosen after the outcome is known.
+
 Qualification: a signal counts as an AI trade only when the setting behind it has evidence — enough
 out-of-sample trades, a Wilson lower bound of the win rate ≥ QUALIFY_LOW and a positive expectancy. Other
 signals are still traded virtually as shadow trades (to keep learning) but are reported separately, so
@@ -36,6 +43,7 @@ adding many unproven assets cannot silently dilute — or inflate — the headli
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import itertools
 import json
@@ -81,6 +89,8 @@ class Params:
     trend_filter: bool = True
     expiry: int = 30  # bars a pending signal stays valid
     hold: int = 60  # bars an open trade may run before it is closed at market
+    confluence: str = "none"  # extra SMC confirmation: "none" | "sweep" | "fvg" | "both"
+    manage: str = "none"  # "none" | "partial" = close half at +1R and move the stop to entry
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -101,6 +111,7 @@ class Signal:
     stop: float
     target: float
     status: str = "pending"  # pending | open | win | loss | timeout | cancelled
+    manage: str = "none"
     opened: int | None = None
     closed: int | None = None
     exit: float | None = None
@@ -152,21 +163,55 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
         return s
     k = s.opened
     end_hold = min(n, s.opened + 1 + hold)
+    reward = abs(s.target - s.entry) / risk
+    partial = s.manage == "partial" and reward > 1.0 + 1e-9
+    level = s.entry + d * risk  # +1R: half is closed here, then the stop moves to entry
+    taken = False
     while k < end_hold:
-        hit_stop = l[k] <= s.stop if d > 0 else h[k] >= s.stop
+        stop = s.entry if taken else s.stop
+        hit_stop = l[k] <= stop if d > 0 else h[k] >= stop
         hit_target = (h[k] >= s.target if d > 0 else l[k] <= s.target) and k > s.opened
         if hit_stop:  # also when the target is touched in the same bar: conservative
-            s.status, s.closed, s.exit, s.r, s.reason = "loss", k, s.stop, -1.0, "stop loss"
+            if taken:
+                s.status, s.closed, s.exit, s.r, s.reason = "win", k, s.entry, 0.5, "TP1 +1R (50%), sisa ditutup di entry"
+            else:
+                s.status, s.closed, s.exit, s.r, s.reason = "loss", k, s.stop, -1.0, "stop loss"
             return s
         if hit_target:
-            s.status, s.closed, s.exit, s.r, s.reason = "win", k, s.target, round(abs(s.target - s.entry) / risk, 3), "target"
+            r = 0.5 + 0.5 * reward if partial else reward
+            s.status, s.closed, s.exit, s.r = "win", k, s.target, round(r, 3)
+            s.reason = "TP1 +1R (50%) lalu target" if partial else "target"
             return s
+        if partial and not taken and k > s.opened and (h[k] >= level if d > 0 else l[k] <= level):
+            taken = True  # the stop at entry applies from the next bar (order inside this bar is unknown)
         k += 1
     if n > s.opened + hold:
         k = s.opened + hold
+        rest = (c[k] - s.entry) * d / risk
         s.status, s.closed, s.exit = "timeout", k, float(c[k])
-        s.r, s.reason = round((c[k] - s.entry) * d / risk, 3), "batas waktu, ditutup di harga pasar"
+        s.r, s.reason = round(0.5 + 0.5 * rest if taken else rest, 3), "batas waktu, ditutup di harga pasar"
     return s
+
+
+def _swept(d: int, ob, t: int, l, h, c, pivots_low, pivots_high) -> bool:
+    """Liquidity sweep: the extreme of the leg that broke structure wicked through a known, untouched pivot of
+    the other side and closed back inside on that bar (sell-side grab before a bullish break, and vice versa)."""
+    lo = max(0, ob.index - 3)
+    if d > 0:
+        j = lo + int(np.argmin(l[lo:t + 1]))
+        for p in pivots_low:
+            if p.confirmed > j or p.index >= j or j - p.index > 120:
+                continue
+            if l[j] < p.price < c[j] and (j == p.index + 1 or l[p.index + 1:j].min() >= p.price):
+                return True
+    else:
+        j = lo + int(np.argmax(h[lo:t + 1]))
+        for p in pivots_high:
+            if p.confirmed > j or p.index >= j or j - p.index > 120:
+                continue
+            if h[j] > p.price > c[j] and (j == p.index + 1 or h[p.index + 1:j].max() <= p.price):
+                return True
+    return False
 
 
 def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> list[Signal]:
@@ -179,6 +224,13 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> list[Signa
     for b in structure.breaks:
         against[-b.direction].add(b.index)
     hi, lo = _swing_range_at(r) if p.pd_filter else (None, None)
+    if p.confluence in ("sweep", "both"):
+        pivots = r.internal.pivots + r.swing.pivots
+        pivots_low = [q for q in pivots if q.kind == "low"]
+        pivots_high = [q for q in pivots if q.kind == "high"]
+    if p.confluence in ("fvg", "both"):
+        gap_index = {1: sorted((g.index, g.created) for g in r.gaps if g.direction == 1),
+                     -1: sorted((g.index, g.created) for g in r.gaps if g.direction == -1)}
     out: list[Signal] = []
     for b in structure.breaks:
         if p.kinds == "CHoCH" and b.kind != "CHoCH":
@@ -208,7 +260,13 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> list[Signa
             target = entry + d * p.rr * risk
         if (target - entry) * d < MIN_RR * risk or (target - c[t]) * d <= 0:
             continue  # less than 1:1, or the target is already behind price: no trade
-        s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target))
+        if p.confluence in ("sweep", "both") and not _swept(d, ob, t, l, h, c, pivots_low, pivots_high):
+            continue
+        if p.confluence in ("fvg", "both"):
+            k = bisect.bisect_left(gap_index[d], (ob.index, -1))  # first gap of this direction from the block on
+            if k == len(gap_index[d]) or gap_index[d][k][1] > t:
+                continue  # no displacement (fair value gap) in the leg that broke structure
+        s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage=p.manage)
         out.append(simulate(bars, s, against[d], p.expiry, p.hold))
     return out
 
@@ -264,6 +322,23 @@ def _grid(tf_key: str):
                       target=target, rr=rr, pd_filter=pd, trend_filter=trend, expiry=expiry)
 
 
+VARIANTS = tuple((c, m) for c in ("none", "sweep", "fvg", "both") for m in ("none", "partial"))
+REFINE_TOP = 6
+
+
+def _refine(ranked: list, evaluate) -> list:
+    """Second search stage: the best base settings with every confluence filter and trade-management variant."""
+    seen = {p for _, p, _ in ranked}
+    extra = []
+    for _, p, _ in ranked[:REFINE_TOP]:
+        for confluence, manage in VARIANTS:
+            q = replace(p, confluence=confluence, manage=manage)
+            if q not in seen:
+                seen.add(q)
+                extra.append(evaluate(q))
+    return sorted(ranked + extra, key=lambda x: x[0], reverse=True)
+
+
 def _score(m: dict, min_trades: int) -> float:
     if m["trades"] < min_trades or (m["expectancyR"] or 0) <= 0:
         return -1.0
@@ -281,11 +356,12 @@ def tune(bars: Bars, tf_key: str, current: Params) -> tuple[Params, dict, dict]:
         return analyses[key]
 
     current_report = walk_forward(bars, current, analysis_for(current))
-    ranked = []
-    for p in _grid(tf_key):
+    def evaluate(p: Params):
         report = walk_forward(bars, p, analysis_for(p))
-        ranked.append((_score(report["inSample"], MIN_IS_TRADES), p, report))
-    ranked.sort(key=lambda x: x[0], reverse=True)
+        return _score(report["inSample"], MIN_IS_TRADES), p, report
+
+    ranked = sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True)
+    ranked = _refine(ranked, evaluate)
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -305,6 +381,8 @@ GROUP_MIN_TRAIN = 40
 GROUP_MIN_VALID = 15
 QUALIFY_LOW = 0.50  # qualified = lower bound (z = 1) of the win rate ≥ 50 % with positive expectancy
 QUALIFY_MIN_TRADES = {"asset": 8, "group": 30, "default": 8}
+# Precision modes: a qualified setting must also prove at least this lower bound (z = 1) of its win rate.
+PRECISION_MODES = (("normal", "NORMAL", QUALIFY_LOW), ("ketat", "KETAT", 0.65), ("sangat", "SANGAT KETAT", 0.80))
 
 
 def _parts(bars: Bars, sigs: list[Signal]) -> tuple[list, list, list]:
@@ -333,9 +411,12 @@ def tune_group(pairs: list[tuple[str, Bars]], tf_key: str, current: Params) -> t
             test += c
         return {"train": metrics(train), "valid": metrics(valid), "test": metrics(test), "pairs": len(pairs)}
 
+    def evaluate(p: Params):
+        report = pooled(p)
+        return _score(report["train"], GROUP_MIN_TRAIN), p, report
+
     current_report = pooled(current)
-    ranked = sorted(((_score(r["train"], GROUP_MIN_TRAIN), p, r) for p in _grid(tf_key) for r in [pooled(p)]),
-                    key=lambda x: x[0], reverse=True)
+    ranked = _refine(sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True), evaluate)
     best, best_report = current, current_report
     best_valid = _score(current_report["valid"], GROUP_MIN_VALID)
     for train_score, p, report in ranked[:10]:
@@ -389,6 +470,9 @@ def _db() -> sqlite3.Connection:
         # additive migrations of journals written by earlier versions
         if "qualified" not in _columns(_conn, "signals"):
             _conn.execute("ALTER TABLE signals ADD COLUMN qualified INTEGER")
+        for column, kind in (("quality", "REAL"), ("manage", "TEXT")):
+            if column not in _columns(_conn, "signals"):
+                _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
         if "report" not in _columns(_conn, "tracking"):
             _conn.execute("ALTER TABLE tracking ADD COLUMN report TEXT")
         upgraded = {(s, tf) for s, tf in _conn.execute("SELECT DISTINCT symbol, tf FROM upgrades")}
@@ -464,7 +548,8 @@ def _since(symbol: str, tf: str, now: int) -> int:
 # ------------------------------------------------------------------ live journal
 
 SIGNAL_COLUMNS = ["id", "symbol", "market", "tf", "version", "direction", "kind", "scope", "created_t", "first_seen", "entry",
-                  "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified"]
+                  "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified",
+                  "quality", "manage"]
 
 
 def _sid(symbol: str, tf: str, s: Signal, t: int) -> str:
@@ -479,7 +564,9 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
     """
     now = int(time.time())
     _, version, p = active(inst.symbol, tf)
-    qualified_now = 1 if evidence(inst.symbol, tf)["qualified"] else 0
+    ev = evidence(inst.symbol, tf)
+    qualified_now = 1 if ev["qualified"] else 0
+    quality_now = ev["winRateLow"] if ev["qualified"] else 0.0  # precision modes compare this, stamped before the outcome
     sigs = signals(bars, p)
     tf_sec = TF_SECONDS.get(tf, 3600)
     index_of = {int(t): i for i, t in enumerate(bars.time)}
@@ -490,7 +577,7 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
         db = _db()
         since = _since(inst.symbol, tf, now)
         existing = {row[0]: row for row in db.execute(
-            "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified FROM signals "
+            "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified, quality, manage FROM signals "
             "WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, since - tf_sec * (p.expiry + p.hold)))}
         for s in sigs:
             created_t = int(bars.time[s.created])
@@ -502,12 +589,16 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
                 continue  # closed rows are frozen
             row = _row(inst, tf, version, s, bars, created_t, old[2] if old else now, p, tf_sec)
             row["qualified"] = old[9] if old and old[9] is not None else qualified_now  # decided once, when it appears
+            row["quality"] = old[10] if old and old[10] is not None else quality_now
+            if old and old[11]:
+                row["manage"] = old[11]
             db.execute(insert, {**row, "id": sid})
             written += 1
         # signals of an older parameter version keep their stored levels and are advanced on their own
-        for sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q in existing.values():
+        for sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage in existing.values():
             if status in ("pending", "open") and ver != version and created_t in index_of:
-                s = simulate(bars, Signal(direction, "", "", index_of[created_t], entry, stop, target), set(), p.expiry, p.hold)
+                s = simulate(bars, Signal(direction, "", "", index_of[created_t], entry, stop, target, manage=manage or "none"),
+                             set(), p.expiry, p.hold)
                 if s.status != status:
                     row = _row(inst, tf, ver, s, bars, created_t, first_seen, p, tf_sec)
                     db.execute("UPDATE signals SET status=?, opened_t=?, closed_t=?, exit=?, r=?, reason=?, updated=? WHERE id=?",
@@ -523,7 +614,7 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
             "kind": s.kind, "scope": s.scope, "created_t": created_t, "first_seen": first_seen, "entry": s.entry,
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
             "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason,
-            "updated": int(time.time())}
+            "updated": int(time.time()), "manage": s.manage}
 
 
 def _save_params(symbol: str, tf: str, params: dict, report: dict, now: int) -> int:
@@ -653,6 +744,7 @@ def summary() -> dict:
         total += r["r"] or 0
         equity.append([r["closed_t"], round(total, 2)])
     board, by_source, by_market, qualified_oos = [], {}, {}, []
+    by_mode: dict[str, list] = {key: [] for key, _, _ in PRECISION_MODES}
     rows_by_pair: dict[tuple[str, str], list] = {}
     for r in rows:
         rows_by_pair.setdefault((r["symbol"], r["tf"]), []).append(r)
@@ -665,6 +757,9 @@ def summary() -> dict:
         if ev["qualified"]:
             qualified_oos.append(oos)
             by_market[market]["qualified"].append(oos)
+            for key, _, low in PRECISION_MODES:
+                if (ev["winRateLow"] or 0) >= low:
+                    by_mode[key].append(oos)
         source, version, _ = active(symbol, tf)
         board.append({"symbol": symbol, "tf": tf, "market": market, "version": version, "source": source,
                       "qualified": ev["qualified"], "evidence": ev, "backtest": oos,
@@ -677,6 +772,10 @@ def summary() -> dict:
         "live": _live_metrics(live_q), "liveAll": _live_metrics(rows),
         "backtest": _sum(qualified_oos), "backtestAll": _sum([(r or {}).get("outOfSample") or {} for r in evals.values()]),
         "sources": {k: _sum(v) for k, v in by_source.items()},
+        "modes": [{"key": key, "label": label, "low": low, "backtest": _sum(by_mode[key]),
+                   "live": _live_metrics([r for r in rows if r["qualified"] and (r["quality"] is None and low <= QUALIFY_LOW
+                                                                                 or (r["quality"] or 0) >= low)])}
+                  for key, label, low in PRECISION_MODES],
         "markets": {m: {"live": _live_metrics([r for r in rows if r["market"] == m and r["qualified"]]),
                         "liveAll": _live_metrics([r for r in rows if r["market"] == m]),
                         "backtest": _sum(by_market.get(m, {}).get("qualified", [])),
@@ -714,7 +813,8 @@ def asset(symbol: str, tf: str) -> dict:
             "journal": rows[:30], "latest": recent, "cancelRules": cancel_rules(p, tf),
             "upgrades": [{"from": a, "to": b, "before": json.loads(be), "after": json.loads(af), "created": c}
                          for a, b, be, af, c in ups],
-            "target": TARGET_WIN_RATE, "goal": GOAL_WIN_RATE}
+            "target": TARGET_WIN_RATE, "goal": GOAL_WIN_RATE,
+            "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES]}
 
 
 def cancel_rules(p: Params, tf: str) -> list[str]:

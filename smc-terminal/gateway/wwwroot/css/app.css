@@ -750,6 +750,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .tr-table tr[data-sym] { cursor: pointer; }
 .tr-table tr[data-sym]:hover td { background: rgba(153, 255, 0, .05); }
 .tr-signal { border: 1px solid var(--line-2); border-radius: 3px; padding: 8px 10px; background: var(--panel-2); }
+.tr-modes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0 2px; }
+.tr-modes > span { font-size: 9.5px; letter-spacing: .14em; color: var(--muted); margin-right: 4px; }
+.tr-modes button { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+  color: var(--text); background: transparent; border: 1px solid var(--line-2); }
+.tr-modes button.active { color: #002644; background: var(--go); border-color: var(--go); }
+.co-table tr.sel td { background: var(--accent-bg); }
 .tr-sig-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: 10.5px; }
 .tr-times { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-bottom: 6px; }
 .tr-times div { display: flex; flex-direction: column; }

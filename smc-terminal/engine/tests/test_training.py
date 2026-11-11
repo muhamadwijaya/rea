@@ -168,3 +168,55 @@ def test_summary_reports_qualified_and_all_trades_separately(store):
     assert (d["backtestAll"]["trades"], d["backtestAll"]["wins"]) == (60, 25)
     assert d["sources"]["asset"]["trades"] == 20 and d["sources"]["default"]["trades"] == 40
     assert (d["qualifiedPairs"], d["evaluatedPairs"]) == (1, 2)
+
+
+# ------------------------------------------------------------------ precision levers
+
+# long entry 100, stop 95 (risk 5), target 110 (2R); +1R = 105
+PARTIAL = [
+    ("+1R then back to entry", [(104, 105, 103, 104), (103, 104, 99.5, 101), (102, 106, 101, 105), (104, 104, 99.5, 100)], "win", 0.5),
+    ("+1R then target", [(104, 105, 103, 104), (103, 104, 99.5, 101), (102, 106, 101, 105), (106, 111, 105, 110)], "win", 1.5),
+    ("+1R and stop in one bar is a loss", [(104, 105, 103, 104), (103, 104, 99.5, 101), (101, 106, 94, 96)], "loss", -1.0),
+    ("stop before +1R", [(104, 105, 103, 104), (103, 104, 99.5, 101), (100, 103, 94, 95)], "loss", -1.0),
+]
+
+
+@pytest.mark.parametrize("name,rows,status,r", PARTIAL, ids=[c[0] for c in PARTIAL])
+def test_partial_take_profit_at_one_r_then_stop_to_entry(name, rows, status, r):
+    s = training.simulate(bars(rows), sig(manage="partial"), set(), expiry=3, hold=10)
+    assert (s.status, s.r) == (status, pytest.approx(r))
+
+
+def test_partial_needs_a_target_beyond_one_r():
+    rows = [(104, 105, 103, 104), (103, 104, 99.5, 101), (102, 106, 101, 105)]
+    s = training.simulate(bars(rows), sig(manage="partial", target=105.0), set(), expiry=3, hold=10)
+    assert (s.status, s.r) == ("win", pytest.approx(1.0))  # 1:1 target: nothing to split
+
+
+def test_liquidity_sweep_needs_a_wick_through_an_untouched_known_low_and_a_close_back():
+    from types import SimpleNamespace
+    from app.smc import Pivot
+
+    l = np.array([10.0, 9.0, 10.0, 10.5, 10.2, 8.5, 9.8, 11.0])
+    h = l + 1.0
+    known_low = Pivot(1, 9.0, "low", 3, "")
+    ob = SimpleNamespace(index=5)
+    c = l + 0.3
+    c[5] = 9.2  # wick to 8.5 below the 9.0 low, close back above it
+    assert training._swept(1, ob, 7, l, h, c, [known_low], [])
+    c[5] = 8.8  # closed below the low: a break, not a grab
+    assert not training._swept(1, ob, 7, l, h, c, [known_low], [])
+    c[5] = 9.2
+    late = Pivot(1, 9.0, "low", 6, "")  # only confirmed after the sweep bar: not known yet
+    assert not training._swept(1, ob, 7, l, h, c, [late], [])
+
+
+def test_precision_modes_count_quality_stamped_when_the_signal_appeared(store):
+    db = training._db()
+    rows = [("a", 1, 0.85, 1.0), ("b", 1, 0.70, -1.0), ("c", 1, 0.55, 1.0), ("d", 1, None, -1.0), ("e", 0, 0.0, 1.0)]
+    for sid, q, quality, r in rows:
+        db.execute("INSERT INTO signals(id, symbol, market, tf, status, r, closed_t, qualified, quality) VALUES (?,?,?,?,?,?,?,?,?)",
+                   (sid, "A", "forex", "1h", "win" if r > 0 else "loss", r, 1, q, quality))
+    db.commit()
+    modes = {m["key"]: m["live"]["trades"] for m in training.summary()["modes"]}
+    assert modes == {"normal": 4, "ketat": 2, "sangat": 1}  # shadow trade "e" never counts; "d" predates quality stamps

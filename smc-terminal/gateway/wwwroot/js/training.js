@@ -9,8 +9,17 @@ const STATUS = {
 };
 const MARKET_NAME = { forex: 'FOREX', 'saham-as': 'SAHAM AS', 'saham-idx': 'SAHAM IDX', kripto: 'KRIPTO' };
 const SOURCE = { asset: ['UPGRADE ASET', 'bull'], group: ['PARAMETER GRUP', 'info'], default: ['DEFAULT', 'ghost'] };
-const paramText = (p) => `pivot ${p.swing}/${p.internal} · ${p.scope} ${p.kinds} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
-const qualifiedTag = (q) => (q ? '<span class="tag bull">TERKUALIFIKASI</span>' : '<span class="tag ghost">BAYANGAN</span>');
+const CONFLUENCE = { sweep: 'wajib sweep likuiditas', fvg: 'wajib FVG', both: 'wajib sweep + FVG' };
+const paramText = (p) => `pivot ${p.swing}/${p.internal} · ${p.scope} ${p.kinds} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
+// Precision level reached by a setting (lower bound of its proven win rate); thresholds come from the engine.
+function levelTag(modes, qualified, low) {
+  if (!qualified) return '<span class="tag ghost">BAYANGAN</span>';
+  const hit = [...(modes || [])].sort((a, b) => b.low - a.low).find((m) => (low ?? 0) >= m.low);
+  return `<span class="tag bull">${esc(hit?.label || 'NORMAL')}</span>`;
+}
+const PRECISION_KEY = 'sharx.precision';
+const loadPrecision = () => { try { return localStorage.getItem(PRECISION_KEY) || 'normal'; } catch { return 'normal'; } };
+const savePrecision = (v) => { try { localStorage.setItem(PRECISION_KEY, v); } catch { /* per-viewer convenience only */ } };
 
 const dt = (t) => (t ? new Date(t * 1000).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '–');
 const pct = (v) => (v == null ? '–' : `${(v * 100).toFixed(1)}%`);
@@ -30,12 +39,12 @@ function statBlock(title, m) {
     <span>${m?.trades ?? 0} trade · ${m?.wins ?? 0} menang${m?.expectancyR != null ? ` · ekspektasi ${rr(m.expectancyR)}` : ''}</span></div>`;
 }
 
-function signalCard(s, rules, decimals) {
+function signalCard(s, rules, decimals, modes) {
   const [label, cls] = STATUS[s.status] || [s.status, 'ghost'];
   const f = (v) => fmtPrice(v, decimals);
   const risk = Math.abs(s.entry - s.stop);
   return `<div class="tr-signal">
-    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${qualifiedTag(s.qualified)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
+    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${levelTag(modes, s.qualified, s.quality ?? 0.5)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
     <div class="tr-times">
       <div><span>SINYAL MUNCUL</span><b>${dt(s.created_t)}</b></div>
       <div><span>TERDETEKSI SISTEM</span><b>${s.first_seen ? dt(s.first_seen) : 'riwayat (backtest)'}</b></div>
@@ -71,10 +80,10 @@ export function mountPlanTraining(el) {
         const [srcLabel, srcCls] = SOURCE[d.source] || SOURCE.default;
         el.innerHTML = `
           <h5>SINYAL VIRTUAL TRADING · ${esc(tf.toUpperCase())} · SMC v${d.version}</h5>
-          <div class="tr-sig-top">${qualifiedTag(ev.qualified)} <span class="tag ${srcCls}">${srcLabel}</span>
+          <div class="tr-sig-top">${levelTag(d.modes, ev.qualified, ev.winRateLow)} <span class="tag ${srcCls}">${srcLabel}</span>
             <span class="dim">bukti ${pct(ev.winRate)} dari ${ev.trades ?? 0} trade (batas bawah ${pct(ev.winRateLow)})</span></div>
           ${ev.qualified ? '' : '<div class="note">Belum terkualifikasi: sinyal tetap dicatat sebagai trade bayangan untuk belajar, tetapi tidak dihitung sebagai trade AI sampai buktinya cukup (batas bawah win rate ≥ 50% dengan ekspektasi positif).</div>'}
-          ${current ? signalCard({ ...current, tf }, d.cancelRules, decimals) : '<div class="empty">Belum ada sinyal untuk aset & timeframe ini.</div>'}
+          ${current ? signalCard({ ...current, tf }, d.cancelRules, decimals, d.modes) : '<div class="empty">Belum ada sinyal untuk aset & timeframe ini.</div>'}
           ${others.length ? `<h5>SINYAL SEBELUMNYA</h5><table class="co-table"><thead><tr><th>Muncul</th><th>Arah</th><th>Status</th><th>Hasil</th></tr></thead><tbody>
             ${others.map((s) => `<tr><td>${dt(s.created_t)}</td><td>${s.direction > 0 ? 'BUY' : 'SELL'}</td><td>${esc((STATUS[s.status] || [s.status])[0])}</td><td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}</td></tr>`).join('')}</tbody></table>` : ''}
           <h5>AKURASI ASET INI</h5>
@@ -119,6 +128,7 @@ export const trainingPage = {
   init() {
     this.el = document.getElementById('tab-training');
     this.tab = 'board';
+    this.precision = loadPrecision();
     this.el.innerHTML = `
       <div class="tr-kpis"></div>
       <div class="tr-grid">
@@ -141,6 +151,8 @@ export const trainingPage = {
       this.renderBody();
     });
     this.el.addEventListener('click', (e) => {
+      const mode = e.target.closest('button[data-mode]');
+      if (mode) { this.precision = mode.dataset.mode; savePrecision(this.precision); this.render(); return; }
       const row = e.target.closest('[data-sym]');
       if (row) window.SMC.openAnalysis(row.dataset.sym, row.dataset.tf);
     });
@@ -157,29 +169,32 @@ export const trainingPage = {
   },
   render() {
     const d = this.data;
-    const live = d.live, bt = d.backtest;
+    const modes = d.modes || [];
+    const mode = modes.find((m) => m.key === this.precision) || modes[0];
+    const live = mode.live, bt = mode.backtest;
     this.el.querySelector('.tr-kpis').innerHTML = [
-      ['WIN RATE LIVE (TERKUALIFIKASI)', pct(live.winRate), live.winRate >= d.target ? 'up' : ''],
-      ['WIN RATE BACKTEST (TERKUALIFIKASI)', pct(bt.winRate), bt.winRate >= d.target ? 'up' : ''],
+      [`WIN RATE LIVE · ${mode.label}`, pct(live.winRate), live.winRate >= d.target ? 'up' : ''],
+      [`WIN RATE BACKTEST · ${mode.label}`, pct(bt.winRate), bt.winRate >= d.target ? 'up' : ''],
       ['SEMUA PASANGAN (BACKTEST)', pct(d.backtestAll.winRate), ''],
       ['TRADE LIVE SELESAI', `${live.trades} / ${d.liveAll.trades}`, ''],
-      ['EKSPEKTASI LIVE', rr(live.expectancyR), live.expectancyR > 0 ? 'up' : live.expectancyR < 0 ? 'down' : ''],
-      ['TERKUALIFIKASI', `${d.qualifiedPairs} / ${d.evaluatedPairs}`, 'up'],
+      ['EKSPEKTASI BACKTEST', rr(bt.expectancyR), bt.expectancyR > 0 ? 'up' : bt.expectancyR < 0 ? 'down' : ''],
+      ['PASANGAN LOLOS', `${bt.pairs} / ${d.evaluatedPairs}`, 'up'],
       ['UPGRADE SMC', d.upgradesTotal, 'up'],
     ].map(([l, v, c]) => `<div><span>${l}</span><b class="${c}">${v}</b></div>`).join('');
     const markets = Object.entries(d.markets || {});
     const sources = Object.entries(d.sources || {});
     this.el.querySelector('.tr-overview').innerHTML = `
-      <h5>LIVE — TRADE TERKUALIFIKASI (${live.trades} selesai; semua termasuk bayangan: ${pct(d.liveAll.winRate)} dari ${d.liveAll.trades})</h5>${progress(live.winRate, d.target, d.goal)}
-      <h5>BACKTEST OUT-OF-SAMPLE — PASANGAN TERKUALIFIKASI (${bt.trades} trade; semua pasangan: ${pct(d.backtestAll.winRate)} dari ${d.backtestAll.trades})</h5>${progress(bt.winRate, d.target, d.goal)}
+      <div class="tr-modes"><span>MODE PRESISI</span>${modes.map((m) => `<button data-mode="${m.key}" class="${m === mode ? 'active' : ''}">${esc(m.label)} ≥${Math.round(m.low * 100)}%</button>`).join('')}</div>
+      <h5>LIVE · ${esc(mode.label)} (${live.trades} selesai; semua termasuk bayangan: ${pct(d.liveAll.winRate)} dari ${d.liveAll.trades})</h5>${progress(live.winRate, d.target, d.goal)}
+      <h5>BACKTEST OUT-OF-SAMPLE · ${esc(mode.label)} (${bt.trades} trade dari ${bt.pairs} pasangan; semua pasangan: ${pct(d.backtestAll.winRate)} dari ${d.backtestAll.trades})</h5>${progress(bt.winRate, d.target, d.goal)}
+      <table class="co-table"><thead><tr><th>Mode presisi</th><th>Pasangan</th><th>Win OOS</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
+        ${modes.map((m) => `<tr class="${m === mode ? 'sel' : ''}"><td>${esc(m.label)} <span class="dim">≥${Math.round(m.low * 100)}%</span></td><td>${m.backtest.pairs}</td><td>${pct(m.backtest.winRate)}</td><td>${m.backtest.trades}</td><td>${rr(m.backtest.expectancyR)}</td><td>${pct(m.live.winRate)}</td><td>${m.live.trades}</td></tr>`).join('')}</tbody></table>
       ${sources.length ? `<table class="co-table"><thead><tr><th>Asal parameter</th><th>Pasangan</th><th>Win OOS</th><th>Trade</th><th>Ekspektasi</th></tr></thead><tbody>
         ${sources.map(([k, v]) => `<tr><td><span class="tag ${(SOURCE[k] || SOURCE.default)[1]}">${(SOURCE[k] || SOURCE.default)[0]}</span></td><td>${v.pairs}</td><td>${pct(v.winRate)}</td><td>${v.trades}</td><td>${rr(v.expectancyR)}</td></tr>`).join('')}</tbody></table>` : ''}
       ${markets.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>Live terkualifikasi</th><th>Trade</th><th>Backtest terkualifikasi</th><th>Semua</th></tr></thead><tbody>
         ${markets.map(([m, v]) => `<tr><td>${esc(MARKET_NAME[m] || m)}</td><td>${pct(v.live.winRate)}</td><td>${v.live.trades}</td><td>${pct(v.backtest.winRate)} <span class="dim">(${v.backtest.trades})</span></td><td>${pct(v.backtestAll.winRate)} <span class="dim">(${v.backtestAll.trades})</span></td></tr>`).join('')}</tbody></table>` : ''}
-      <div class="note">Angka "semua" bisa turun saat banyak aset baru dilatih: aset yang belum terbukti ikut dihitung (pengenceran).
-        Aset dengan data sedikit memakai parameter grup pasarnya. Hanya pasangan yang terbukti (batas bawah win rate ≥ ${Math.round((d.qualifyLow || 0.5) * 100)}%,
-        ekspektasi positif) dihitung sebagai trade AI; sisanya trade bayangan untuk belajar. Backtest terkualifikasi ikut dipakai
-        memilih pasangan, jadi bisa sedikit optimistis — bukti ke depan adalah trade live terkualifikasi. Tujuan 99% adalah arah; angka di sini selalu terukur.
+      <div class="note">Mode lebih ketat = win rate lebih tinggi, sinyal lebih jarang. Status presisi dicap saat sinyal muncul (sebelum hasilnya
+        diketahui); bukti ke depan = trade live. Tujuan 99% adalah arah, bukan jaminan — angka di sini selalu terukur.
         ${d.progress?.tuning ? `<br>Sedang melatih: <b>${esc(d.progress.tuning)}</b>` : ''}</div>`;
     equityChart(this.el.querySelector('.tr-equity canvas'), d.equity || []);
     this.el.querySelector('.tr-updated').textContent = `diperbarui ${new Date(d.generatedAt * 1000).toLocaleTimeString('id-ID')}`;
@@ -192,7 +207,7 @@ export const trainingPage = {
     if (this.tab === 'board') {
       body.innerHTML = d.leaderboard.length ? `<table class="co-table tr-table"><thead><tr><th>Aset</th><th>TF</th><th>Status</th><th>Backtest win</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
         ${d.leaderboard.map((b) => `<tr data-sym="${esc(b.symbol)}" data-tf="${esc(b.tf)}"><td><b>${esc(b.symbol)}</b><small class="dim">${esc(MARKET_NAME[b.market] || '')}</small></td><td>${esc(b.tf.toUpperCase())}</td>
-          <td title="Bukti parameter aktif: ${pct(b.evidence.winRate)} dari ${b.evidence.trades} trade out-of-sample">${qualifiedTag(b.qualified)}<small class="dim">${(SOURCE[b.source] || SOURCE.default)[0].toLowerCase()} v${b.version} · bukti ${pct(b.evidence.winRate)}/${b.evidence.trades}</small></td>
+          <td title="Bukti parameter aktif: ${pct(b.evidence.winRate)} dari ${b.evidence.trades} trade out-of-sample">${levelTag(d.modes, b.qualified, b.evidence.winRateLow)}<small class="dim">${(SOURCE[b.source] || SOURCE.default)[0].toLowerCase()} v${b.version} · bukti ${pct(b.evidence.winRate)}/${b.evidence.trades}</small></td>
           <td class="${b.backtest.winRate >= d.target ? 'up' : ''}">${pct(b.backtest.winRate)}</td><td>${b.backtest.trades ?? 0}</td><td>${rr(b.backtest.expectancyR)}</td>
           <td class="${b.live.winRate >= d.target ? 'up' : ''}">${pct(b.live.winRate)}</td><td>${b.live.trades}</td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Pelatihan dimulai ±2 menit setelah aplikasi dibuka, setelah data harga terkumpul.</div>';
@@ -208,7 +223,7 @@ export const trainingPage = {
         ${d.recent.map((s) => `<tr data-sym="${esc(s.symbol)}" data-tf="${esc(s.tf)}"><td>${dt(s.created_t)}<small class="dim">terdeteksi ${dt(s.first_seen)}</small></td>
           <td><b>${esc(s.symbol)}</b><small class="dim">${esc(s.tf.toUpperCase())}</small></td><td>${s.direction > 0 ? 'BUY' : 'SELL'}</td>
           <td>${fmtPrice(s.entry)} / ${fmtPrice(s.stop)} / ${fmtPrice(s.target)}</td><td>${esc((STATUS[s.status] || [s.status])[0])}<small class="dim">${esc(s.reason || '')}</small></td>
-          <td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}<small class="dim">${s.qualified ? 'trade AI' : 'bayangan'}</small></td></tr>`).join('')}</tbody></table>`
+          <td class="${s.r > 0 ? 'up' : s.r < 0 ? 'down' : ''}">${rr(s.r)}<small class="dim">${s.qualified ? `trade AI${s.quality >= 0.8 ? ' · sangat ketat' : s.quality >= 0.65 ? ' · ketat' : ''}` : 'bayangan'}</small></td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Belum ada sinyal live. Sinyal baru dicatat sejak aset mulai dipantau.</div>';
     } else {
       body.innerHTML = d.upgrades.length ? `<table class="co-table tr-table"><thead><tr><th>Waktu</th><th>Aset</th><th>Versi</th><th>Win OOS sebelum → sesudah</th><th>Trade</th><th>Parameter baru</th></tr></thead><tbody>

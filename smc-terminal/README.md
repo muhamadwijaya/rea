@@ -155,6 +155,11 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
 
 - **Timestamp**: waktu bar sinyal muncul, waktu sistem pertama mendeteksinya, waktu kedaluwarsa, waktu entry terpicu,
   waktu selesai.
+- **Konfluensi SMC (opsional, dipilih tuner)**: sinyal hanya diambil bila sebelum break ada **sweep likuiditas** (ujung
+  leg menembus low/high yang sudah diketahui dan belum tersentuh, lalu close kembali ke dalam) dan/atau ada **FVG** di
+  leg yang mematahkan struktur.
+- **Manajemen posisi (opsional, dipilih tuner)**: 50% ditutup di +1R dan stop dipindah ke entry. Trade yang sempat
+  +1R lalu kembali ke entry tercatat PROFIT +0,5R; bila +1R dan stop tersentuh di bar yang sama tetap dihitung LOSS.
 - **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan), harga mencapai target lebih dulu,
   harga close menembus stop, atau kedaluwarsa (mis. 30 bar).
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
@@ -168,6 +173,9 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   ekspektasi tetap positif dan jumlah trade cukup; bila parameter grup kemudian lebih baik untuk aset itu, aset kembali
   ke parameter grup. Urutan pewarisan: upgrade aset → grup pasar → default. Diulang tiap 6 jam; panjang pivot yang
   dipakai juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
+- **Mode presisi**: NORMAL (batas bawah win rate ≥ 50%), KETAT (≥ 65%), SANGAT KETAT (≥ 80%). Mode lebih ketat hanya
+  menghitung setting dengan bukti terkuat: win rate lebih tinggi, sinyal lebih jarang. Batas bawah tiap sinyal live
+  dicap saat sinyal muncul, jadi hasil live per mode tidak dipilih setelah hasilnya diketahui.
 - **Trade terkualifikasi vs bayangan**: sinyal dihitung sebagai trade AI hanya bila parameter di baliknya sudah terbukti
   out-of-sample (cukup trade, batas bawah win rate ≥ 50%, ekspektasi positif). Sinyal lain tetap dijalankan secara virtual
   sebagai **trade bayangan** untuk belajar dan dilaporkan terpisah.
