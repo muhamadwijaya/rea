@@ -31,6 +31,9 @@ internal sealed class MainForm : Form
     private readonly Panel _track = new() { Height = 3, Width = 420, BackColor = Color.FromArgb(28, 38, 55) };
     private readonly Panel _bar = new() { Height = 3, Width = 120, BackColor = Accent };
     private readonly System.Windows.Forms.Timer _anim = new() { Interval = 16 };
+    private readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 600 };
+    private double _zoom = 1.0;
+    private bool _restoring = true;
     private WebApplication? _gateway;
     private Uri? _home;
     private bool _fullScreen;
@@ -46,9 +49,7 @@ internal sealed class MainForm : Form
         Icon = AppIcon.Create();
         MinimumSize = new Size(1100, 680);
         KeyPreview = true;
-        WindowSettings.Restore(this);
-        _windowedState = WindowState == FormWindowState.Minimized ? FormWindowState.Maximized : WindowState;
-        EnterFullScreen();
+        RestoreWindow(WindowSettings.Load());
         BuildSplash();
         Controls.Add(_web);
         Controls.Add(_splash);
@@ -56,6 +57,46 @@ internal sealed class MainForm : Form
         Shown += async (_, _) => await StartAsync();
         FormClosing += OnFormClosing;
         KeyDown += OnKeyDown;
+        // Any size / position / state change is saved automatically (debounced).
+        ResizeEnd += (_, _) => QueueSave();
+        Resize += (_, _) => QueueSave();
+        _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); SaveWindow(); };
+        _restoring = false;
+    }
+
+    private void RestoreWindow(WindowSettings.State state)
+    {
+        StartPosition = FormStartPosition.Manual;
+        Bounds = new Rectangle(state.X, state.Y, state.Width, state.Height);
+        _windowedState = state.Maximized ? FormWindowState.Maximized : FormWindowState.Normal;
+        _zoom = state.Zoom;
+        if (state.FullScreen)
+        {
+            WindowState = _windowedState;
+            EnterFullScreen();
+        }
+        else
+        {
+            WindowState = _windowedState;
+        }
+    }
+
+    private void QueueSave()
+    {
+        if (_restoring || _shuttingDown || WindowState == FormWindowState.Minimized)
+        {
+            return;
+        }
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    private void SaveWindow()
+    {
+        var bounds = WindowState == FormWindowState.Normal && !_fullScreen ? Bounds : RestoreBounds;
+        var windowed = _fullScreen ? _windowedState : WindowState;
+        WindowSettings.Save(new WindowSettings.State(bounds.X, bounds.Y, bounds.Width, bounds.Height,
+            windowed == FormWindowState.Maximized, _fullScreen, Math.Round(_zoom, 2)));
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -175,7 +216,14 @@ internal sealed class MainForm : Form
         var core = _web.CoreWebView2;
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.AreDevToolsEnabled = Environment.GetEnvironmentVariable("SMC_DEVTOOLS") == "1";
-        core.Settings.IsZoomControlEnabled = true;
+        core.Settings.IsZoomControlEnabled = true; // Ctrl + wheel, Ctrl +/-, Ctrl 0
+        _web.ZoomFactor = _zoom;
+        _web.ZoomFactorChanged += (_, _) =>
+        {
+            _zoom = _web.ZoomFactor;
+            PostZoom();
+            QueueSave();
+        };
         core.DocumentTitleChanged += (_, _) => Text = WindowTitle;
         core.WebMessageReceived += OnWebMessage;
         core.NewWindowRequested += (_, e) =>
@@ -236,11 +284,24 @@ internal sealed class MainForm : Form
                 break;
             case "ui:ready":
                 PostWindowState();
+                PostZoom();
+                break;
+            case "zoom:in":
+                _web.ZoomFactor = Math.Min(2.0, Math.Round(_web.ZoomFactor + 0.1, 2));
+                break;
+            case "zoom:out":
+                _web.ZoomFactor = Math.Max(0.5, Math.Round(_web.ZoomFactor - 0.1, 2));
+                break;
+            case "zoom:reset":
+                _web.ZoomFactor = 1.0;
                 break;
         }
     }
 
     private void PostWindowState() => _web.CoreWebView2?.PostWebMessageAsString(_fullScreen ? "fullscreen:1" : "fullscreen:0");
+
+    private void PostZoom() => _web.CoreWebView2?.PostWebMessageAsString(
+        "zoom:" + _web.ZoomFactor.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
 
     private bool IsHome(Uri uri) => _home is not null && uri.Host == _home.Host && uri.Port == _home.Port;
 
@@ -288,6 +349,7 @@ internal sealed class MainForm : Form
             EnterFullScreen();
         }
         PostWindowState();
+        QueueSave();
     }
 
     private void EnterFullScreen()
@@ -331,8 +393,9 @@ internal sealed class MainForm : Form
         {
             return;
         }
+        _saveTimer.Stop();
+        SaveWindow();
         _shuttingDown = true;
-        WindowSettings.Save(this, _fullScreen ? _windowedState : WindowState);
         Hide();
         try
         {

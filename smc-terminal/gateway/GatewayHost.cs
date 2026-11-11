@@ -61,7 +61,7 @@ public static class GatewayHost
         builder.Services.AddSingleton<CalendarStore>();
         builder.Services.AddSingleton<StatsService>();
         builder.Services.AddSingleton<SymbolNewsService>();
-        builder.Services.AddSingleton<SecretStore>();
+        builder.Services.AddSingleton<AiSettingsStore>();
         builder.Services.AddHostedService<NewsWorker>();
         builder.Services.AddHostedService<CalendarWorker>();
         builder.Services.AddHostedService<ScreenerWorker>();

@@ -55,7 +55,8 @@ export class AnalysisView {
     this.el.innerHTML = `
       <div class="an-wrap">
         <aside class="panel an-watch">
-          <div class="panel-head"><span class="diamond">◆</span> WATCHLIST <span class="right"><span class="seg watch-scope"><button data-v="core" class="active">INTI</button><button data-v="all">SEMUA</button></span></span></div>
+          <div class="panel-head"><span class="diamond">◆</span> WATCHLIST <span class="right watch-count dim"></span></div>
+          <div class="seg watch-scope"><button data-v="core" class="active">INTI</button><button data-v="all">SEMUA ASET</button></div>
           <form class="watch-form" autocomplete="off"><input class="input an-input" list="symbol-list" placeholder="cari / simbol lain…"><button class="btn" type="submit">MUAT</button></form>
           <div class="watch-list"></div>
         </aside>
@@ -126,7 +127,9 @@ export class AnalysisView {
         .sort((a, b) => (a.symbol < b.symbol ? -1 : 1))
       : rowsOf(this.store.screener, this.cfg.key).map((r) => ({ symbol: r.instrument.symbol, name: r.instrument.name, price: r.error ? null : r.price,
         changePct: r.changePct, decimals: r.instrument.decimals, dot: r.error ? '' : r.direction }));
-    const shown = (q ? rows.filter((r) => r.symbol.includes(q) || (r.name || '').toUpperCase().includes(q)) : rows).slice(0, 400);
+    const matched = q ? rows.filter((r) => r.symbol.includes(q) || (r.name || '').toUpperCase().includes(q)) : rows;
+    const shown = matched.slice(0, 400);
+    this.$('.watch-count').textContent = `${matched.length}${matched.length > shown.length ? ` · ${shown.length} tampil` : ''}`;
     this.$('.watch-list').innerHTML = shown.length ? shown.map((r) => `
       <div class="watch-row ${r.symbol === active ? 'active' : ''}" data-sym="${esc(r.symbol)}" title="${esc(r.name)}">
         <span class="w-sym"><span class="w-dot" style="background:${r.dot ? dirHex(r.dot) : 'var(--dim)'}"></span>${esc(r.symbol)}</span>

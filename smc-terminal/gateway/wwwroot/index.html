@@ -51,6 +51,9 @@
       </div>
       <button class="btn-primary" data-focus-search>▶ ANALISA</button>
       <div class="winctl hidden" id="winctl">
+        <button data-zoom="out" title="Perkecil tampilan (Ctrl −)">A−</button>
+        <button data-zoom="reset" id="zoom-label" title="Ukuran normal (Ctrl 0) — tersimpan otomatis">100%</button>
+        <button data-zoom="in" title="Perbesar tampilan (Ctrl +)">A+</button>
         <button data-win="minimize" title="Minimize">─</button>
         <button data-win="toggle-fullscreen" title="Layar penuh / jendela (F11)" id="win-fs">❐</button>
         <button data-win="close" class="close" title="Keluar">✕</button>
@@ -84,7 +87,7 @@
         </div>
 
         <div class="panel orbs-panel">
-          <div class="panel-head"><span class="diamond">◆</span> MARKET ORBS <span class="sub">· tiap jarum = 1 aset · panjang = besar perubahan hari ini · warna = arah · tag berita mengambang 3 menit</span><span class="right"><span class="time" id="orbs-status"></span></span></div>
+          <div class="panel-head"><span class="diamond">◆</span> MARKET ORBS <span class="sub">3D · 1 filamen = 1 aset · panjang = besar gerak hari ini · <span class="up">emas naik</span> · <span class="down">biru turun</span> · seret = putar · tag berita 3 mnt</span><span class="right"><span class="time" id="orbs-status"></span></span></div>
           <div class="orbs-stage" id="orbs-stage"><canvas></canvas><div class="orb-heads"></div><div class="orb-tip hover-tip"></div></div>
         </div>
 

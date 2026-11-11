@@ -372,8 +372,11 @@ function desktopIntegration() {
   host.addEventListener('message', (e) => {
     if (e.data === 'fullscreen:1') { $('#win-fs').textContent = '❐'; $('#win-fs').title = 'Mode jendela (F11)'; }
     if (e.data === 'fullscreen:0') { $('#win-fs').textContent = '⛶'; $('#win-fs').title = 'Layar penuh (F11)'; }
+    if (typeof e.data === 'string' && e.data.startsWith('zoom:')) $('#zoom-label').textContent = `${Math.round(parseFloat(e.data.slice(5)) * 100)}%`;
   });
   $('#winctl').addEventListener('click', (e) => {
+    const z = e.target.closest('[data-zoom]');
+    if (z) { send(`zoom:${z.dataset.zoom}`); return; }
     const b = e.target.closest('[data-win]');
     if (!b) return;
     if (b.dataset.win === 'close') confirmExit().then((ok) => ok && send('window:close'));

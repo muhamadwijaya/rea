@@ -13,6 +13,7 @@ is bad for USDJPY. Matching is deliberately conservative:
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -30,7 +31,12 @@ TICKER_STOP = {
     "Q1", "Q2", "Q3", "Q4", "H1", "H2", "YOY", "MOM", "QOQ", "EPS", "AND", "THE", "NOT", "BUT", "WAS", "HAD", "WHO",
     "OJK", "BEI", "BI", "IDX", "RI", "PT", "TBK", "DPR", "APBN", "BUMN", "PHK", "IHSG", "USD", "IDR", "EUR", "JPY", "GBP",
     "CNY", "WTI", "LNG", "EV", "EVS", "AR", "VR", "TV", "PC", "API", "CHIP", "DATA", "BANK", "MAN", "MEN", "WAR", "LAW",
+    "MSCI", "FTSE", "STOXX",  # index providers: headlines are about index reviews, not the listed company
 }
+
+# A first word shared by this many instrument names (e.g. "Teknologi", "Nusantara", "Mitra") is a common word,
+# not a distinctive company name.
+GENERIC_NAME_WORD = 3
 
 # Generic words that are not distinctive enough as a one-word company name.
 NAME_STOP = {
@@ -95,6 +101,8 @@ def _indexes() -> tuple[dict[str, list], dict[str, tuple[str, int, bool]], int]:
     """(ticker -> instruments, lower-cased phrase -> (symbol, sign, needs capital), longest phrase in words)."""
     tickers: dict[str, list] = {}
     phrases: dict[str, tuple[str, int, bool]] = {}
+    named = [i for i in instruments.universe() if i.asset_class in ("us", "idx", "crypto")]
+    word_use = Counter(w for i in named for w in {x.lower() for x in _clean_name(i.name).split()})
     for inst in instruments.universe():
         code = inst.symbol
         if inst.asset_class == "crypto":
@@ -110,7 +118,8 @@ def _indexes() -> tuple[dict[str, list], dict[str, tuple[str, int, bool]], int]:
             if len(words) >= 2 and len(clean) >= 8:
                 phrases.setdefault(clean.lower(), (inst.symbol, 1, True))
             first = words[0]
-            if len(first) >= 5 and first.lower() not in NAME_STOP and first[0].isupper():
+            if (len(first) >= 5 and first.lower() not in NAME_STOP and first[0].isupper()
+                    and word_use[first.lower()] < GENERIC_NAME_WORD):
                 phrases.setdefault(first.lower(), (inst.symbol, 1, True))
     for alias, (symbol, sign) in CURATED.items():
         phrases[alias.lower()] = (symbol, sign, False)
@@ -133,6 +142,8 @@ def tag(text: str, lang: str = "en", category: str = "") -> list[Tag]:
     prefer_idx = lang == "id" or category == "idx"
     found: dict[str, Tag] = {}
 
+    alias_fx: set[str] = set()  # currencies named by a curated alias ("euro"), not by an explicit pair
+
     def add(symbol: str, sign: int) -> None:
         inst = instruments.find(symbol)
         if inst and symbol not in found and len(found) < MAX_TAGS:
@@ -154,6 +165,8 @@ def tag(text: str, lang: str = "en", category: str = "") -> list[Tag]:
             phrase = " ".join(w.rstrip(".,'") for w in words[i:i + size])
             hit = phrases.get(phrase.lower())
             if hit and (not hit[2] or phrase[:1].isupper()):
+                if not hit[2] and hit[0] not in found:
+                    alias_fx.add(hit[0])
                 add(hit[0], hit[1])
                 for j in range(i, i + size):
                     used[j] = True
@@ -164,4 +177,10 @@ def tag(text: str, lang: str = "en", category: str = "") -> list[Tag]:
         candidates = tickers.get(token)
         if candidates:
             add(_pick(candidates, prefer_idx).symbol, 1)
+    # "Bitcoin price in euro": the currency is only the quote unit of a crypto headline.
+    if any(t.market == "kripto" for t in found.values()):
+        for symbol in alias_fx:
+            inst = instruments.find(symbol)
+            if symbol in found and inst and (inst.asset_class == "forex" or symbol == "DXY"):
+                del found[symbol]
     return list(found.values())

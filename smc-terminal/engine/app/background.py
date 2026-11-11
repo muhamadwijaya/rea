@@ -20,7 +20,7 @@ log = logging.getLogger("smc.background")
 
 QUOTE_CHUNK = 150
 QUOTE_INTERVAL = 120  # seconds between the starts of two full quote sweeps
-SCAN_INTERVAL = 20 * 60  # seconds between full-universe 1D scans
+SCAN_INTERVAL = {"1d": 20 * 60, "4h": 40 * 60}  # seconds between full-universe scans per timeframe
 
 
 @dataclass
@@ -45,8 +45,8 @@ class QuoteBook:
 
 _quotes = QuoteBook()
 _quotes_lock = threading.Lock()
-_scan: dict[str, dict] = {}
-_scan_progress = Progress()
+_scan: dict[tuple[str, str], dict] = {}
+_scan_progress: dict[str, Progress] = {"1d": Progress(), "4h": Progress()}
 _scan_lock = threading.Lock()
 
 
@@ -129,39 +129,40 @@ def quotes(market: str = "all") -> dict:
     return {"market": market, "generatedAt": int(time.time()), "sweeps": sweeps, "progress": progress, "count": len(rows), "rows": rows}
 
 
-def _scan_universe() -> None:
+def _scan_universe(tf: str) -> None:
     markets = instruments.MARKETS
     progress = Progress(total=len(markets), started=time.time())
     with _scan_lock:
-        global _scan_progress
-        _scan_progress = progress
+        _scan_progress[tf] = progress
     for market in markets:
         try:
-            snap = screener.screen(market, "1d", scope="all")
+            snap = screener.screen(market, tf, scope="all")
             with _scan_lock:
-                _scan[market] = snap
+                _scan[(market, tf)] = snap
         except Exception as exc:  # one failing market must not stop the others
             progress.error = f"{market}: {exc}"[:200]
-            log.exception("universe scan %s failed", market)
+            log.exception("universe scan %s %s failed", market, tf)
         progress.done += 1
     progress.finished = time.time()
-    log.info("universe 1D scan finished in %.0fs", progress.finished - progress.started)
+    log.info("universe %s scan finished in %.0fs", tf, progress.finished - progress.started)
 
 
-def universe_screen(market: str) -> dict:
+def universe_screen(market: str, tf: str = "1d") -> dict:
+    tf = "4h" if tf == "4h" else "1d"
+    warming = {"market": market, "tf": tf, "scope": "all", "status": "warming", "rows": []}
     with _scan_lock:
-        progress = _scan_progress.to_json()
+        progress = _scan_progress[tf].to_json()
         if market == "all":
-            parts = [_scan[m] for m in instruments.MARKETS if m in _scan]
+            parts = [_scan[(m, tf)] for m in instruments.MARKETS if (m, tf) in _scan]
             if not parts:
-                return {"market": market, "tf": "1d", "scope": "all", "status": "warming", "progress": progress, "rows": []}
+                return {**warming, "progress": progress}
             rows = [r for p in parts for r in p["rows"]]
-            return {"market": market, "tf": "1d", "scope": "all", "status": "ready", "progress": progress,
+            return {"market": market, "tf": tf, "scope": "all", "status": "ready", "progress": progress,
                     "generatedAt": min(p["generatedAt"] for p in parts), "count": len(rows), "rows": rows,
                     "failures": sum(p["failures"] for p in parts), "elapsedMs": sum(p["elapsedMs"] for p in parts)}
-        snap = _scan.get(market)
+        snap = _scan.get((market, tf))
     if snap is None:
-        return {"market": market, "tf": "1d", "scope": "all", "status": "warming", "progress": progress, "rows": []}
+        return {**warming, "progress": progress}
     return {**snap, "status": "ready", "progress": progress}
 
 
@@ -186,5 +187,6 @@ def start() -> None:
         return
     _started = True
     threading.Thread(target=_loop, args=("quotes", _sweep_quotes, QUOTE_INTERVAL, 2), daemon=True, name="quotes").start()
-    # The core 4H screener runs first (requested by the gateway at boot); the universe scan follows.
-    threading.Thread(target=_loop, args=("universe-scan", _scan_universe, SCAN_INTERVAL, 45), daemon=True, name="scan").start()
+    # The core 4H screener runs first (requested by the gateway at boot); the universe scans follow.
+    threading.Thread(target=_loop, args=("scan-1d", lambda: _scan_universe("1d"), SCAN_INTERVAL["1d"], 45), daemon=True, name="scan-1d").start()
+    threading.Thread(target=_loop, args=("scan-4h", lambda: _scan_universe("4h"), SCAN_INTERVAL["4h"], 200), daemon=True, name="scan-4h").start()

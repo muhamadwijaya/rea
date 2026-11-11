@@ -72,51 +72,50 @@ internal static class AppIcon
     }
 }
 
-/// <summary>Remembers window position/size between runs (%LOCALAPPDATA%\SMCTerminal\window.json).</summary>
+/// <summary>
+/// Remembers the window between runs (%LOCALAPPDATA%\SMCTerminal\window.json): windowed bounds,
+/// maximized, full screen and the UI zoom. Saved on every change, so a crash does not lose it.
+/// </summary>
 internal static class WindowSettings
 {
-    private sealed record State(int X, int Y, int Width, int Height, bool Maximized);
+    public sealed record State(int X, int Y, int Width, int Height, bool Maximized, bool FullScreen = true, double Zoom = 1.0);
 
     private static string FilePath => Path.Combine(MainForm.DataDirectory, "window.json");
 
-    public static void Restore(Form form)
+    public static State Load()
     {
-        form.StartPosition = FormStartPosition.Manual;
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1600, 900);
-        form.Bounds = new Rectangle(area.X + 40, area.Y + 30, Math.Min(1600, area.Width - 80), Math.Min(950, area.Height - 60));
-        form.WindowState = FormWindowState.Maximized;
+        var fallback = new State(area.X + 40, area.Y + 30, Math.Min(1600, area.Width - 80), Math.Min(950, area.Height - 60), true);
         try
         {
             if (!File.Exists(FilePath))
             {
-                return;
+                return fallback;
             }
             var s = JsonSerializer.Deserialize<State>(File.ReadAllText(FilePath));
             if (s is null)
             {
-                return;
+                return fallback;
             }
             var bounds = new Rectangle(s.X, s.Y, s.Width, s.Height);
-            if (Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(bounds)) && s.Width >= 800 && s.Height >= 500)
+            var visible = Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(bounds)) && s.Width >= 800 && s.Height >= 500;
+            return (visible ? s : s with { X = fallback.X, Y = fallback.Y, Width = fallback.Width, Height = fallback.Height }) with
             {
-                form.Bounds = bounds;
-            }
-            form.WindowState = s.Maximized ? FormWindowState.Maximized : FormWindowState.Normal;
+                Zoom = Math.Clamp(s.Zoom <= 0 ? 1.0 : s.Zoom, 0.5, 2.0),
+            };
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            // fall back to defaults
+            return fallback;
         }
     }
 
-    /// <summary>Saves the windowed (non full-screen) placement; <paramref name="windowedState"/> is the state to restore to.</summary>
-    public static void Save(Form form, FormWindowState windowedState)
+    public static void Save(State state)
     {
         try
         {
-            var b = form.WindowState == FormWindowState.Normal && form.FormBorderStyle != FormBorderStyle.None ? form.Bounds : form.RestoreBounds;
             Directory.CreateDirectory(MainForm.DataDirectory);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(new State(b.X, b.Y, b.Width, b.Height, windowedState == FormWindowState.Maximized)));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(state));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

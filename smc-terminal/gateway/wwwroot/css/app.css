@@ -114,6 +114,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
 .winctl button:last-child { border-right: none; }
 .winctl button:hover { color: var(--text); background: var(--panel-3); }
 .winctl button.close:hover { background: var(--bear); color: #fff; }
+.winctl button[data-zoom] { width: auto; padding: 0 8px; font-size: 10.5px; }
 
 /* ------------------------------------------------------------------ live feed */
 .livefeed { flex: 0 0 auto; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--bg-2); height: 28px; overflow: hidden; }
@@ -556,6 +557,14 @@ table.data td.r, table.data th.r { text-align: right; }
 .conf-bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
 .conf-bar i { display: block; height: 100%; }
 .ai-settings summary { cursor: pointer; color: var(--muted); font-size: 10.5px; letter-spacing: .12em; }
+.ai-settings > .toolbar, .ai-settings > .seg { margin-top: 8px; }
+.ai-settings .seg { display: inline-flex; flex-wrap: wrap; }
+.ai-settings select.input { font-size: 11px; }
+.ai-tries { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 8px; font-size: 10.5px; color: var(--muted); }
+.ai-tries span { border: 1px solid var(--line-2); border-radius: 3px; padding: 1px 6px; }
+.ai-tries span.ok { color: var(--bull); border-color: var(--bull); }
+.ai-tries span.fail { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(255,255,255,.25); }
+.ai-tries i { font-style: normal; color: var(--muted); }
 .btn-primary:disabled { opacity: .5; cursor: wait; }
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
@@ -564,11 +573,21 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .checks-panel .engine-left { flex: 1; }
 .orbs-panel { display: flex; flex-direction: column; min-height: 0; }
 .orbs-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.orbs-stage canvas { position: absolute; inset: 0; }
+.orbs-stage { background: radial-gradient(ellipse at 50% 45%, #0c1326 0%, #070b14 70%); }
+.orbs-stage canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+.orbs-panel .up { color: #f5c04e; }
+.orbs-panel .down { color: #55acff; }
+.orbs-panel .flat { color: #9aa7bd; }
 .orb-heads { position: absolute; inset: 0; pointer-events: none; }
 .orb-head { position: absolute; font-size: 10.5px; color: var(--text-2); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .orb-head b[data-go] { pointer-events: auto; cursor: pointer; letter-spacing: .12em; color: var(--accent-2); }
 .orb-news { font-size: 10px; color: var(--muted); letter-spacing: .06em; }
 .orb-tip { position: absolute; pointer-events: none; background: var(--panel-3); border: 1px solid var(--line-2); padding: 7px 9px; font-size: 11px; border-radius: 3px; box-shadow: var(--shadow); display: none; z-index: 3; line-height: 1.55; max-width: 260px; }
 .verdict-stack { gap: 5px; padding: 6px; display: flex; flex-direction: column; }
-.watch-scope button { padding: 2px 7px; font-size: 9.5px; }
+.watch-scope { display: flex; margin: 7px 7px 0; }
+.watch-scope button { flex: 1; padding: 4px 0; font-size: 10px; letter-spacing: .1em; }
+.watch-count { font-size: 10px; letter-spacing: .06em; }
+.scr-bar { padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.scr-conds .chip { font-size: 10px; padding: 2px 8px; letter-spacing: .04em; }
+.orbs-panel .panel-head { white-space: nowrap; }
+.orbs-panel .panel-head .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

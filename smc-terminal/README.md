@@ -29,7 +29,10 @@ di belakang aplikasi dan ikut berhenti saat jendela ditutup.
 Setiap kali dibuka, aplikasi tampil **layar penuh** (tanpa title bar/tombol close Windows) dan menampilkan
 **loading screen** berisi tahapan — gateway, koneksi realtime, engine Python, data harga & screener, arah
 market, berita, kalender — sampai semuanya siap. Kontrol jendela ada di pojok kanan atas aplikasi:
-**─** minimize, **❐** mode jendela/layar penuh (juga **F11**), **✕** keluar. **F5** memuat ulang tampilan.
+**A− / 100% / A+** ukuran tampilan (juga **Ctrl −**, **Ctrl 0**, **Ctrl +** atau Ctrl + scroll), **─** minimize,
+**❐** mode jendela/layar penuh (juga **F11**), **✕** keluar. **F5** memuat ulang tampilan. Ukuran tampilan, ukuran &
+posisi jendela, dan mode layar penuh **tersimpan otomatis** (`%LOCALAPPDATA%\SMCTerminal\window.json`) sehingga
+sama persis saat aplikasi dibuka lagi.
 Tautan berita dibuka di browser default.
 
 Aplikasi desktop memakai **Microsoft Edge WebView2 Runtime** (sudah ada di Windows 10/11). Bila belum
@@ -46,12 +49,12 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 
 | Halaman | Isi |
 | --- | --- |
-| **Dashboard** | KPI, pencarian, lima cek SMC, **market orbs** (satu orb per pasar, tiap jarum = 1 aset dari universe penuh, label open → harga sekarang & %, hover/klik aset, tag berita mengambang 3 menit dengan sentimen naik/netral/turun + tally "condong ke mana" 60 menit), tab ARAH · SINYAL · ALERT · VERDICT · ANALISA |
+| **Dashboard** | KPI, pencarian, lima cek SMC, **market orbs 3D** (satu bola per pasar, tiap filamen = 1 aset dari universe penuh tersebar di permukaan bola; panjang = besar gerak hari ini, **emas = naik, biru = turun**; berputar pelan dengan perspektif & kedalaman, bisa diseret untuk memutar; label open → harga sekarang & % untuk aset teratas yang menghadap layar, hover/klik aset, tag berita mengambang 3 menit dengan sentimen naik/netral/turun + tally "condong ke mana" 60 menit), tab ARAH · SINYAL · ALERT · VERDICT · ANALISA |
 | **Forex** · **Saham AS** · **Saham IDX** · **Kripto** | Tiap pasar punya 4 sub-tab sendiri ↓ |
 | ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP; layer lewat menu LAYER SMC) atau chart TradingView live / split; panel kanan bertab BIAS · MTF · PLAN · NARASI · LEVEL · TV · BERITA |
-| ↳ Screener | Tab SMC SCREENER (filter bias, TF 1H/4H/1D, sortir) · tab TRADINGVIEW SCREENER realtime pasar itu |
+| ↳ Screener | Tab SMC SCREENER: **SEMUA ASET 1D / SEMUA ASET 4H** (seluruh universe pasar itu) atau aset inti 1H/4H/1D; filter kondisi SMC (CHoCH/BOS baru ≤ 3 bar, swing bullish/bearish, swing = internal, harga di OB, zona discount/premium, FVG terbuka, RSI ≤ 30 / ≥ 70), bias, sektor, cari, sortir · tab TRADINGVIEW SCREENER realtime pasar itu |
 | ↳ Berita | Berita realtime khusus pasar itu (push SignalR), sentimen per aset, filter, TradingView News pasar itu, status sumber |
-| ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI Claude** (opsional, butuh API key) |
+| ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI** (OpenRouter model gratis dengan rotasi otomatis, Claude, atau API lain) |
 | ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
@@ -59,15 +62,23 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 **Aset**: 57 aset inti (`config/watchlist.json`, dipindai SMC 1H/4H/1D) + **universe ±1.600 aset**
 (`config/universe.json`): seluruh S&P 500 + saham AS populer & ETF, seluruh saham BEI yang tersedia di Yahoo
 (±880), ±80 kripto teratas (identitas ticker dicek dengan harga CoinGecko), 44 pair forex mayor/cross/eksotis
-dan komoditas. Universe dipindai SMC 1D tiap 20 menit dan harga open/last-nya diperbarui bergiliran tiap ±2
-menit. Perbarui daftar dengan `python engine/tools/build_universe.py` (butuh `engine/tools/requirements.txt`).
+dan komoditas. Seluruh universe dipindai SMC **1D tiap 20 menit dan 4H tiap 40 menit** (±1,5–2 menit per sapuan),
+dan harga open/last-nya diperbarui bergiliran tiap ±2 menit. Perbarui daftar dengan `python engine/tools/build_universe.py` (butuh `engine/tools/requirements.txt`).
 Berita dari 28 sumber RSS dibagi per pasar dan ditautkan ke aset (ticker, nama perusahaan/koin, alias mata uang).
 
-**Analisa AI (opsional)**: buka FUNDAMENTAL & AI › Pengaturan AI, masukkan Anthropic API key (disimpan lokal,
-terenkripsi DPAPI di Windows) atau set `ANTHROPIC_API_KEY`. Model: `claude-opus-5-5` dengan fallback server-side
-otomatis bila permintaan ditolak. Setiap analisa memakai kuota akun Anthropic Anda. Keyakinan yang ditampilkan
-adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di pasar; karena itu
-aplikasi menampilkan akurasi nyata model aturan yang diverifikasi dengan reaksi harga setelah rilis data.
+**Analisa AI (opsional)**: buka FUNDAMENTAL & AI › Pengaturan AI, pilih provider dan masukkan API key-nya
+(disimpan lokal, terenkripsi DPAPI di Windows, tidak pernah dikirim ke browser):
+
+| Provider | Keterangan |
+| --- | --- |
+| **OpenRouter** (default) | Key gratis dari <https://openrouter.ai/keys> (`sk-or-…`, atau `OPENROUTER_API_KEY`). Hanya model **gratis** yang dipakai, diambil otomatis dari katalog OpenRouter (model teks ≥ 32K konteks, ukuran kecil dilewati, model yang mendukung JSON ketat diutamakan, `openrouter/free` paling akhir). Bila model sedang dibatasi (429), tidak tersedia, terlalu lama, atau jawabannya tidak valid, model itu dijeda dan aplikasi **otomatis pindah ke model gratis berikutnya** (maks. 6 percobaan / ±200 detik); model yang terakhir berhasil dipakai lebih dulu. Bila kuota harian model gratis akun Anda habis, aplikasi berhenti dan memberi tahu kapan kuota pulih. Bisa juga dikunci ke satu model tertentu. |
+| **Anthropic Claude** | Key `sk-ant-…` (atau `ANTHROPIC_API_KEY`); model `claude-opus-5-5` dengan fallback server-side. Memakai kuota/biaya akun Anthropic Anda. |
+| **API lain** | Endpoint apa pun yang kompatibel OpenAI `/chat/completions` (Groq, Together, DeepSeek, LM Studio/Ollama lokal, dll.): isi base URL, nama model dan key bila perlu (atau `AI_CUSTOM_API_KEY`). |
+
+Semua provider menerima fakta yang sama dari engine dan jawabannya divalidasi ke format yang sama sebelum ditampilkan
+(arah, keyakinan, pendorong, risiko, level kunci, invalidasi); hasil menampilkan model yang menjawab dan model yang
+dilewati. Keyakinan adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di
+pasar; karena itu aplikasi menampilkan akurasi nyata model aturan yang diverifikasi dengan reaksi harga setelah rilis data.
 
 ## Arsitektur
 
@@ -87,7 +98,9 @@ Engine Python — FastAPI (engine/)
    • data OHLC Yahoo Finance (yfinance) + cache TTL, unduhan batch
    • engine SMC (smc.py), skor bias, skenario & narasi (analysis.py)
    • screener per pasar (screener.py), arah market & kekuatan mata uang (direction.py)
-   • sentimen headline EN/ID + tag aset (sentiment.py)
+   • sentimen headline EN/ID + tag aset (sentiment.py, tagger.py), fundamental & outlook
+   • pemindaian universe 1D/4H & harga seluruh aset di background (background.py)
+   • analisa AI multi-provider (app/ai/: OpenRouter rotasi model gratis, Claude, OpenAI-compatible)
 ```
 
 ## Konfigurasi
@@ -112,10 +125,12 @@ Engine Python — FastAPI (engine/)
 | `GET /api/news?market=kripto&category=&sentiment=&q=&limit=` | Berita per pasar (terbaru dulu) |
 | `GET /api/news/sentiment?market=forex` | Ringkasan sentimen 12 jam per pasar |
 | `GET /api/quotes?market=all` | Open / last / % seluruh universe |
-| `GET /api/screener?market=saham-idx&scope=all` | SMC 1D seluruh aset suatu pasar |
+| `GET /api/screener?market=saham-idx&scope=all&tf=1d` | SMC seluruh aset suatu pasar (`tf`: 1d atau 4h) |
 | `GET /api/fundamental` | Rilis data + prediksi + reaksi nyata + akurasi |
 | `GET /api/outlook?symbols=EURUSD,NVDA` | Outlook gabungan SMC + fundamental + berita |
-| `POST /api/ai/analyze` `{"symbol":"EURUSD"}` | Analisa AI Claude (butuh API key) |
+| `POST /api/ai/analyze` `{"symbol":"EURUSD"}` | Analisa AI dengan provider terpilih (butuh API key) |
+| `GET /api/ai/models` | Model gratis OpenRouter yang dipakai, urutan & status jeda |
+| `GET/POST/DELETE /api/settings/ai` | Provider, model, base URL & key AI (key tidak pernah dikembalikan) |
 | `GET /api/symbol-news?symbol=AAPL` | Berita per simbol |
 | `GET /api/calendar` · `/api/alerts` · `/api/stats` · `/api/health` | Kalender, alert, KPI, status |
 

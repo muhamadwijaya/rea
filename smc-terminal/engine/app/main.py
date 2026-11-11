@@ -87,7 +87,7 @@ def screen(market: str = "all", tf: str = "4h", scope: str = "core") -> dict:
     if scope == "all":
         # Full universe: served from the background 1D scan (never blocks on hundreds of downloads).
         instruments.by_market(market, "all")
-        return background.universe_screen(market)
+        return background.universe_screen(market, tf)
     return screener.screen(market, tf)
 
 
@@ -143,8 +143,17 @@ def asset_outlook(body: OutlookRequest) -> dict:
 class AiRequest(BaseModel):
     symbol: str
     news: list[dict] = Field(default_factory=list, max_length=200)
+    provider: str = "openrouter"
+    model: str | None = Field(default=None, max_length=200)
+    baseUrl: str | None = Field(default=None, max_length=500)
 
 
 @app.post("/ai/analyze")
-def ai_analyze(body: AiRequest, x_anthropic_key: str | None = Header(default=None)) -> dict:
-    return ai.analyze(body.symbol, body.news, x_anthropic_key)
+def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> dict:
+    """Key arrives in the X-AI-Key header (never in the body, never logged)."""
+    return ai.analyze(body.symbol, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
+
+
+@app.get("/ai/models")
+def ai_models(provider: str = "openrouter") -> dict:
+    return ai.models(provider)

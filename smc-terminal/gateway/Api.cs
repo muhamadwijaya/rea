@@ -52,7 +52,8 @@ public static class Api
             if (scope == "all")
             {
                 // Full universe (1D) is scanned in the engine's background job and served from its cache.
-                var universe = await engine.GetAsync($"screener?market={market}&tf=1d&scope=all", ct);
+                var utf = tf == "4h" ? "4h" : "1d";
+                var universe = await engine.GetAsync($"screener?market={market}&tf={utf}&scope=all", ct);
                 return Results.Content(universe.Body, "application/json", statusCode: universe.Status);
             }
             // The worker keeps the default snapshot warm; other combinations go straight to the engine cache.
@@ -170,43 +171,142 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapPost("/ai/analyze", async (AiRequest body, NewsStore news, SecretStore secrets, EngineClient engine, CancellationToken ct) =>
+        api.MapPost("/ai/analyze", async (AiRequest body, NewsStore news, AiSettingsStore settings, EngineClient engine, CancellationToken ct) =>
         {
             var items = news.Query(null, null, null, null, null, 25, 0, DateTimeOffset.UtcNow.AddHours(-48), body.Symbol);
-            var headers = secrets.AnthropicKey is { } key ? new Dictionary<string, string> { ["X-Anthropic-Key"] = key } : null;
-            var response = await engine.PostJsonAsync("ai/analyze", new { symbol = body.Symbol, news = items }, ct, headers);
+            var options = settings.Options;
+            // The key travels only in a header to the local engine; without one the engine falls back to the provider's env var.
+            var headers = settings.GetKey(options.Provider) is { } key ? new Dictionary<string, string> { ["X-AI-Key"] = key } : null;
+            var response = await engine.PostJsonAsync("ai/analyze", new
+            {
+                symbol = body.Symbol,
+                news = items,
+                provider = options.Provider,
+                model = options.ActiveModel,
+                baseUrl = options.Provider == "custom" ? options.CustomBaseUrl : null,
+            }, ct, headers);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/settings/ai", (SecretStore secrets) => Results.Json(new
+        api.MapGet("/ai/models", async (EngineClient engine, CancellationToken ct) =>
         {
-            configured = secrets.AnthropicKey is not null || SecretStore.EnvironmentKeyPresent,
-            source = secrets.AnthropicKey is not null ? "saved" : SecretStore.EnvironmentKeyPresent ? "environment" : null,
-            encrypted = OperatingSystem.IsWindows(),
-            model = "claude-opus-5-5",
-        }));
-
-        api.MapPost("/settings/ai", (AiKeyRequest body, SecretStore secrets) =>
-        {
-            var key = body.ApiKey?.Trim() ?? "";
-            if (!key.StartsWith("sk-ant-", StringComparison.Ordinal) || key.Length < 20 || key.Any(char.IsWhiteSpace))
-            {
-                return Results.BadRequest(new { error = "invalid_key", message = "Format API key tidak dikenali (harus diawali sk-ant-)." });
-            }
-            secrets.SaveAnthropicKey(key);
-            return Results.Json(new { configured = true, source = "saved" });
+            var response = await engine.GetAsync("ai/models?provider=openrouter", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapDelete("/settings/ai", (SecretStore secrets) =>
+        api.MapGet("/settings/ai", (AiSettingsStore settings) => Results.Json(AiSettingsView(settings)));
+
+        api.MapPost("/settings/ai", (AiSettingsRequest body, AiSettingsStore settings) =>
         {
-            secrets.DeleteAnthropicKey();
-            return Results.Json(new { configured = SecretStore.EnvironmentKeyPresent });
+            var current = settings.Options;
+            var provider = body.Provider?.Trim().ToLowerInvariant() ?? current.Provider;
+            if (!AiSettingsStore.IsProvider(provider))
+            {
+                return Results.BadRequest(new { error = "invalid_provider", message = "Provider AI tidak dikenal." });
+            }
+            var next = current with
+            {
+                Provider = provider,
+                OpenRouterModel = body.OpenRouterModel?.Trim() is { Length: > 0 } m ? m : current.OpenRouterModel,
+                CustomBaseUrl = body.CustomBaseUrl?.Trim().TrimEnd('/') ?? current.CustomBaseUrl,
+                CustomModel = body.CustomModel?.Trim() ?? current.CustomModel,
+            };
+            if (InvalidOption(next) is { } optionError)
+            {
+                return Results.BadRequest(new { error = "invalid_option", message = optionError });
+            }
+            var keyProvider = body.KeyProvider?.Trim().ToLowerInvariant() ?? provider;
+            if (!string.IsNullOrWhiteSpace(body.ApiKey))
+            {
+                if (!AiSettingsStore.IsProvider(keyProvider))
+                {
+                    return Results.BadRequest(new { error = "invalid_provider", message = "Provider AI tidak dikenal." });
+                }
+                if (InvalidKey(keyProvider, body.ApiKey.Trim()) is { } keyError)
+                {
+                    return Results.BadRequest(new { error = "invalid_key", message = keyError });
+                }
+                settings.SaveKey(keyProvider, body.ApiKey.Trim());
+            }
+            if (next != current)
+            {
+                settings.SaveOptions(next);
+            }
+            return Results.Json(AiSettingsView(settings));
+        });
+
+        api.MapDelete("/settings/ai", (string? provider, AiSettingsStore settings) =>
+        {
+            var target = provider?.Trim().ToLowerInvariant() ?? settings.Options.Provider;
+            if (!AiSettingsStore.IsProvider(target))
+            {
+                return Results.BadRequest(new { error = "invalid_provider", message = "Provider AI tidak dikenal." });
+            }
+            settings.DeleteKey(target);
+            return Results.Json(AiSettingsView(settings));
         });
     }
 
     public sealed record AiRequest(string Symbol);
 
-    public sealed record AiKeyRequest(string? ApiKey);
+    public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
+
+    /// <summary>Settings as shown to the browser: which keys exist and where from, never the keys themselves.</summary>
+    private static object AiSettingsView(AiSettingsStore settings)
+    {
+        var options = settings.Options;
+        var providers = AiSettingsStore.Providers.Select(p =>
+        {
+            var saved = settings.GetKey(p.Key) is not null;
+            var env = AiSettingsStore.EnvironmentKeyPresent(p.Key);
+            return new
+            {
+                id = p.Key,
+                name = p.Value.Name,
+                envVar = p.Value.EnvVar,
+                configured = saved || env || p.Key == "custom" && options.CustomBaseUrl.Length > 0,
+                source = saved ? "saved" : env ? "environment" : null,
+            };
+        }).ToList();
+        return new
+        {
+            provider = options.Provider,
+            configured = providers.First(p => p.id == options.Provider).configured,
+            providers,
+            options = new { openrouterModel = options.OpenRouterModel, customBaseUrl = options.CustomBaseUrl, customModel = options.CustomModel },
+            encrypted = OperatingSystem.IsWindows(),
+            anthropicModel = "claude-opus-5-5",
+        };
+    }
+
+    private static string? InvalidKey(string provider, string key)
+    {
+        if (key.Length > 500 || key.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)))
+        {
+            return "Format API key tidak valid.";
+        }
+        return provider switch
+        {
+            "openrouter" when !key.StartsWith("sk-or-", StringComparison.Ordinal) || key.Length < 20 => "Format API key OpenRouter tidak dikenali (harus diawali sk-or-).",
+            "anthropic" when !key.StartsWith("sk-ant-", StringComparison.Ordinal) || key.Length < 20 => "Format API key Anthropic tidak dikenali (harus diawali sk-ant-).",
+            "custom" when key.Length < 8 => "API key terlalu pendek.",
+            _ => null,
+        };
+    }
+
+    private static string? InvalidOption(AiOptions options)
+    {
+        static bool BadModel(string m) => m.Length > 200 || m.Any(c => char.IsWhiteSpace(c) || char.IsControl(c));
+        if (BadModel(options.OpenRouterModel) || BadModel(options.CustomModel))
+        {
+            return "Nama model tidak valid.";
+        }
+        if (options.CustomBaseUrl.Length > 0 && (!Uri.TryCreate(options.CustomBaseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")))
+        {
+            return "Base URL harus alamat http(s) lengkap, mis. https://api.example.com/v1.";
+        }
+        return null;
+    }
 
     private static AnalysisRecord? ToRecord(string body)
     {

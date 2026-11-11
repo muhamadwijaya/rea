@@ -1,5 +1,5 @@
 // FUNDAMENTAL & AI view of one market page: economic releases with actual vs forecast, the rule model's
-// call and the real 60-minute reaction, measured accuracy, combined asset outlook, and the Claude panel.
+// call and the real 60-minute reaction, measured accuracy, combined asset outlook, and the AI panel.
 import { api, esc, on, badge, dirHex, fmtScore, fmtTime, timeAgo, arrow } from './util.js';
 import { rowsOf } from './markets.js';
 import { mountAiPanel } from './ai-panel.js';
@@ -34,7 +34,7 @@ export class FundamentalView {
           <div class="pane" data-t="akurasi"><div class="panel-body fd-acc"></div></div>
         </div>
         <div class="panel col-panel">
-          <div class="panel-head"><span class="diamond">◆</span> ANALISA AI · CLAUDE <span class="right sub">opsional · butuh API key</span></div>
+          <div class="panel-head"><span class="diamond">◆</span> ANALISA AI <span class="right sub">OpenRouter gratis (rotasi otomatis) · Claude · API lain</span></div>
           <div class="panel-body fd-ai" style="overflow:auto;flex:1"></div>
         </div>
       </div>`;

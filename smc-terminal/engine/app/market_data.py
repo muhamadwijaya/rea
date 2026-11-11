@@ -41,6 +41,8 @@ TIMEFRAMES: dict[str, Timeframe] = {
     "1h": Timeframe("1h", "1H", "60m", "120d", None, 120, 12, 4),
     "4h": Timeframe("4h", "4H", "60m", "300d", "4h", 300, 10, 3),
     "1d": Timeframe("1d", "1D", "1d", "2y", None, 900, 10, 3),
+    # Lighter 4H for the full-universe scan (90 days of hourly bars per asset instead of 300).
+    "4hu": Timeframe("4hu", "4H", "60m", "90d", "4h", 1800, 10, 3),
     "1w": Timeframe("1w", "1W", "1wk", "15y", None, 3600, 8, 3),
 }
 

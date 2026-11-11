@@ -108,6 +108,13 @@ def test_sentiment_negation_and_assets():
         ("Rupiah melemah ke Rp 18.150", "id", {("USDIDR", -1)}),
         ("Bitcoin falls below $74,000", "en", {("BTCUSD", 1)}),
         ("CEO says AI spending is up", "en", set()),
+        # generic Indonesian words and index providers are not companies
+        ("Pemanfaatan Teknologi AI Ubah Cara Investor Bertransaksi Saham", "id", set()),
+        ("Gelagat Investor Asing di Saham BRPT & BRMS Jelang Review MSCI", "id", {("BRPT", 1), ("BRMS", 1)}),
+        # a currency named only as the quote unit of a crypto headline is not tagged; explicit pairs are
+        ("Bitcoin price in euro hits a record", "en", {("BTCUSD", 1)}),
+        ("EUR/USD and Bitcoin both rally", "en", {("EURUSD", 1), ("BTCUSD", 1)}),
+        ("Bitcoin and gold rally together", "en", {("BTCUSD", 1), ("XAUUSD", 1)}),
     ],
 )
 def test_tagger_maps_headlines_to_instruments(text, lang, expected):
