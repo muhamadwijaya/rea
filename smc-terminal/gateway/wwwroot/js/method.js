@@ -1,0 +1,23 @@
+// Metodologi: static explanation of every rule the engine applies.
+import { $ } from './util.js';
+
+const CARDS = [
+  ['1 · Struktur pasar (pivot)', `<p>Pivot = bar yang high-nya tertinggi (atau low-nya terendah) di jendela <code>2×N+1</code> bar. N swing / internal per timeframe: 15M 15/4 · 1H 12/4 · 4H 10/3 · 1D 10/3 · 1W 8/3. Pivot baru diketahui setelah N bar di kanannya tutup (tanpa look-ahead).</p><p>Label: <b>HH</b> higher high, <b>LH</b> lower high, <b>HL</b> higher low, <b>LL</b> lower low.</p>`],
+  ['2 · BOS & CHoCH', `<p>Saat <b>close</b> menembus pivot high/low aktif terakhir:</p><ul><li><b>BOS</b> — searah tren sebelumnya (kelanjutan).</li><li><b>CHoCH</b> — berlawanan tren (perubahan karakter / potensi reversal).</li></ul><p>Dihitung terpisah untuk struktur swing (besar) dan internal (kecil, ditandai <code>i</code>).</p>`],
+  ['3 · Order block', `<p>Setiap break membuat OB dari candle dengan low terendah (break bullish) atau high tertinggi (break bearish) antara pivot yang ditembus dan bar break. Candle > 2 ATR dipangkas ke body.</p><ul><li><b>Tapped</b> — harga kembali masuk ke OB.</li><li><b>Invalid</b> — close menembus sisi jauh OB.</li></ul>`],
+  ['4 · Fair Value Gap', `<p>Bullish FVG: <code>low[i] &gt; high[i-2]</code> dan candle tengah close di atas <code>high[i-2]</code>, ukuran ≥ 0.15 ATR. Bearish kebalikannya. Persentase terisi dilacak; FVG dianggap tertutup saat harga menyentuh sisi jauhnya.</p>`],
+  ['5 · Likuiditas', `<p><b>EQH/EQL</b>: dua pivot (panjang 3) berurutan dengan selisih ≤ 0.1 ATR — kolam stop-loss. <b>BSL/SSL</b>: swing high di atas / low di bawah harga yang belum tersentuh. Dipakai sebagai target skenario.</p>`],
+  ['6 · Premium / Discount', `<p>Dealing range = pivot swing high & low terakhir (diperluas oleh ekstrem sesudahnya). Posisi &gt; 55% = <b>premium</b>, &lt; 45% = <b>discount</b>, di antaranya <b>equilibrium</b>. Tren bullish → range low = <i>strong low</i>, range high = <i>weak high</i> (target).</p>`],
+  ['7 · Skor bias (−100…+100)', `<table class="kv"><tr><td>Tren swing</td><td>±30</td></tr><tr><td>Tren internal</td><td>±15</td></tr><tr><td>CHoCH ≤ 12 bar (swing/internal)</td><td>±15 / ±10</td></tr><tr><td>EMA50 &amp; EMA200</td><td>±15</td></tr><tr><td>Posisi premium/discount</td><td>±10</td></tr><tr><td>Momentum RSI(14)</td><td>±10</td></tr><tr><td>Harga di dalam OB aktif</td><td>±5</td></tr></table><p>≥ +50 NAIK KUAT · ≥ +20 NAIK · −20…+20 SIDEWAYS · ≤ −20 TURUN · ≤ −50 TURUN KUAT. MTF: 1D 45% · 4H 35% · 1H 20%.</p>`],
+  ['Skenario trading', `<p>Searah bias: zona entry = OB aktif / FVG terbuka terdekat di arah pullback. Stop = sisi jauh zona ± 0.3 ATR. Target = likuiditas terdekat (BSL untuk buy, SSL untuk sell), lalu ujung dealing range. RR dihitung otomatis. Bias netral → tidak ada skenario.</p>`],
+  ['Arah market', `<p>Untuk DXY, mayor FX, emas, minyak, SPX, NDX, IHSG, VIX, US10Y, BTC dan USD/IDR: skor = 55% bias 1D + 45% bias 4H. <b>Kekuatan mata uang</b> = rata-rata skor semua pair G8 (base +, quote −). <b>Regime</b> risk-on/off menimbang indeks saham, kripto, IHSG (+) dan VIX, JPY, CHF, emas (−). Gateway menambah sentimen berita 12 jam & event high-impact 48 jam.</p>`],
+  ['Sentimen berita', `<p>Leksikon finansial Inggris + Indonesia (mis. <i>surge, plunge, menguat, anjlok</i>) dengan penanganan negasi (<i>not, tidak, belum</i>). Skor = tanh(Σ bobot / 3). Kata yang cocok ditampilkan di tooltip label sentimen. Aset ditandai dari kata kunci (Fed → USD, emas → GOLD, IHSG → IDX, …).</p>`],
+  ['Sumber data & keterbatasan', `<ul><li>Analisa SMC: Yahoo Finance via <code>yfinance</code> — bisa tertunda tergantung bursa; emas/perak memakai kontrak futures sebagai proksi.</li><li>Chart realtime, teknikal & screener pasar penuh: widget resmi TradingView.</li><li>Berita: RSS publik (dikonfigurasi di <code>gateway/appsettings.json</code>).</li><li>Kalender: ekspor JSON mingguan ForexFactory.</li><li>Semua output adalah hasil aturan otomatis, <b>bukan saran investasi</b>.</li></ul>`],
+  ['Arsitektur', `<p><b>Python (FastAPI)</b> — data harga, engine SMC, skor bias, screener, arah market, sentimen. <b>C# (ASP.NET Core 8)</b> — gateway web, agregasi RSS realtime, kalender, alert, push SignalR, penyajian UI. <b>UI</b> — HTML/JS + Lightweight Charts + widget TradingView. Semua berjalan lokal: <code>start.bat</code>.</p>`],
+];
+
+export default {
+  init() {
+    $('#method').innerHTML = CARDS.map(([t, body]) => `<div class="panel"><div class="panel-body"><h3>${t}</h3>${body}</div></div>`).join('');
+  },
+};

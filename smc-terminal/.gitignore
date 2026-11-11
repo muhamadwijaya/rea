@@ -1,0 +1,7 @@
+# Build & runtime outputs
+gateway/bin/
+gateway/obj/
+engine/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
