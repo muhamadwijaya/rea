@@ -8,7 +8,8 @@
 import { api, esc, on } from './util.js';
 
 const KEY = 'sharx.voice';
-const DEFAULTS = { enabled: false, scope: 'all', listen: true, engine: 'piper', browserVoice: '', rate: 1.0, volume: 1.0 };
+const DEFAULTS = { enabled: false, scope: 'all', listen: true, engine: 'piper', persona: 'jarvis', mixed: true, browserVoice: '', rate: 1.0, volume: 1.0 };
+const PERSONA_MODELS = { jarvis: ['id', 'engb', 'stt'], natural: ['id', 'en', 'stt'] };
 const MAX_QUEUE = 3;
 const STALE_MS = 5 * 60 * 1000;
 const ANSWER_MS = 8000;
@@ -66,13 +67,14 @@ class Speaker {
 
   piperReady(lang) {
     const tts = this.a.status?.tts;
-    return this.a.settings.engine === 'piper' && this.a.status?.packages?.piper && (tts?.[lang]?.ready || (lang !== 'en' && tts?.id?.ready));
+    if (this.a.settings.engine !== 'piper' || !this.a.status?.packages?.piper) return false;
+    return lang === 'en' ? Boolean(tts?.engb?.ready || tts?.en?.ready) : Boolean(tts?.id?.ready);
   }
 
   async fetchWav(text, lang) {
     const res = await fetch('/api/voice/tts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, lang, rate: this.a.settings.rate }),
+      body: JSON.stringify({ text, lang, rate: this.a.settings.rate, persona: this.a.settings.persona, mixed: this.a.settings.mixed }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `HTTP ${res.status}`);
     return res.blob();
@@ -254,13 +256,19 @@ export class VoiceAssistant {
         <option value="piper" ${s.engine === 'piper' ? 'selected' : ''}>Piper — suara neural offline (gratis, tanpa batas)</option>
         <option value="browser" ${s.engine === 'browser' ? 'selected' : ''}>Suara Windows / browser</option>
       </select>
+      ${s.engine === 'piper' ? `<select class="input" data-k="persona">
+        <option value="jarvis" ${s.persona === 'jarvis' ? 'selected' : ''}>Persona JARVIS — asisten AI, suara berat & tenang, English aksen British</option>
+        <option value="natural" ${s.persona === 'natural' ? 'selected' : ''}>Persona natural — suara asli tanpa efek</option>
+      </select>
+      <label class="check"><input type="checkbox" data-k="mixed" ${s.mixed ? 'checked' : ''}> Kata / kalimat bahasa Inggris dibacakan dengan suara Inggris</label>
+      ${s.persona === 'jarvis' && pkg.pyworld === false ? '<div class="note down">Paket pyworld belum terpasang — persona JARVIS memakai suara asli. Jalankan setup.bat lagi.</div>' : ''}` : ''}
       ${s.engine === 'browser' ? `<select class="input" data-k="browserVoice"><option value="">Otomatis</option>${voices.map((v) => `<option ${v.name === s.browserVoice ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>` : ''}
       <label class="va-range">Kecepatan <input type="range" min="0.7" max="1.5" step="0.05" data-k="rate" value="${s.rate}"><b>${Number(s.rate).toFixed(2)}×</b></label>
       <label class="va-range">Volume <input type="range" min="0.1" max="1" step="0.05" data-k="volume" value="${s.volume}"><b>${Math.round(s.volume * 100)}%</b></label>
       <h5>MODEL (SEKALI UNDUH, DISIMPAN DI KOMPUTER INI)</h5>
       ${pkg.piper === false || pkg.whisper === false ? '<div class="note down">Paket suara belum terpasang — jalankan setup.bat lagi. Sementara memakai suara Windows.</div>' : ''}
-      ${model('id', 'Suara Indonesia', st?.tts?.id)}${model('en', 'Suara English', st?.tts?.en)}${model('stt', 'Pengenal jawaban (Whisper)', st?.stt)}
-      <div class="toolbar"><button class="btn" data-act="dl-all">UNDUH SEMUA</button><button class="btn" data-act="test">TES SUARA</button></div>
+      ${model('id', 'Suara Indonesia', st?.tts?.id)}${model('engb', 'Suara English British pria (JARVIS)', st?.tts?.engb)}${model('en', 'Suara English natural', st?.tts?.en)}${model('stt', 'Pengenal jawaban (Whisper)', st?.stt)}
+      <div class="toolbar"><button class="btn" data-act="dl-all">UNDUH YANG DIPERLUKAN</button><button class="btn" data-act="test">TES SUARA</button></div>
       <div class="note">Semua suara diproses offline di komputer ini. Model suara Piper untuk pemakaian pribadi (lisensi dataset suara).
         Tombol Y / N di keyboard juga bisa menjawab.</div>
       <div class="note va-note"></div>`;
@@ -281,14 +289,14 @@ export class VoiceAssistant {
     const dl = e.target.closest('[data-dl]');
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (dl || act === 'dl-all') {
-      const items = dl ? [dl.dataset.dl] : ['id', 'en', 'stt'];
+      const items = dl ? [dl.dataset.dl] : PERSONA_MODELS[this.settings.persona] || PERSONA_MODELS.jarvis;
       try {
         this.status = await api('/api/voice/setup', { json: { items } });
       } catch (err) { this.note(err.message); }
       this.renderSettings();
       this.pollDownloads();
     }
-    if (act === 'test') this.speak('Halo, saya asisten berita SHARX INVEST. Laba bersih Bank Rakyat Indonesia naik sembilan persen. Sentimen naik.');
+    if (act === 'test') this.speak('Selamat malam. Saya asisten berita SHARX INVEST. Saham Nvidia rebound di premarket setelah CoreWeave menaikkan outlook pendapatan. Sentimen naik.');
   }
 
   async refreshStatus() {
@@ -301,7 +309,7 @@ export class VoiceAssistant {
       await sleep(1500);
       await this.refreshStatus();
       const st = this.status;
-      const busy = [st?.tts?.id, st?.tts?.en, st?.stt].some((m) => m?.download?.status === 'downloading');
+      const busy = [st?.tts?.id, st?.tts?.engb, st?.tts?.en, st?.stt].some((m) => m?.download?.status === 'downloading');
       if (!busy) return;
     }
   }

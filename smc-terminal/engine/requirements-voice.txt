@@ -1,3 +1,7 @@
 piper-tts>=1.3,<2
 faster-whisper>=1.1,<2
 trafilatura>=2.0,<3
+# JARVIS persona: WORLD vocoder (needs pkg_resources from setuptools < 81) and EN/ID word detection
+pyworld>=0.3.4,<0.4
+setuptools<81
+wordfreq>=3.0,<4

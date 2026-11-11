@@ -36,3 +36,29 @@ def test_article_falls_back_to_summary_with_a_reason():
     r = voice.article("https://news.google.com/rss/articles/abc", "Judul", "Ringkasan")
     assert r["source"] == "summary" and r["text"] == "Judul Ringkasan" and "Google News" in r["reason"]
     assert voice.article("javascript:alert(1)", "J")["source"] == "summary"
+
+
+def test_english_inside_indonesian_text_gets_the_english_voice():
+    pytest.importorskip("wordfreq")
+    segs = voice.segments("Saham Nvidia rebound di premarket setelah CoreWeave menaikkan outlook pendapatan.", "id")
+    english = [t for lang, t in segs if lang == "en"]
+    assert english == ["rebound", "premarket", "CoreWeave", "outlook"]
+    assert segs[0] == ("id", "Saham Nvidia")  # words common to both languages follow the sentence
+    assert voice.segments("Nvidia shares rebound as CoreWeave raises its outlook.", "en") == [
+        ("en", "Nvidia shares rebound as CoreWeave raises its outlook.")]
+    assert all(lang == "id" for lang, _ in voice.segments("IHSG ditutup naik didorong saham bank dan investor asing.", "id"))
+
+
+def test_jarvis_revoicing_lowers_pitch_into_the_male_range():
+    pyworld = pytest.importorskip("pyworld")
+    sr = 22050
+    t = np.arange(int(sr * 1.0)) / sr
+    x = 0.4 * np.sign(np.sin(2 * np.pi * 250 * t)) * np.hanning(len(t))  # buzzy 250 Hz "voice"
+    y = voice._world(x, sr, *voice.JARVIS_REVOICE["id"])
+
+    def f0(sig):
+        f, tt = pyworld.dio(sig, sr, frame_period=5.0)
+        f = pyworld.stonemask(sig, f, tt, sr)
+        return float(np.median(f[f > 0]))
+
+    assert 100 <= f0(y) <= 140 and f0(x) > 200

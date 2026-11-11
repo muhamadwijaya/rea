@@ -123,9 +123,20 @@ Tombol **🔊** di kanan atas mengaktifkan asisten suara (pengaturan disimpan di
 Pilihan: semua berita bertag / hanya aset inti / hanya sentimen kuat; kecepatan & volume; mikrofon on/off; suara
 Piper atau suara Windows. Bila berita datang beruntun, hanya 3 terbaru yang dibacakan (yang lebih dari 5 menit dilewati).
 
+**Persona suara JARVIS** (default): gaya asisten AI orisinal — suara pria yang berat dan tenang dengan sedikit
+resonansi "AI" — bukan tiruan suara aktor mana pun. Suara Indonesia diubah ke nada pria yang dalam dengan vocoder
+WORLD (pyworld: nada ≈250 → ≈115 Hz, formant diturunkan), bahasa Inggris dibaca suara pria British (VCTK p226,
+CC BY 4.0). Persona **natural** memakai suara asli tanpa efek.
+
+**Bahasa Inggris tetap dibaca bahasa Inggris**: teks dipecah per kata dengan frekuensi kata EN/ID (wordfreq).
+Kata/kalimat Inggris di dalam teks Indonesia ("Saham Nvidia *rebound* di *premarket* setelah *CoreWeave* menaikkan
+*outlook*") dibacakan suara Inggris, sisanya suara Indonesia; kata yang sama umum di kedua bahasa (data, bank,
+Nvidia) dan singkatan/ticker mengikuti kalimatnya. Bisa dimatikan di pengaturan suara.
+
 **Suara — gratis, tanpa batas, offline**: [Piper](https://github.com/OHF-Voice/piper1-gpl) (suara neural) dengan
-suara **Indonesia** `id_ID-news_tts-medium` dan **English** `en_US-lessac-medium` (masing-masing ±63 MB), serta
-pengenal jawaban **Whisper tiny** (±75 MB, via faster-whisper). Model diunduh sekali dari pengaturan suara (UNDUH SEMUA),
+suara **Indonesia** `id_ID-news_tts-medium`, **English British pria** `en_GB-vctk-medium` (persona JARVIS) dan
+**English natural** `en_US-lessac-medium` (masing-masing ±63–77 MB), serta pengenal jawaban **Whisper tiny** (±75 MB,
+via faster-whisper). Model diunduh sekali dari pengaturan suara (UNDUH YANG DIPERLUKAN),
 diverifikasi checksum, disimpan di `%LOCALAPPDATA%\SharxInvest\voices` dan `\stt`; setelah itu tidak perlu internet
 untuk suara. Paket Python-nya (`engine/requirements-voice.txt`) dipasang `setup.bat`; bila gagal, aplikasi tetap
 berjalan dan memakai suara Windows. Lisensi: Piper GPL-3.0 (dipasang terpisah, tidak dibundel); model suara Piper
@@ -205,7 +216,7 @@ Engine Python — FastAPI (engine/)
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
 | `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade |
 | `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["id","en","stt"]}`) |
-| `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1}` | Suara Piper (audio/wav) |
+| `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"persona":"jarvis","mixed":true}` | Suara Piper (audio/wav); `mixed` = kata Inggris dibaca suara Inggris |
 | `POST /api/voice/stt` (audio/wav 16 kHz) | Kenali jawaban singkat → `{"text","intent":"yes|no|null"}` |
 | `GET /api/news/article?id=…` | Isi lengkap berita (atau ringkasan + alasan) |
 | `GET /api/screener?market=all&tf=4h` | Screener (`market`: all, forex, saham-as, saham-idx, kripto) |

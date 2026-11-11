@@ -168,12 +168,14 @@ def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> 
 
 class TtsRequest(BaseModel):
     text: str = Field(max_length=5000)
-    lang: str = "id"
+    lang: str = "id"  # main language of the text
     rate: float = 1.0
+    persona: str = "jarvis"  # "jarvis" | "natural"
+    mixed: bool = True  # English words / phrases inside Indonesian text read by the English voice
 
 
 class VoiceSetupRequest(BaseModel):
-    items: list[str] = Field(default_factory=lambda: ["id", "stt"], max_length=4)
+    items: list[str] = Field(default_factory=lambda: ["id", "engb", "stt"], max_length=5)
 
 
 class ArticleRequest(BaseModel):
@@ -194,7 +196,7 @@ def voice_setup(body: VoiceSetupRequest) -> dict:
 
 @app.post("/voice/tts")
 def voice_tts(body: TtsRequest) -> Response:
-    return Response(content=voice.speak(body.text, body.lang, body.rate), media_type="audio/wav")
+    return Response(content=voice.speak(body.text, body.lang, body.rate, body.persona, body.mixed), media_type="audio/wav")
 
 
 @app.post("/voice/stt")
