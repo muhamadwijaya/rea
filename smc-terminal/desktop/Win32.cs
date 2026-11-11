@@ -41,39 +41,18 @@ internal static class Win32
     private static extern bool SetForegroundWindow(IntPtr hwnd);
 }
 
-/// <summary>The application icon, drawn in code (candles + trend line) so no binary asset is needed.</summary>
+/// <summary>The SHARX INVEST icon (sharx.ico, embedded; also the executable's icon).</summary>
 internal static class AppIcon
 {
     public static Icon Create()
     {
-        using var bmp = new Bitmap(64, 64);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var bg = new SolidBrush(Color.FromArgb(11, 17, 28));
-            using var ring = new Pen(Color.FromArgb(38, 50, 74), 2);
-            g.FillRectangle(bg, 0, 0, 64, 64);
-            g.DrawEllipse(ring, 7, 7, 50, 50);
-            DrawCandle(g, Color.FromArgb(255, 77, 94), 18, 18, 42, 22, 36);
-            DrawCandle(g, Color.FromArgb(47, 210, 140), 32, 14, 46, 20, 38);
-            DrawCandle(g, Color.FromArgb(107, 155, 255), 46, 12, 36, 16, 30);
-            using var trend = new Pen(Color.FromArgb(242, 201, 76), 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            g.DrawLines(trend, new[] { new Point(10, 50), new Point(24, 40), new Point(34, 44), new Point(54, 22) });
-        }
-        return Icon.FromHandle(bmp.GetHicon());
-    }
-
-    private static void DrawCandle(Graphics g, Color color, int x, int wickTop, int wickBottom, int bodyTop, int bodyBottom)
-    {
-        using var pen = new Pen(color, 2);
-        using var brush = new SolidBrush(color);
-        g.DrawLine(pen, x, wickTop, x, wickBottom);
-        g.FillRectangle(brush, x - 4, bodyTop, 8, bodyBottom - bodyTop);
+        using var stream = typeof(AppIcon).Assembly.GetManifestResourceStream("sharx.ico");
+        return stream is null ? SystemIcons.Application : new Icon(stream);
     }
 }
 
 /// <summary>
-/// Remembers the window between runs (%LOCALAPPDATA%\SMCTerminal\window.json): windowed bounds,
+/// Remembers the window between runs (window.json in the app data folder): windowed bounds,
 /// maximized, full screen and the UI zoom. Saved on every change, so a crash does not lose it.
 /// </summary>
 internal static class WindowSettings

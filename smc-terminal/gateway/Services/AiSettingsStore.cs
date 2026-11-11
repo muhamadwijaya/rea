@@ -21,8 +21,8 @@ public sealed record AiOptions(string Provider, string OpenRouterModel, string C
 
 /// <summary>
 /// The AI settings and per-provider API keys.
-/// Windows: keys encrypted with DPAPI (current user) in %LOCALAPPDATA%\SMCTerminal\secrets.json.
-/// Other OS: ~/.config/smc-terminal/secrets.json with owner-only permissions.
+/// Stored in the app data folder (AppPaths) as secrets.json: on Windows the keys are encrypted with DPAPI
+/// (current user); on other OS the file has owner-only permissions.
 /// Keys are never logged or returned to the browser; the provider's environment variable also works.
 /// Reads the earlier single-key format ({"anthropic": {...}}) and keeps that key.
 /// </summary>
@@ -39,9 +39,7 @@ public sealed class AiSettingsStore(ILogger<AiSettingsStore> log)
     private Dictionary<string, string>? _keys;
     private AiOptions _options = AiOptions.Default;
 
-    private static string FilePath => OperatingSystem.IsWindows()
-        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SMCTerminal", "secrets.json")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "smc-terminal", "secrets.json");
+    private static string FilePath => AppPaths.File("secrets.json");
 
     public static bool IsProvider(string? provider) => provider is not null && Providers.ContainsKey(provider);
 

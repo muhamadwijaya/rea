@@ -61,7 +61,7 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
     /// <summary>Scores headlines through the engine; returns an empty map when the engine is unavailable.</summary>
     public async Task<Dictionary<string, SentimentScore>> ScoreSentimentAsync(IEnumerable<SmcTerminal.Gateway.Models.NewsItem> items, CancellationToken ct)
     {
-        var batch = items.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary, lang = i.Lang, category = i.Category }).ToList();
+        var batch = items.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary, lang = i.Lang, category = i.Category, published = i.Published.ToString("o"), link = i.Link, source = i.Source }).ToList();
         var scores = new Dictionary<string, SentimentScore>();
         if (batch.Count == 0)
         {

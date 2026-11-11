@@ -12,7 +12,7 @@ for %%A in (%*) do (
 if not defined QUIET (
   echo.
   echo  ==========================================================
-  echo    SMC TERMINAL - Setup  ^(Python engine + aplikasi desktop C#^)
+  echo    SHARX INVEST - Setup  ^(Python engine + aplikasi desktop C#^)
   echo  ==========================================================
   echo.
 )
@@ -47,15 +47,23 @@ rem ---------------------------------------------------------------- build aplik
 if defined REBUILD del /q "%ROOT%app\VERSION" >nul 2>nul
 fc /b "%ROOT%VERSION" "%ROOT%app\VERSION" >nul 2>nul
 if not errorlevel 1 goto :built
+tasklist /FI "IMAGENAME eq SharxInvest.exe" 2>nul | find /i "SharxInvest.exe" >nul
+if not errorlevel 1 (
+  echo  [!] SHARX INVEST sedang berjalan - tutup dulu aplikasinya lalu jalankan setup lagi.
+  goto :end_fail
+)
 tasklist /FI "IMAGENAME eq SMCTerminal.exe" 2>nul | find /i "SMCTerminal.exe" >nul
 if not errorlevel 1 (
-  echo  [!] SMC Terminal sedang berjalan - tutup dulu aplikasinya lalu jalankan setup lagi.
+  echo  [!] Versi lama ^(SMC Terminal^) sedang berjalan - tutup dulu aplikasinya lalu jalankan setup lagi.
   goto :end_fail
 )
 echo  [*] Build aplikasi desktop C# ^(1-3 menit pada run pertama^)...
 dotnet publish "%ROOT%desktop\SmcTerminal.Desktop.csproj" -c Release -r win-x64 --self-contained false -o "%ROOT%app" -nologo -v q || goto :fail_build
 copy /y "%ROOT%VERSION" "%ROOT%app\VERSION" >nul
-echo  [OK] Aplikasi siap: %ROOT%app\SMCTerminal.exe
+rem Nama aplikasi berubah menjadi SharxInvest.exe: buang file versi lama "SMCTerminal" dari folder app.
+for %%F in (SMCTerminal.exe SMCTerminal.dll SMCTerminal.pdb SMCTerminal.deps.json SMCTerminal.runtimeconfig.json) do if exist "%ROOT%app\%%F" del /q "%ROOT%app\%%F" >nul 2>nul
+echo  [OK] Aplikasi siap: %ROOT%app\SharxInvest.exe
+echo       ^(shortcut Desktop lama? jalankan buat-shortcut.bat lagi^)
 :built
 
 if not defined QUIET (

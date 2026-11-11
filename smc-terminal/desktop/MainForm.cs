@@ -16,12 +16,11 @@ namespace SmcTerminal.Desktop;
 /// </summary>
 internal sealed class MainForm : Form
 {
-    public const string WindowTitle = "SMC Terminal — Saham · Forex · Kripto";
-    private static readonly Color Background = Color.FromArgb(10, 14, 22);
-    private static readonly Color Accent = Color.FromArgb(107, 155, 255);
+    public const string WindowTitle = "SHARX INVEST — Saham · Forex · Kripto";
+    private static readonly Color Background = Color.FromArgb(0, 27, 51);
+    private static readonly Color Accent = Color.FromArgb(153, 255, 0);
 
-    public static string DataDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SMCTerminal");
+    public static string DataDirectory => SmcTerminal.Gateway.AppPaths.DataDirectory;
 
     private readonly string _root;
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Background };
@@ -112,10 +111,20 @@ internal sealed class MainForm : Form
     private void BuildSplash()
     {
         var mono = FontFamily.Families.Any(f => f.Name == "Cascadia Mono") ? "Cascadia Mono" : "Consolas";
-        var brand = new Label
+        Control brand = new Label
         {
-            Text = "SMC TERMINAL", ForeColor = Color.FromArgb(230, 235, 243), Font = new Font(mono, 26, FontStyle.Bold), AutoSize = true,
+            Text = "SHARX INVEST", ForeColor = Color.FromArgb(230, 235, 243), Font = new Font(mono, 26, FontStyle.Bold), AutoSize = true,
         };
+        var logoFile = Path.Combine(_root, "gateway", "wwwroot", "img", "sharx-logo.png");
+        if (File.Exists(logoFile))
+        {
+            var logo = Image.FromFile(logoFile);
+            brand = new PictureBox
+            {
+                Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(420, (int)(420.0 * logo.Height / logo.Width)),
+                BackColor = Background,
+            };
+        }
         var sub = new Label
         {
             Text = "SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT", ForeColor = Accent, Font = new Font(mono, 10), AutoSize = true,
@@ -191,7 +200,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            ShowSplash("SMC Terminal gagal dijalankan.", $"{ex.Message}\n\nLog: {LogDirectory}");
+            ShowSplash("SHARX INVEST gagal dijalankan.", $"{ex.Message}\n\nLog: {LogDirectory}");
         }
     }
 
@@ -208,7 +217,7 @@ internal sealed class MainForm : Form
             ShowSplash(
                 "Microsoft Edge WebView2 Runtime belum terpasang — aplikasi dibuka di browser untuk sementara.",
                 "Install WebView2 (gratis): https://go.microsoft.com/fwlink/p/?LinkId=2124703 lalu jalankan ulang.\n" +
-                "Biarkan jendela ini terbuka selama memakai SMC Terminal; menutupnya akan menghentikan server.");
+                "Biarkan jendela ini terbuka selama memakai SHARX INVEST; menutupnya akan menghentikan server.");
             OpenExternal(_home!);
             return false;
         }

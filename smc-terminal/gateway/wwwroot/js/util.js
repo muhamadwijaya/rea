@@ -42,6 +42,17 @@ export function fmtPrice(v, decimals) {
   return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 
+/** Large amounts as 1.23T / 4.56B / 7.89M / 1.2K (sign kept). */
+export function fmtBig(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '–';
+  const a = Math.abs(v);
+  if (a >= 1e12) return `${(v / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return String(Math.round(v * 1000) / 1000);
+}
+
 export function fmtPct(v, digits = 2) {
   if (v === null || v === undefined || Number.isNaN(v)) return '–';
   return `${v > 0 ? '+' : ''}${Number(v).toFixed(digits)}%`;

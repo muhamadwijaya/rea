@@ -32,7 +32,7 @@ MAX_OUTPUT = 12_000
 MAX_ATTEMPTS = 6
 BUDGET_S = 200.0  # stays below the gateway's 240 s request timeout
 ATTEMPT_TIMEOUT_S = 100.0
-HEADERS = {"X-Title": "SMC Terminal"}
+HEADERS = {"X-Title": "SHARX INVEST"}
 
 
 @dataclass(frozen=True)

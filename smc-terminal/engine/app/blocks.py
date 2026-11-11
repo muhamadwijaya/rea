@@ -48,7 +48,7 @@ BLOCK_ORDER = {
     "forex": ["Mayor", "Cross", "Eksotis", "Logam", "Energi", "Pertanian", "Indeks"],
     "saham-as": ["Indeks & Yield"],
     "saham-idx": ["Indeks"],
-    "kripto": list(CRYPTO_CATEGORIES) + ["Lainnya"],
+    "kripto": list(CRYPTO_CATEGORIES) + ["Gaming & Metaverse", "Lainnya"],
 }
 
 
@@ -63,7 +63,8 @@ def block_of(inst: Instrument) -> str:
     if cls == "index":
         return {"forex": "Indeks", "saham-idx": "Indeks"}.get(inst.market, "Indeks & Yield")
     if cls == "crypto":
-        return _CRYPTO.get(sym, "Lainnya")
+        # hand-checked category first, then the generated CoinGecko category
+        return _CRYPTO.get(sym) or inst.sector or "Lainnya"
     if cls == "us":
         if inst.group == "ETF":
             return "ETF"

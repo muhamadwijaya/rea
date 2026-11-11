@@ -52,6 +52,10 @@ const CARDS = [
   ['Penandaan berita per aset', `<p>Headline ditautkan ke aset lewat ticker huruf besar (<code>$NVDA</code>, <code>BBCA</code>), nama perusahaan/koin, pair (<code>EUR/USD</code>) dan alias (yen, rupiah, emas, minyak, S&amp;P 500, IHSG …) beserta tanda arah (mis. "yen menguat" = USDJPY turun). Tag inilah yang mengambang 3 menit di orbs dan dihitung untuk "condong ke mana".</p>`],
   ['Halaman per pasar', `<p>FOREX, SAHAM AS, SAHAM IDX dan KRIPTO masing-masing punya Analisa SMC, Screener, Berita dan Arah Market sendiri. Instrumen dibagi oleh engine (field <code>market</code> di <code>config/watchlist.json</code>); berita dibagi oleh gateway dari kategori feed + aset yang disebut di headline (mis. berita forex yang menyebut Bitcoin ikut tampil di KRIPTO).</p>`],
   ['Arsitektur', `<p><b>Aplikasi desktop (C# WinForms + WebView2)</b> — jendela sendiri, menjalankan gateway di dalam proses. <b>Gateway C# (ASP.NET Core 8)</b> — API, agregasi RSS realtime, kalender, alert, push SignalR, serta mengelola engine Python sebagai proses tersembunyi (restart otomatis bila crash). <b>Engine Python (FastAPI)</b> — data harga, SMC, skor bias, screener, arah market, sentimen. Log: folder <code>logs/</code>.</p>`],
+  ['Virtual trading sinyal SMC', `<p>Setiap break struktur (CHoCH/BOS) membuat sinyal dari order block yang memicunya: entry limit di OB (tengah atau tepi), stop di balik OB ± k·ATR, target = likuiditas yang dibuat impuls atau RR tetap — tidak pernah kurang dari 1:1. Semua keputusan kausal: hanya memakai bar sampai saat itu.</p>
+    <p><b>Timestamp</b>: bar saat sinyal muncul, waktu sistem pertama mendeteksinya, waktu kedaluwarsa, waktu entry terpicu dan waktu selesai. <b>Batal otomatis</b> sebelum entry bila struktur berbalik, harga lebih dulu mencapai target, harga close menembus stop, atau sinyal kedaluwarsa. Setelah entry: PROFIT di target, LOSS di stop (satu bar menyentuh keduanya = LOSS), atau ditutup karena batas waktu. Hasil dicatat dalam R di jurnal lokal.</p>`],
+  ['Upgrade SMC otomatis', `<p>Per aset dan timeframe, ±1.150 kombinasi parameter SMC diuji pada 70% riwayat lalu diverifikasi pada 30% riwayat terakhir (out-of-sample). Parameter baru dipakai hanya bila batas bawah win rate (Wilson 90%) out-of-sample lebih tinggi, ekspektasi tetap positif dan jumlah trade cukup — jadi win rate tidak "dibeli" dengan target kecil, stop jauh, atau kebetulan sampel. Diulang tiap 6 jam per aset; tiap upgrade diberi versi dan dicatat di log. Akurasi terukur ini juga menentukan bobot SMC saat dicocokkan dengan analisa AI.</p>
+    <p>Target 70% dan tujuan 99% ditampilkan sebagai arah perbaikan; yang dilaporkan selalu hasil terukur. Tidak ada metode yang dapat menjamin 99% di pasar.</p>`],
 ];
 
 // Card titles grouped into tabs.
@@ -62,6 +66,7 @@ const TABS = [
   ['skor', 'SKOR & SKENARIO', ['7 · Skor bias (−100…+100)', 'Skenario trading']],
   ['arah', 'ARAH MARKET & BERITA', ['Arah market', 'Sentimen berita', 'Penandaan berita per aset', 'Halaman per pasar']],
   ['fund', 'FUNDAMENTAL & AI', ['Fundamental: rilis data ekonomi', 'Outlook gabungan & AI']],
+  ['training', 'AI TRAINING', ['Virtual trading sinyal SMC', 'Upgrade SMC otomatis']],
   ['data', 'DATA & ARSITEKTUR', ['Sumber data & keterbatasan', 'Arsitektur']],
 ];
 

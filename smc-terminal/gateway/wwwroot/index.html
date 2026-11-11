@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SMC Terminal</title>
+  <title>SHARX INVEST</title>
   <meta name="description" content="Screener saham, forex & kripto dengan analisa Smart Money Concept, berita realtime, kalender ekonomi dan arah market.">
-  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="img/sharx-icon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
   <!-- ============================================================ BOOT SCREEN -->
   <div id="boot" class="boot">
     <div class="boot-card">
-      <div class="boot-brand"><img src="img/logo.svg" width="56" height="56" alt=""><div><div class="brand-name">SMC<b>TERMINAL</b></div><div class="brand-sub">SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT</div></div></div>
+      <div class="boot-brand"><img src="img/sharx-logo.png" alt="SHARX INVEST" class="boot-logo"><div class="brand-sub">SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT · AI</div></div>
       <div class="boot-radar"><span></span><span></span><span></span><i></i></div>
       <ul class="boot-steps" id="boot-steps"></ul>
       <div class="boot-bar"><i id="boot-bar"></i></div>
@@ -26,19 +26,14 @@
   </div>
 
   <header class="topbar">
-    <div class="brand" data-go="dashboard">
-      <div class="brand-logo"><img src="img/logo.svg" width="22" height="22" alt=""></div>
-      <div>
-        <div class="brand-name">SMC<b>TERMINAL</b></div>
-        <div class="brand-sub">SAHAM · FOREX · KRIPTO</div>
-      </div>
-    </div>
+    <div class="brand" data-go="dashboard" title="SHARX INVEST — dashboard"><img src="img/sharx-logo.png" alt="SHARX INVEST" class="brand-wordmark"></div>
     <nav class="tabs" id="tabs">
       <button class="tab-btn active" data-tab="dashboard">DASHBOARD</button>
       <button class="tab-btn" data-tab="forex">FOREX</button>
       <button class="tab-btn" data-tab="saham-as">SAHAM AS</button>
       <button class="tab-btn" data-tab="saham-idx">SAHAM IDX</button>
       <button class="tab-btn" data-tab="kripto">KRIPTO</button>
+      <button class="tab-btn" data-tab="training">AI TRAINING</button>
       <button class="tab-btn" data-tab="kalender">KALENDER</button>
       <button class="tab-btn" data-tab="metode">METODOLOGI</button>
     </nav>
@@ -118,6 +113,9 @@
     <section class="tab-panel market-page" id="tab-saham-idx"></section>
     <section class="tab-panel market-page" id="tab-kripto"></section>
 
+    <!-- ============================================================ AI TRAINING (built by js/training.js) -->
+    <section class="tab-panel" id="tab-training"></section>
+
     <!-- ============================================================ KALENDER -->
     <section class="tab-panel" id="tab-kalender">
       <div class="cal-top">
@@ -141,7 +139,8 @@
   </main>
 
   <footer class="statusbar">
-    <span id="status-left">SMC Terminal</span>
+    <span id="status-left">SHARX INVEST</span>
+    <span class="fps" id="fps" title="Frame per detik tampilan (target 60)">-- FPS</span>
     <span>Data analisa: Yahoo Finance (bisa tertunda) · realtime: TradingView · berita: RSS · kalender: ForexFactory · <b>bukan saran investasi</b></span>
   </footer>
 

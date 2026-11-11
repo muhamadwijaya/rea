@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import market_data, smc
+from . import market_data, smc, training
 from .indicators import ema, rsi
 from .instruments import Instrument
 from .market_data import Bars, Timeframe
@@ -63,6 +63,7 @@ class Analysis:
     rsi14: np.ndarray
     score: float
     components: list[Component]
+    lengths: tuple[int, int] = (0, 0)  # swing / internal pivot lengths used
 
     @property
     def price(self) -> float:
@@ -155,14 +156,16 @@ _memo_lock = threading.Lock()
 
 def run_on_bars(inst: Instrument, tf: Timeframe, bars: Bars) -> Analysis:
     key = (inst.yahoo, tf.key)
+    # pivot lengths upgraded by the virtual-trading tuner for this asset, else the timeframe defaults
+    swing, internal = training.pivot_lengths(inst.symbol, tf.key) or (tf.swing, tf.internal)
     with _memo_lock:
         hit = _memo.get(key)
-    if hit is not None and hit.bars is bars and hit.instrument == inst:
+    if hit is not None and hit.bars is bars and hit.instrument == inst and hit.lengths == (swing, internal):
         return hit
-    r = smc.analyze(bars.open, bars.high, bars.low, bars.close, tf.swing, tf.internal)
+    r = smc.analyze(bars.open, bars.high, bars.low, bars.close, swing, internal)
     e50, e200, rsi14 = ema(bars.close, 50), ema(bars.close, 200), rsi(bars.close, 14)
     score, comps = _score(bars, r, e50, e200, rsi14)
-    result = Analysis(inst, tf, bars, r, e50, e200, rsi14, score, comps)
+    result = Analysis(inst, tf, bars, r, e50, e200, rsi14, score, comps, (swing, internal))
     with _memo_lock:
         _memo[key] = result
     return result
@@ -497,20 +500,27 @@ def _near(top: float, bottom: float, price: float, atr_now: float, k: float = 3.
     return bottom - k * atr_now <= price <= top + k * atr_now
 
 
-MTF_WEIGHTS = {"1d": 0.45, "4h": 0.35, "1h": 0.20}
+MTF_POSITION_WEIGHTS = (0.45, 0.35, 0.20)  # highest timeframe first
+
+# SMC timeframes that match a trading horizon (used to confirm an AI call over that horizon).
+HORIZON_TIMEFRAMES = {
+    "1-2 minggu": ("1d", "4h", "1h"),
+    "1-3 hari": ("4h", "1h", "15m"),
+    "intraday": ("1h", "15m", "5m"),
+}
 
 
 def mtf(inst: Instrument, tfs: tuple[str, ...] = ("1d", "4h", "1h")) -> dict:
     rows = []
     total = weight = 0.0
-    for key in tfs:
+    for pos, key in enumerate(tfs):
         try:
             s = summary(run(inst, key))
         except Exception as exc:  # one failing timeframe must not hide the others
             rows.append({"tf": key, "error": str(getattr(exc, "message", exc))})
             continue
         rows.append(s)
-        w = MTF_WEIGHTS.get(key, 0.2)
+        w = MTF_POSITION_WEIGHTS[pos] if pos < len(MTF_POSITION_WEIGHTS) else 0.1
         total += s["score"] * w
         weight += w
     combined = total / weight if weight else 0.0

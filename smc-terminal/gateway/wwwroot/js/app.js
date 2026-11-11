@@ -4,6 +4,7 @@ import * as tv from './tv.js';
 import dashboard from './dashboard.js';
 import calendar from './calendar.js';
 import method from './method.js';
+import { trainingPage } from './training.js';
 import { marketPage } from './market.js';
 import { MARKET_KEYS, MARKETS } from './markets.js';
 
@@ -23,6 +24,7 @@ export const store = {
 const modules = {
   dashboard,
   ...Object.fromEntries(MARKET_KEYS.map((k) => [k, marketPage(k)])),
+  training: trainingPage,
   kalender: calendar,
   metode: method,
 };
@@ -122,7 +124,7 @@ function statusLine(s) {
     `${s.newsTotal} berita · ${s.feedsOk}/${s.feedsTotal} sumber`,
     `${s.alerts24h} alert 24j`,
   ];
-  $('#status-left').textContent = `SMC Terminal · ${parts.join(' · ')}`;
+  $('#status-left').textContent = `SHARX INVEST · ${parts.join(' · ')}`;
 }
 
 function updateLiveLabel() {
@@ -389,7 +391,7 @@ function desktopIntegration() {
 function confirmExit() {
   return new Promise((resolve) => {
     const modal = $('#modal');
-    $('#modal-text').innerHTML = '<b>Keluar dari SMC Terminal?</b><div class="note">Engine analisa dan pengambilan berita akan dihentikan.</div>';
+    $('#modal-text').innerHTML = '<b>Keluar dari SHARX INVEST?</b><div class="note">Engine analisa dan pengambilan berita akan dihentikan.</div>';
     modal.classList.remove('hidden');
     const done = (ok) => { modal.classList.add('hidden'); modal.onclick = null; resolve(ok); };
     modal.onclick = (e) => {
@@ -418,3 +420,23 @@ function boot() {
 }
 
 boot();
+
+// ------------------------------------------------------------------ frame-rate meter (target: 60 fps)
+(function fpsMeter() {
+  const el = document.getElementById('fps');
+  if (!el) return;
+  let frames = 0;
+  let last = performance.now();
+  const tick = (t) => {
+    frames++;
+    if (t - last >= 1000) {
+      const fps = Math.round((frames * 1000) / (t - last));
+      el.textContent = `${fps} FPS`;
+      el.className = `fps ${fps >= 58 ? 'ok' : 'low'}`;
+      frames = 0;
+      last = t;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}());

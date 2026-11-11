@@ -78,6 +78,8 @@ class Bars:
 
 
 _cache: dict[tuple[str, str], tuple[float, Bars]] = {}
+# Cash dividends per Yahoo ticker, captured from the daily downloads (no extra requests): [(unix time, amount)].
+_dividends: dict[str, list[tuple[int, float]]] = {}
 _locks: dict[tuple[str, str], threading.Lock] = {}
 _guard = threading.Lock()
 
@@ -142,7 +144,7 @@ def _download(tickers: list[str], tf: Timeframe) -> pd.DataFrame:
             interval=tf.interval,
             group_by="ticker",
             auto_adjust=False,
-            actions=False,
+            actions=tf.key == "1d",  # daily downloads also carry dividends (used by the benefit tracker)
             threads=True,
             progress=False,
         )
@@ -162,6 +164,27 @@ def _slice(data: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
     return data
 
 
+def _capture_dividends(yahoo: str, frame: pd.DataFrame) -> None:
+    if "Dividends" not in frame.columns:
+        return
+    paid = frame["Dividends"].dropna()
+    paid = paid[paid > 0]
+    epoch = pd.Timestamp("1970-01-01", tz="UTC")
+    idx = paid.index.tz_localize("UTC") if paid.index.tz is None else paid.index.tz_convert("UTC")
+    _dividends[yahoo] = [(int((t - epoch) // pd.Timedelta(seconds=1)), float(v)) for t, v in zip(idx, paid.to_numpy())]
+
+
+def dividends(yahoo: str) -> list[tuple[int, float]] | None:
+    """Dividends seen in the last daily download of this ticker (None = not downloaded yet)."""
+    return _dividends.get(yahoo)
+
+
+def cached(inst: Instrument, tf_key: str) -> Bars | None:
+    """Bars already in the cache (fresh or not), without downloading."""
+    hit = _cache.get((inst.yahoo, timeframe(tf_key).key))
+    return hit[1] if hit else None
+
+
 def load(inst: Instrument, tf_key: str) -> Bars:
     tf = timeframe(tf_key)
     key = (inst.yahoo, tf.key)
@@ -176,6 +199,7 @@ def load(inst: Instrument, tf_key: str) -> Bars:
         frame = _slice(_download([inst.yahoo], tf), inst.yahoo)
         if frame is None:
             raise NoData(f"Yahoo Finance tidak mengembalikan data untuk {inst.yahoo}.")
+        _capture_dividends(inst.yahoo, frame)
         try:
             bars = frame_to_bars(frame, tf)
         except NoData as exc:
@@ -218,6 +242,7 @@ def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | 
         try:
             if frame is None:
                 raise NoData(f"Tidak ada data untuk {inst.yahoo}.")
+            _capture_dividends(inst.yahoo, frame)
             bars = frame_to_bars(frame, tf)
             _store((inst.yahoo, tf.key), bars, tf)
             out[inst.symbol] = bars

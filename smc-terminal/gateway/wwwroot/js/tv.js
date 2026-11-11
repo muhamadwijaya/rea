@@ -56,7 +56,7 @@ export function advancedChart(el, tvSymbol, tf) {
     theme: 'dark',
     style: '1',
     isTransparent: false,
-    backgroundColor: 'rgba(6, 18, 46, 1)',
+    backgroundColor: 'rgba(0, 27, 51, 1)',
     gridColor: 'rgba(28, 38, 55, 0.6)',
     allow_symbol_change: true,
     hide_side_toolbar: false,

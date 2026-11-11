@@ -3,7 +3,7 @@ namespace SmcTerminal.Gateway.Models;
 public sealed class TerminalOptions
 {
     public string EngineUrl { get; set; } = "http://127.0.0.1:8765";
-    public int NewsPollSeconds { get; set; } = 60;
+    public int NewsPollSeconds { get; set; } = 15;
     public int ScreenerRefreshSeconds { get; set; } = 90;
     public string ScreenerTimeframe { get; set; } = "4h";
     public int DirectionRefreshSeconds { get; set; } = 300;
@@ -27,6 +27,9 @@ public sealed class FeedConfig
     public string Url { get; set; } = "";
     public string Category { get; set; } = "macro";
     public string Lang { get; set; } = "en";
+
+    /// <summary>Seconds between polls of this feed; 0 = Terminal:NewsPollSeconds.</summary>
+    public int PollSeconds { get; set; }
 }
 
 public sealed record NewsItem

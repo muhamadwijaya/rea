@@ -5,6 +5,8 @@ import { SmcChart } from './smc-chart.js';
 import { advancedChart, technicalGauge } from './tv.js';
 import { rowsOf } from './markets.js';
 import { mountAiPanel } from './ai-panel.js';
+import { mountCompany } from './company.js';
+import { mountPlanTraining } from './training.js';
 
 const LAYERS = [
   ['swing', 'Struktur swing'], ['internal', 'Internal'], ['pivots', 'HH/HL/LH/LL'], ['ob', 'Order block'],
@@ -19,7 +21,7 @@ const span = (sec) => {
   return `${h ? `${h}:` : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(s2).padStart(2, '0')}`;
 };
 
-const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['tv', 'TV'], ['berita', 'BERITA'], ['ai', 'AI']];
+const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['laporan', 'LAPORAN'], ['tv', 'TV'], ['berita', 'BERITA'], ['ai', 'AI']];
 const LEGEND = [
   ['#2fd28c', 'bull'], ['#ff4d5e', 'bear'], ['#38d3f5', 'FVG bull'], ['#ff9f43', 'FVG bear'], ['#6b9bff', 'EMA50'], ['#f2c94c', 'EMA200 · likuiditas'],
 ];
@@ -123,6 +125,8 @@ export class AnalysisView {
     this.$('.an-tabs').addEventListener('click', (e) => {
       const t = e.target.closest('.ptabs button[data-t]');
       if (t) this.sideTab = t.dataset.t;
+      if (t?.dataset.t === 'laporan' && this.data) this.company?.load(this.data.instrument.symbol); // fetched on first view
+      if (t?.dataset.t === 'plan' && this.data) this.planTraining?.load(this.data.instrument.symbol, this.current.tf, this.data.instrument.decimals);
       const row = e.target.closest('.mtf-row[data-tf]');
       if (row) this.load(this.current.symbol, row.dataset.tf);
     });
@@ -307,7 +311,9 @@ export class AnalysisView {
         <div class="mtf-row" data-tf="${esc(t.tf)}" style="cursor:pointer" title="Buka TF ${esc(t.tf.toUpperCase())}"><b>${esc(t.tf.toUpperCase())}</b><span>${trendText(t.swingTrend)} <span class="dim">swing</span></span><span>${trendText(t.internalTrend)} <span class="dim">int</span></span><span class="num" style="text-align:right;color:${dirHex(t.direction)}">${fmtScore(t.score)}</span></div>`).join('')}
       <div class="note">${mtf.aligned ? '✔ ' : '⚠ '}${esc(mtf.note)} Skor gabungan ${fmtScore(mtf.score)} (bobot 1D 45% · 4H 35% · 1H 20%). Klik baris untuk membuka timeframe itu.</div>` : '<div class="empty">Tidak tersedia.</div>');
 
-    pane('plan', `${planHtml}<div class="note">Skenario dibuat otomatis dari aturan SMC — bukan saran investasi.</div>`);
+    pane('plan', `<div class="an-train"></div><h5 class="an-plan-title">SKENARIO ZONA TERDEKAT</h5>${planHtml}<div class="note">Skenario dibuat otomatis dari aturan SMC — bukan saran investasi.</div>`);
+    this.planTraining = mountPlanTraining(this.$('.an-train'));
+    if (this.sideTab === 'plan') this.planTraining.load(inst.symbol, this.current.tf, inst.decimals);
     pane('narasi', `<ul class="narr">${d.narrative.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`);
     pane('level', `<div class="levels">
         ${(liq.above || []).slice(0, 2).reverse().map((l) => `<div><span class="flat">BSL · ${esc(l.kind)}</span><b class="num">${fmt(l.price)}</b></div>`).join('')}
@@ -320,6 +326,9 @@ export class AnalysisView {
         <div><span class="muted">EMA50 / EMA200</span><b class="num">${fmt(d.indicators.ema50)} / ${fmt(d.indicators.ema200)}</b></div>
         <div><span class="muted">RSI(14) · ATR</span><b class="num">${d.indicators.rsi?.toFixed(1) ?? '–'} · ${fmt(d.indicators.atr)}</b></div>
       </div><div class="note">${esc(d.source)}. Chart SMC diperbarui tiap 60 detik; mode TRADINGVIEW LIVE / SPLIT untuk harga tick realtime.</div>`);
+    pane('laporan', '<div class="an-company"></div>');
+    this.company = mountCompany(this.$('.an-company'));
+    if (this.sideTab === 'laporan') this.company.load(inst.symbol);
     pane('tv', '<div class="tv-gauge" style="height:100%;min-height:380px"></div>');
     pane('berita', '<div class="sym-news"><div class="loading">Memuat berita</div></div>');
     pane('ai', '<div class="an-outlook"><div class="loading">Menghitung outlook gabungan</div></div><div class="an-ai"></div>');

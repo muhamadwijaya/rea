@@ -7,6 +7,7 @@ The C# gateway is the only intended client; the engine binds to localhost.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -14,7 +15,7 @@ from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import ai, analysis, background, direction, fundamental, instruments, market_data, outlook, screener, sentiment
+from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, outlook, screener, sentiment, training
 from .errors import EngineError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -22,10 +23,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     background.start()
+    if os.environ.get("SMC_BACKGROUND", "1") != "0":
+        benefits.start()
+        training.start()
     yield
 
 
-app = FastAPI(title="SMC Terminal Engine", version="2.2.0", lifespan=lifespan)
+app = FastAPI(title="SHARX INVEST Engine", version="3.0.0", lifespan=lifespan)
 STARTED = time.time()
 
 
@@ -102,6 +106,9 @@ class NewsItem(BaseModel):
     summary: str = ""
     lang: str = "en"
     category: str = ""
+    published: str | None = None
+    link: str | None = None
+    source: str | None = None
 
 
 class SentimentRequest(BaseModel):
@@ -110,7 +117,11 @@ class SentimentRequest(BaseModel):
 
 @app.post("/sentiment")
 def score_sentiment(body: SentimentRequest) -> dict:
-    return {"items": sentiment.score_items([i.model_dump() for i in body.items])}
+    raw = [i.model_dump() for i in body.items]
+    scored = sentiment.score_items(raw)
+    # benefit / corporate-action headlines (dividend, buyback, airdrop, ...) are kept per tagged asset
+    benefits.record_news([{**r, "symbols": s.get("symbols", [])} for r, s in zip(raw, scored)])
+    return {"items": scored}
 
 
 class FundamentalRequest(BaseModel):
@@ -152,6 +163,32 @@ class AiRequest(BaseModel):
 def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> dict:
     """Key arrives in the X-AI-Key header (never in the body, never logged)."""
     return ai.analyze(body.symbol, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
+
+
+@app.get("/training/summary")
+def training_summary() -> dict:
+    return training.summary()
+
+
+@app.get("/training/asset")
+def training_asset(symbol: str, tf: str = "1h") -> dict:
+    market_data.timeframe(tf)  # validates the timeframe
+    return training.asset(symbol, tf)
+
+
+@app.get("/benefits")
+def benefit_calendar(market: str = "all") -> dict:
+    return benefits.view(market)
+
+
+@app.get("/company")
+def company_report(symbol: str) -> dict:
+    inst = instruments.resolve(symbol)
+    data = company.data(inst)
+    if data is None:
+        return {"symbol": inst.symbol, "assetClass": inst.asset_class, "unavailable": True,
+                "notes": ["Laporan perusahaan hanya untuk saham, ETF dan kripto."]}
+    return data
 
 
 @app.get("/live")

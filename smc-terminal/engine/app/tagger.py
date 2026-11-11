@@ -32,6 +32,10 @@ TICKER_STOP = {
     "OJK", "BEI", "BI", "IDX", "RI", "PT", "TBK", "DPR", "APBN", "BUMN", "PHK", "IHSG", "USD", "IDR", "EUR", "JPY", "GBP",
     "CNY", "WTI", "LNG", "EV", "EVS", "AR", "VR", "TV", "PC", "API", "CHIP", "DATA", "BANK", "MAN", "MEN", "WAR", "LAW",
     "MSCI", "FTSE", "STOXX",  # index providers: headlines are about index reviews, not the listed company
+    # crypto tickers that are everyday words or acronyms in headlines
+    "AB", "ARK", "INC", "PRO", "MED", "RE", "SC", "SB", "MX", "XT", "OP", "IQ", "AMP", "APE", "BAT", "GPS", "MON",
+    "NES", "PCI", "DEP", "DOS", "REQ", "ENS", "CTC", "FUN", "PEOPLE", "SAND", "FLOW", "CAKE", "MANA", "BLUR", "KITE",
+    "INIT", "PLUME", "TRAC", "WOO", "MERL", "GT", "NOS", "LON", "MOG", "MBG", "YB", "B2", "B3", "ID", "PI", "TRUMP",
 }
 
 # A first word shared by this many instrument names (e.g. "Teknologi", "Nusantara", "Mitra") is a common word,
@@ -71,8 +75,12 @@ CURATED: dict[str, tuple[str, int]] = {
     "the Dow": ("DJI", 1), "Russell 2000": ("RUT", 1), "VIX": ("VIX", 1), "Treasury yields": ("US10Y", 1),
     "10-year yield": ("US10Y", 1), "IHSG": ("IHSG", 1), "JCI": ("IHSG", 1), "Jakarta Composite": ("IHSG", 1),
     "Bitcoin": ("BTCUSD", 1), "Ether": ("ETHUSD", 1), "Ethereum": ("ETHUSD", 1),
+    # distinctive coin names (not everyday words) tag in any feed
+    "Solana": ("SOLUSD", 1), "Cardano": ("ADAUSD", 1), "Dogecoin": ("DOGEUSD", 1), "Polkadot": ("DOTUSD", 1),
+    "Chainlink": ("LINKUSD", 1), "Litecoin": ("LTCUSD", 1), "Shiba Inu": ("SHIBUSD", 1),
 }
 
+_CRYPTO_WORDS = re.compile(r"\b(crypto|kripto|token|coin|koin|blockchain|defi|altcoin|bitcoin|ether|stablecoin)", re.I)
 _PAIR = re.compile(r"\b([A-Z]{3})\s?/\s?([A-Z]{3})\b|\b([A-Z]{6})\b")
 _TOKEN = re.compile(r"\$?[A-Z][A-Z0-9]{1,5}\b")
 _WORDS = re.compile(r"[A-Za-z0-9&'.\-]+")
@@ -97,10 +105,14 @@ def _clean_name(name: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _indexes() -> tuple[dict[str, list], dict[str, tuple[str, int, bool]], int]:
-    """(ticker -> instruments, lower-cased phrase -> (symbol, sign, needs capital), longest phrase in words)."""
+def _indexes() -> tuple[dict[str, list], dict[str, tuple[str, int, bool, bool]], int]:
+    """(ticker -> instruments, lower-cased phrase -> (symbol, sign, needs capital, crypto news only), longest phrase).
+
+    A coin's one-word name ("Story", "Sonic", "Render") is often an ordinary word, so it only tags in crypto news
+    or headlines with crypto words (token, coin, blockchain…); elsewhere the full name or the ticker is needed.
+    """
     tickers: dict[str, list] = {}
-    phrases: dict[str, tuple[str, int, bool]] = {}
+    phrases: dict[str, tuple[str, int, bool, bool]] = {}
     named = [i for i in instruments.universe() if i.asset_class in ("us", "idx", "crypto")]
     word_use = Counter(w for i in named for w in {x.lower() for x in _clean_name(i.name).split()})
     for inst in instruments.universe():
@@ -116,13 +128,13 @@ def _indexes() -> tuple[dict[str, list], dict[str, tuple[str, int, bool]], int]:
                 continue
             # Company / coin names are proper nouns: matched case-insensitively but only when capitalised.
             if len(words) >= 2 and len(clean) >= 8:
-                phrases.setdefault(clean.lower(), (inst.symbol, 1, True))
+                phrases.setdefault(clean.lower(), (inst.symbol, 1, True, False))
             first = words[0]
             if (len(first) >= 5 and first.lower() not in NAME_STOP and first[0].isupper()
                     and word_use[first.lower()] < GENERIC_NAME_WORD):
-                phrases.setdefault(first.lower(), (inst.symbol, 1, True))
+                phrases.setdefault(first.lower(), (inst.symbol, 1, True, inst.asset_class == "crypto"))
     for alias, (symbol, sign) in CURATED.items():
-        phrases[alias.lower()] = (symbol, sign, False)
+        phrases[alias.lower()] = (symbol, sign, False, False)
     longest = max(len(p.split()) for p in phrases)
     return tickers, phrases, longest
 
@@ -140,6 +152,7 @@ def _pick(candidates: list, prefer_idx: bool):
 def tag(text: str, lang: str = "en", category: str = "") -> list[Tag]:
     tickers, phrases, longest = _indexes()
     prefer_idx = lang == "id" or category == "idx"
+    crypto_context = category == "crypto" or bool(_CRYPTO_WORDS.search(text))
     found: dict[str, Tag] = {}
 
     alias_fx: set[str] = set()  # currencies named by a curated alias ("euro"), not by an explicit pair
@@ -164,7 +177,7 @@ def tag(text: str, lang: str = "en", category: str = "") -> list[Tag]:
                 continue
             phrase = " ".join(w.rstrip(".,'") for w in words[i:i + size])
             hit = phrases.get(phrase.lower())
-            if hit and (not hit[2] or phrase[:1].isupper()):
+            if hit and (not hit[2] or phrase[:1].isupper()) and (not hit[3] or crypto_context):
                 if not hit[2] and hit[0] not in found:
                     alias_fx.add(hit[0])
                 add(hit[0], hit[1])

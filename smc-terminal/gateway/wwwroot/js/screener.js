@@ -96,7 +96,7 @@ export class ScreenerView {
         <div class="ptabs"><button data-t="smc" class="active">SMC SCREENER · ${esc(cfg.nav)}</button><button data-t="tv">TRADINGVIEW SCREENER (REALTIME)</button></div>
         <div class="pane active" data-t="smc">
           <div class="toolbar scr-bar">
-            <div class="seg scr-tf"><button data-v="all-1d">1D · SEMUA ASET</button><button data-v="all-4h">4H · SEMUA ASET</button><button data-v="1h">1H · INTI</button><button data-v="4h">4H · INTI</button><button data-v="1d">1D · INTI</button></div>
+            <div class="seg scr-tf"><button data-v="all-1d">1D · SEMUA ASET</button><button data-v="all-4h">4H · SEMUA ASET</button><button data-v="1m">1M</button><button data-v="5m">5M</button><button data-v="10m">10M</button><button data-v="15m">15M</button><button data-v="1h">1H · INTI</button><button data-v="4h">4H · INTI</button><button data-v="1d">1D · INTI</button></div>
             <div class="seg scr-bias"><button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button></div>
             <select class="input scr-sector" style="min-width:0;max-width:200px"><option value="">Semua sektor</option></select>
             <input class="input scr-search" placeholder="cari simbol / nama…" style="min-width:0;width:170px">

@@ -140,6 +140,7 @@ public sealed class EngineSupervisor(EngineProcessOptions options, ILogger<Engin
             psi.ArgumentList.Add(arg);
         }
         psi.Environment["PYTHONUNBUFFERED"] = "1";
+        psi.Environment["SHARX_DATA_DIR"] = AppPaths.DataDirectory; // virtual-trading journal and caches
         psi.Environment["PYTHONIOENCODING"] = "utf-8";
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };

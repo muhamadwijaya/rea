@@ -50,7 +50,7 @@ export function aiResultHtml(r) {
     <div class="conf-bar"><i style="width:${c.final}%;background:${c.signal === 'BELI' ? 'var(--go)' : c.signal === 'JUAL' ? 'var(--stop)' : 'var(--neu)'}"></i></div>
     <div class="ai-conflu">
       <div><span>AI · FUNDAMENTAL</span><b style="color:${dirHex(dir)}">${arrow(dir)} ${esc(a.direction.toUpperCase())} ${a.confidence}</b></div>
-      <div><span>SMC · MTF 1D/4H/1H</span><b class="${c.smcScore > 0 ? 'up' : c.smcScore < 0 ? 'down' : ''}">${esc(c.smcLabel || '–')} ${fmtScore(c.smcScore)}</b></div>
+      <div><span>SMC · ${esc((c.smcTimeframes?.length ? c.smcTimeframes : ['1D', '4H', '1H']).join('/'))} (${esc(c.horizon || a.horizon)})</span><b class="${c.smcScore > 0 ? 'up' : c.smcScore < 0 ? 'down' : ''}">${esc(c.smcLabel || '–')} ${fmtScore(c.smcScore)}</b></div>
       <div><span>KONFLUENSI</span><b><span class="tag ${statusClass}">${statusText}</span> ${c.adjustment > 0 ? '+' : ''}${c.adjustment || 0}</b></div>
     </div>
     <div class="note" style="margin-top:4px">${esc(c.note)} Keyakinan AI ${c.base} → akhir ${c.final} (maks. 95).</div>

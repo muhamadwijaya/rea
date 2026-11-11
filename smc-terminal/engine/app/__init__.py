@@ -1,1 +1,1 @@
-"""SMC Terminal analysis engine (Python)."""
+"""SHARX INVEST analysis engine (Python)."""

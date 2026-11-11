@@ -76,7 +76,7 @@ public static class GatewayHost
         });
         app.MapHub<MarketHub>("/hub/market");
         app.MapTerminalApi();
-        app.Logger.LogInformation("SMC Terminal gateway — engine {Engine} ({Mode}), {Feeds} feed berita",
+        app.Logger.LogInformation("SHARX INVEST gateway — engine {Engine} ({Mode}), {Feeds} feed berita",
             options.EngineUrl, options.ManageEngine ? "dikelola gateway" : "eksternal", options.Feeds.Count);
         return app;
     }

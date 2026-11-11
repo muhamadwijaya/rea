@@ -4,7 +4,7 @@
 
 const C = {
   bull: '#2fd28c', bear: '#ff4d5e', neu: '#f2c94c', blue: '#6b9bff', cyan: '#38d3f5', orange: '#ff9f43',
-  text: '#c6d2ee', dim: '#5b6f9e', grid: 'rgba(33, 63, 128, .35)', bg: '#06122e',
+  text: '#c9d6e6', dim: '#5d7896', grid: 'rgba(21, 76, 124, .35)', bg: '#001b33',
 };
 
 const rgba = (hex, a) => {

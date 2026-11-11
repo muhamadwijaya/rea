@@ -16,5 +16,5 @@ if ! cmp -s engine/requirements.txt engine/.venv/requirements.installed; then
 fi
 dotnet build gateway/SmcTerminal.Gateway.csproj -c Release -nologo -v q
 
-echo "SMC Terminal: http://127.0.0.1:$WEB_PORT/  (Ctrl+C untuk berhenti)"
+echo "SHARX INVEST: http://127.0.0.1:$WEB_PORT/  (Ctrl+C untuk berhenti)"
 cd gateway && exec dotnet run -c Release --no-build -- --urls "http://127.0.0.1:$WEB_PORT" --Terminal:ManageEngine=true

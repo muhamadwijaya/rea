@@ -1,6 +1,6 @@
 // FUNDAMENTAL & AI view of one market page: economic releases with actual vs forecast, the rule model's
 // call and the real 60-minute reaction, measured accuracy, combined asset outlook, and the AI panel.
-import { api, esc, on, badge, dirHex, fmtScore, fmtTime, timeAgo, arrow } from './util.js';
+import { api, esc, on, badge, dirHex, fmtScore, fmtTime, timeAgo, arrow, fmtBig } from './util.js';
 import { rowsOf } from './markets.js';
 import { mountAiPanel } from './ai-panel.js';
 
@@ -9,15 +9,6 @@ const VERDICT = {
   opposite: '<span class="tag bear">✘ BERLAWANAN</span>',
   flat: '<span class="tag ghost">– DATAR</span>',
 };
-
-function fmtValue(v) {
-  if (v === null || v === undefined) return '–';
-  const a = Math.abs(v);
-  if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
-  return String(Math.round(v * 1000) / 1000);
-}
 
 export class FundamentalView {
   constructor(el, cfg, store) {
@@ -82,7 +73,7 @@ export class FundamentalView {
         <td class="nowrap">${fmtTime(e.date, true)}</td><td><span class="ccy">${esc(e.currency)}</span></td>
         <td><b>${esc(e.title)}</b> <span class="impact ${esc(e.impact)}">${esc(e.impact.toUpperCase())}</span>${e.evidence?.length ? `<small>${e.evidence.length} headline sumber (arahkan kursor)</small>` : ''}</td>
         <td class="r num">${esc(e.forecast || '–')}</td><td class="r num dim">${esc(e.previous || '–')}</td>
-        <td class="r num">${e.actual != null ? `<b>${fmtValue(e.actual)}</b>` : '–'}</td>
+        <td class="r num">${e.actual != null ? `<b>${fmtBig(e.actual)}</b>` : '–'}</td>
         <td class="fd-call">${call}${assets}</td>
         <td class="r num">${r ? `<span class="${r.currencyMovePct > 0 ? 'up' : r.currencyMovePct < 0 ? 'down' : ''}">${e.currency} ${r.currencyMovePct > 0 ? '+' : ''}${r.currencyMovePct.toFixed(2)}%</span><small>${esc(r.symbol)} ${r.minutes} mnt</small>` : '–'}</td>
         <td>${e.verdict ? VERDICT[e.verdict] : ''}</td></tr>`;

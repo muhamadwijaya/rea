@@ -7,8 +7,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SmcTerminal.Desktop</RootNamespace>
-    <AssemblyName>SMCTerminal</AssemblyName>
-    <Product>SMC Terminal</Product>
+    <AssemblyName>SharxInvest</AssemblyName>
+    <Product>SHARX INVEST</Product>
+    <ApplicationIcon>sharx.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Run on .NET 8 or any newer installed Windows Desktop runtime. -->
     <RollForward>Major</RollForward>
@@ -29,4 +30,7 @@
     </ItemGroup>
   </Target>
 
+  <ItemGroup>
+    <EmbeddedResource Include="sharx.ico" LogicalName="sharx.ico" />
+  </ItemGroup>
 </Project>

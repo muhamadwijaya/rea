@@ -45,6 +45,18 @@ export const sentimentOf = (item, sign) => {
   return s > 0.15 ? 'up' : s < -0.15 ? 'down' : 'flat';
 };
 
+const textWidths = new Map(); // font|text -> width (labels repeat every frame)
+function measure(ctx, text) {
+  const key = `${ctx.font}|${text}`;
+  let w = textWidths.get(key);
+  if (w === undefined) {
+    if (textWidths.size > 4000) textWidths.clear();
+    w = ctx.measureText(text).width;
+    textWidths.set(key, w);
+  }
+  return w;
+}
+
 export class Orbs {
   constructor(stage) {
     this.stage = stage;
@@ -125,26 +137,48 @@ export class Orbs {
     this.changed();
   }
 
-  /** Always a 2×2 grid; `u` is the unit scale for every size drawn in a cell. */
+  /**
+   * Always a 2×2 grid; `u` is the unit scale for every size drawn in a cell. An orb zoomed in (> 1×)
+   * grows out of its cell towards the whole stage (`focus`, 0..1) so it is never cut off: at full
+   * focus its complete sphere fills the panel, with every asset of the market.
+   */
   layout() {
     const w = this.stage.clientWidth, h = this.stage.clientHeight;
     const cw = w / 2, ch = h / 2;
     const u = Math.min(cw, ch) / REF_CELL;
+    const head = 34 * u;
+    const stageR = Math.max(20, (Math.min(w, h - head) / 2 - 18 * u) / 1.04);
     return MARKET_KEYS.map((k, i) => {
       const x = (i % 2) * cw, y = Math.floor(i / 2) * ch;
-      const head = 34 * u;
-      return { key: k, x, y, w: cw, h: ch, u, cx: x + cw / 2, cy: y + head + (ch - head) / 2, r: Math.max(20, (Math.min(cw, ch - head) / 2 - 18 * u) / 1.04) };
+      const cell = { key: k, x, y, w: cw, h: ch, u, cx: x + cw / 2, cy: y + head + (ch - head) / 2, r: Math.max(20, (Math.min(cw, ch - head) / 2 - 18 * u) / 1.04) };
+      cell.maxZoom = stageR / cell.r;
+      const v = this.view(k);
+      if (v.zoom > cell.maxZoom) v.zoom = cell.maxZoom;
+      const f = v.zoom > 1 ? Math.min(1, (v.zoom - 1) / Math.max(0.01, cell.maxZoom - 1)) : 0;
+      if (f <= 0) return { ...cell, focus: 0 };
+      const lerp = (a, b) => a + (b - a) * f;
+      return { ...cell, focus: f, x: lerp(x, 0), y: lerp(y, 0), w: lerp(cw, w), h: lerp(ch, h),
+        cx: lerp(cell.cx, w / 2), cy: lerp(cell.cy, head + (h - head) / 2) };
     });
   }
 
+  /** The zoomed-in orb, if any (it takes all pointer input while zoomed). */
+  focused() {
+    return this.layout().filter((o) => o.focus > 0).sort((a, b) => b.focus - a.focus)[0] || null;
+  }
+
   cellAt(x, y) {
+    const f = this.focused();
+    if (f) return f;
     return this.layout().find((c) => x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) || null;
   }
 
   renderHeads() {
     if (!this.heads) return;
     const now = Date.now();
-    this.heads.innerHTML = this.layout().map((o) => {
+    const cells = this.layout();
+    const focus = cells.filter((o) => o.focus > 0.25).sort((a, b) => b.focus - a.focus)[0];
+    this.heads.innerHTML = (focus ? [focus] : cells).map((o) => {
       const rows = this.byMarket[o.key];
       const ch = rows.map((q) => q.changePct).filter((v) => v != null);
       const up = ch.filter((v) => v > 0.05).length, down = ch.filter((v) => v < -0.05).length;
@@ -230,7 +264,7 @@ export class Orbs {
     if (!o) return;
     e.preventDefault();
     const v = this.view(o.key);
-    v.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v.zoom * Math.exp(-e.deltaY * 0.0015)));
+    v.zoom = Math.max(ZOOM_MIN, Math.min(o.maxZoom, ZOOM_MAX, v.zoom * Math.exp(-e.deltaY * 0.0015)));
     this.tip.style.display = 'none';
     this.renderHeads();
   }
@@ -239,7 +273,7 @@ export class Orbs {
     const { x, y } = this.local(e);
     const o = this.cellAt(x, y);
     if (!o || this.tagAt(x, y)) return;
-    this.view(o.key).zoom = 1;
+    for (const k of MARKET_KEYS) this.view(k).zoom = 1;
     this.renderHeads();
   }
 
@@ -255,10 +289,9 @@ export class Orbs {
   start() {
     if (this.running) return;
     this.running = true;
-    let last = 0;
-    const frame = (t) => {
+    const frame = () => {
       if (!this.stage.isConnected || !this.stage.closest('.tab-panel')?.classList.contains('active') || this.stage.offsetParent === null) { this.running = false; return; }
-      if (t - last > 33) { last = t; this.draw(); }
+      this.draw(); // every display frame (60 fps or the monitor's refresh rate)
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
@@ -290,12 +323,20 @@ export class Orbs {
     this.ripples = this.ripples.filter((r) => now - r.at < 2400);
     this.tips = [];
     this.tagHits = [];
-    for (const o of this.layout()) {
+    const cells = this.layout().sort((a, b) => a.focus - b.focus); // the zoomed orb is drawn last, on top
+    for (const o of cells) {
+      if (o.focus > 0) {
+        this.tips = []; // only the zoomed orb is interactive
+        this.tagHits = [];
+        ctx.fillStyle = `rgba(0, 21, 42, ${(0.92 * Math.min(1, o.focus * 1.6)).toFixed(3)})`;
+        ctx.fillRect(0, 0, w, h);
+      }
       ctx.save();
       ctx.beginPath(); ctx.rect(o.x, o.y, o.w, o.h); ctx.clip();
       this.drawOrb(o, now);
       ctx.restore();
     }
+    if (this.focusSeen !== (cells.at(-1).focus > 0.25)) { this.focusSeen = cells.at(-1).focus > 0.25; this.renderHeads(); }
   }
 
   drawOrb(o, now) {
@@ -346,20 +387,18 @@ export class Orbs {
     const n = rows.length;
     const pos = new Map();
     // filaments grouped by tone and depth so a few thousand assets cost a few dozen strokes
-    const groups = TONES.map(() => Array.from({ length: DEPTH_BUCKETS }, () => ({ inner: new Path2D(), outer: new Path2D(), tips: [] })));
+    const groups = TONES.map(() => Array.from({ length: DEPTH_BUCKETS }, () => ({ line: new Path2D(), tips: [] })));
     rows.forEach((q, i) => {
       const dy = 1 - (2 * (i + 0.5)) / n, ring = Math.sqrt(1 - dy * dy), th = i * GOLDEN;
       const dx = Math.cos(th) * ring, dz = Math.sin(th) * ring;
       const strength = Math.min(1, Math.abs(q.changePct ?? 0) / scale);
       const L = 0.3 + 0.7 * strength;
       const [x0, y0] = project(dx * 0.1, dy * 0.1, dz * 0.1);
-      const [xm, ym] = project(dx * L * 0.55, dy * L * 0.55, dz * L * 0.55);
       const [xt, yt, zt] = project(dx * L, dy * L, dz * L);
       const depth = (zt / L + 1) / 2; // 0 = far side, 1 = facing the viewer
       const t = tone(q.changePct ?? 0);
       const g = groups[TONES.indexOf(t)][Math.min(DEPTH_BUCKETS - 1, Math.floor(depth * DEPTH_BUCKETS))];
-      g.inner.moveTo(x0, y0); g.inner.lineTo(xm, ym);
-      g.outer.moveTo(xm, ym); g.outer.lineTo(xt, yt);
+      g.line.moveTo(x0, y0); g.line.lineTo(xt, yt);
       g.tips.push([xt, yt, q.core]);
       pos.set(q.symbol, { x: xt, y: yt, depth, right: xt >= cx, q });
       if (xt >= o.x && xt <= o.x + o.w && yt >= o.y && yt <= o.y + o.h) this.tips.push({ x: xt, y: yt, depth, q });
@@ -373,8 +412,13 @@ export class Orbs {
         const g = groups[ti][b];
         if (!g.tips.length) return;
         ctx.lineWidth = (0.5 + 0.7 * f) * u;
-        ctx.strokeStyle = `rgba(${RGB[t]},${(alpha * 0.28).toFixed(3)})`; ctx.stroke(g.inner);
-        ctx.strokeStyle = `rgba(${RGB[t]},${(alpha * 0.75).toFixed(3)})`; ctx.stroke(g.outer);
+        ctx.strokeStyle = `rgba(${RGB[t]},${(alpha * 0.55).toFixed(3)})`; ctx.stroke(g.line);
+        if (b < 2) { // far side: plain dots, the glow would be invisible behind the sphere anyway
+          ctx.fillStyle = `rgba(${RGB[t]},${(alpha * 1.2).toFixed(3)})`;
+          const d = 1.6 * tipScale;
+          for (const [x, y] of g.tips) ctx.fillRect(x - d / 2, y - d / 2, d, d);
+          return;
+        }
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = Math.min(1, alpha * 1.25);
         const sprite = this.sprites[t];
@@ -434,7 +478,7 @@ export class Orbs {
       const title = g.title.length > 46 ? `${g.title.slice(0, 45)}…` : g.title;
       const text = `${word} · ${g.symbol} · ${title}${g.link ? ' ↗' : ''}`;
       ctx.font = `bold ${9.5 * u}px JetBrains Mono`;
-      const w = Math.min(ctx.measureText(text).width, o.w * 0.7) + 10 * u;
+      const w = Math.min(measure(ctx, text), o.w * 0.7) + 10 * u;
       const { right, x: x0 } = side(p, w, 26 * u);
       const by = slot(x0, p.y - 18 * u, w, tagH, [0, -22, 22, -44, 44, -66, 66, -88]);
       if (by === null) return;
@@ -463,7 +507,7 @@ export class Orbs {
     for (const q of [...facing.slice(0, k), ...facing.slice(-k)]) {
       const p = pos.get(q.symbol);
       const text = `${q.symbol} ${fmtPrice(q.open, q.decimals)}→${fmtPrice(q.last, q.decimals)} ${fmtPct(q.changePct)}`;
-      const w = ctx.measureText(text).width + 4 * u;
+      const w = measure(ctx, text) + 4 * u;
       const { right, x } = side(p, w, 7 * u);
       const y = slot(x, p.y, w, labelH, [0, 14, -14, 28, -28]);
       if (y === null) continue;

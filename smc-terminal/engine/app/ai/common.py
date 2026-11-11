@@ -12,7 +12,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from .. import analysis, instruments, outlook, profile
+from .. import analysis, instruments, outlook, profile, training
 from ..errors import EngineError
 
 SYSTEM = """Kamu adalah analis fundamental pasar keuangan. Tentukan arah harga satu aset (naik / turun / netral)
@@ -132,19 +132,32 @@ def facts(inst: instruments.Instrument, news: list[dict]) -> tuple[dict, dict]:
         "dataNotes": prof.get("notes", []),
         "now": int(now),
     }
-    mtf = view["mtf"]
-    smc = {"score": mtf["score"], "label": mtf["label"], "aligned": mtf["aligned"],
-           "timeframes": [{"tf": t.get("tf"), "score": t.get("score"), "label": t.get("label")} for t in mtf["timeframes"]],
-           "plan4h": detail.get("plan")}
+    horizons = {}
+    for horizon, tfs in analysis.HORIZON_TIMEFRAMES.items():
+        mtf = view["mtf"] if tfs == ("1d", "4h", "1h") else analysis.mtf(inst, tfs)
+        horizons[horizon] = {"score": mtf["score"], "label": mtf["label"], "aligned": mtf["aligned"], "tfs": list(tfs),
+                             "timeframes": [{"tf": t.get("tf"), "score": t.get("score"), "label": t.get("label")}
+                                            for t in mtf["timeframes"]]}
+    smc = {"horizons": horizons, "plan4h": detail.get("plan"),
+           "reliability": {h: training.reliability(inst.symbol, list(tfs)) for h, tfs in analysis.HORIZON_TIMEFRAMES.items()}}
     return fact, smc
 
 
 def confluence(answer: dict, smc: dict) -> dict:
-    """Raise the AI's confidence when its fundamental call agrees with the SMC bias, lower it on conflict."""
+    """Raise the AI's confidence when its fundamental call agrees with the SMC bias, lower it on conflict.
+
+    The SMC view compared is the one for the AI's horizon (intraday: 1H/15M/5M, 1-3 hari: 4H/1H/15M,
+    1-2 minggu: 1D/4H/1H). `smc` is either {"horizons": {...}} or a single view.
+    """
+    horizons = smc.get("horizons") or {}
+    view = horizons.get(answer["horizon"]) or horizons.get("1-2 minggu") or smc
     ai_dir = {"naik": 1, "turun": -1}.get(answer["direction"], 0)
-    score = float(smc.get("score") or 0)
+    score = float(view.get("score") or 0)
     smc_dir = 0 if abs(score) < SMC_MIN_SCORE else (1 if score > 0 else -1)
-    weight = round(min(MAX_ADJUSTMENT, 5 + abs(score) * 0.2))
+    weight = min(MAX_ADJUSTMENT, 5 + abs(score) * 0.2)
+    # SMC that has been accurate on this asset (virtual trading) counts more, inaccurate SMC less
+    rel = (smc.get("reliability") or {}).get(answer["horizon"])
+    weight = round(min(MAX_ADJUSTMENT, weight * (rel["factor"] if rel else 1.0)))
     base = answer["confidence"]
     if ai_dir and smc_dir and ai_dir == smc_dir:
         status, adj = "match", weight
@@ -155,11 +168,14 @@ def confluence(answer: dict, smc: dict) -> dict:
     else:
         status, adj = "neutral", 0
         note = "SMC belum memberi arah jelas." if not smc_dir else "AI menilai netral; SMC tidak mengubah keyakinan."
+    if rel:
+        note += f" Akurasi SMC aset ini {rel['winRate'] * 100:.0f}% dari {rel['trades']} trade virtual (bobot ×{rel['factor']})."
     final = max(5, min(CONFIDENCE_CAP, base + adj))
     signal = ("BELI" if ai_dir > 0 else "JUAL") if ai_dir and final >= SIGNAL_MIN_CONFIDENCE else "NETRAL"
-    return {"status": status, "aiDirection": answer["direction"], "smcScore": round(score, 1), "smcLabel": smc.get("label"),
-            "smcAligned": bool(smc.get("aligned")), "base": base, "adjustment": adj, "final": final, "signal": signal,
-            "note": note}
+    return {"status": status, "aiDirection": answer["direction"], "smcScore": round(score, 1), "smcLabel": view.get("label"),
+            "smcAligned": bool(view.get("aligned")), "smcTimeframes": [t.upper() for t in view.get("tfs", [])],
+            "horizon": answer["horizon"], "base": base, "adjustment": adj, "final": final, "signal": signal, "note": note,
+            "smcReliability": rel}
 
 
 def user_message(fact_json: dict) -> str:

@@ -58,11 +58,7 @@ public sealed class CalendarWorker(
     IOptions<TerminalOptions> options,
     ILogger<CalendarWorker> log) : BackgroundService
 {
-    private static string CachePath => Path.Combine(
-        OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SMCTerminal")
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "smc-terminal"),
-        "calendar.json");
+    private static string CachePath => AppPaths.File("calendar.json");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

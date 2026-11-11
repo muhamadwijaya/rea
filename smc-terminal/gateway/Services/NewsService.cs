@@ -204,7 +204,7 @@ public static class NewsItemExtensions
     };
 }
 
-/// <summary>Polls every configured feed, scores new headlines through the engine and pushes them live.</summary>
+/// <summary>Polls every configured feed on its own loop, scores new headlines through the engine and pushes them live.</summary>
 public sealed class NewsWorker(
     IHttpClientFactory httpFactory,
     NewsStore store,
@@ -230,28 +230,25 @@ public sealed class NewsWorker(
         }
         Statuses = _status.Values.ToList();
 
-        var interval = TimeSpan.FromSeconds(Math.Max(20, options.Value.NewsPollSeconds));
-        using var timer = new PeriodicTimer(interval);
-        var first = true;
-        do
+        // History first (all feeds once, one reset event), then every feed on its own loop: a new headline
+        // is scored and pushed as soon as its feed returns it, never waiting for slower feeds.
+        try
         {
-            try
-            {
-                await PollOnce(first, stoppingToken);
-                first = false;
-            }
-            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-            {
-                log.LogError(ex, "News poll failed");
-            }
-        } while (await timer.WaitForNextTickAsync(stoppingToken));
+            await PollAll(stoppingToken);
+        }
+        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+        {
+            log.LogError(ex, "Initial news poll failed");
+        }
+        var baseInterval = TimeSpan.FromSeconds(Math.Max(10, options.Value.NewsPollSeconds));
+        await Task.WhenAll(options.Value.Feeds.Select(feed => FeedLoop(feed, baseInterval, stoppingToken)));
     }
 
-    private async Task PollOnce(bool first, CancellationToken ct)
+    private async Task PollAll(CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        using var gate = new SemaphoreSlim(6);
-        var tasks = options.Value.Feeds.Select(async feed =>
+        using var gate = new SemaphoreSlim(8);
+        var batches = await Task.WhenAll(options.Value.Feeds.Select(async feed =>
         {
             await gate.WaitAsync(ct);
             try
@@ -262,25 +259,59 @@ public sealed class NewsWorker(
             {
                 gate.Release();
             }
-        });
-        var batches = await Task.WhenAll(tasks);
+        }));
         Statuses = _status.Values.ToList();
-
         var added = store.AddRange(batches.SelectMany(b => b), now);
         await ScoreUnscored(ct);
+        log.LogInformation("News: {Count} headlines loaded (store {Total})", added.Count, store.Total);
+        await broadcaster.Send("newsReset", new { total = store.Total }, ct);
+    }
 
+    private async Task FeedLoop(FeedConfig feed, TimeSpan baseInterval, CancellationToken ct)
+    {
+        var interval = feed.PollSeconds > 0 ? TimeSpan.FromSeconds(Math.Max(10, feed.PollSeconds)) : baseInterval;
+        try
+        {
+            // spread the feeds over the interval so requests do not all fire together
+            await Task.Delay(TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * interval.TotalMilliseconds), ct);
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await PollFeed(feed, ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    log.LogError(ex, "News poll of {Feed} failed", feed.Name);
+                }
+                var failures = _status[feed.Url].ConsecutiveFailures;
+                var wait = failures == 0 ? interval : TimeSpan.FromSeconds(Math.Min(300, interval.TotalSeconds * Math.Pow(2, Math.Min(5, failures))));
+                await Task.Delay(wait, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task PollFeed(FeedConfig feed, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var items = await FetchFeed(feed, now, ct);
+        Statuses = _status.Values.ToList();
+        var added = store.AddRange(items, now);
         if (added.Count == 0)
         {
             return;
         }
-        log.LogInformation("News: {Count} new headlines (store {Total})", added.Count, store.Total);
-        if (first)
-        {
-            await broadcaster.Send("newsReset", new { total = store.Total }, ct);
-            return;
-        }
+        await ScoreUnscored(ct);
         var ids = added.Select(a => a.Id).ToHashSet();
         var fresh = store.Query(null, null, null, null, null, 300).Where(i => ids.Contains(i.Id)).ToList();
+        if (fresh.Count == 0)
+        {
+            return;
+        }
+        log.LogInformation("News: {Count} new from {Feed} (store {Total})", fresh.Count, feed.Name, store.Total);
         await broadcaster.Send("news", fresh, ct);
         foreach (var item in fresh.Where(i => Math.Abs(i.Sentiment ?? 0) >= 0.75 && i.Published > now.AddMinutes(-30)).Take(3))
         {

@@ -5,7 +5,7 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        using var mutex = new Mutex(true, @"Local\SMCTerminal.Desktop", out var firstInstance);
+        using var mutex = new Mutex(true, @"Local\SharxInvest.Desktop", out var firstInstance);
         if (!firstInstance)
         {
             Win32.ActivateExisting(MainForm.WindowTitle);
@@ -17,9 +17,9 @@ internal static class Program
         if (root is null)
         {
             MessageBox.Show(
-                "Folder SMC Terminal tidak ditemukan.\n\nJalankan SMCTerminal.exe dari folder 'app' di dalam folder smc-terminal " +
+                "Folder SHARX INVEST tidak ditemukan.\n\nJalankan SharxInvest.exe dari folder 'app' di dalam folder smc-terminal " +
                 "(yang berisi folder engine, gateway dan config), atau jalankan start.bat.",
-                "SMC Terminal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                "SHARX INVEST", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
         Application.Run(new MainForm(root));

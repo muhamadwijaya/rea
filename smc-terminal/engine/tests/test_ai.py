@@ -143,3 +143,13 @@ def test_confluence_with_smc(direction, confidence, smc_score, status, final, si
 def test_new_answer_fields_default_when_missing():
     a = common.parse_answer('{"direction": "naik", "confidence": 55, "summary": "ok"}')
     assert a["catalysts"] == [] and a["fundamentalView"] == ""
+
+
+def test_confluence_uses_smc_timeframes_of_the_ai_horizon():
+    smc = {"horizons": {"1-2 minggu": {"score": 60, "label": "NAIK", "tfs": ["1d", "4h", "1h"]},
+                        "intraday": {"score": -60, "label": "TURUN", "tfs": ["1h", "15m", "5m"]}}}
+    swing = common.normalize({"direction": "naik", "confidence": 60, "summary": "x", "horizon": "1-2 minggu"})
+    day = common.normalize({"direction": "naik", "confidence": 60, "summary": "x", "horizon": "intraday"})
+    assert common.confluence(swing, smc)["status"] == "match"
+    c = common.confluence(day, smc)
+    assert c["status"] == "conflict" and c["smcTimeframes"] == ["1H", "15M", "5M"]

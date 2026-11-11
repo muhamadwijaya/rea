@@ -14,7 +14,6 @@ export class NewsView {
     this.cfg = cfg;
     this.filters = { category: 'all', sentiment: 'all', q: '' };
     this.items = [];
-    this.pending = [];
     this.offset = 0;
     el.innerHTML = `
       <div class="sent-strip sent-bars"></div>
@@ -28,7 +27,6 @@ export class NewsView {
         <div class="panel col-panel">
           <div class="panel-head"><span class="diamond">◆</span> BERITA ${esc(cfg.nav)} REALTIME <span class="sub news-sub"></span><span class="right live-label">LIVE</span></div>
           <div class="scroll news-scroll">
-            <div class="new-banner hidden"><button>↑ <span></span> berita baru</button></div>
             <div class="news-list"></div>
             <div style="padding:12px; text-align:center"><button class="btn news-more">MUAT LEBIH BANYAK</button></div>
           </div>
@@ -54,13 +52,6 @@ export class NewsView {
       timer = setTimeout(() => { this.filters.q = e.target.value.trim(); this.load(); }, 300);
     });
     $('.news-more').addEventListener('click', () => { this.offset += PAGE; this.load(false); });
-    $('.new-banner').addEventListener('click', () => {
-      this.items = [...this.pending, ...this.items];
-      this.pending = [];
-      $('.new-banner').classList.add('hidden');
-      this.renderList();
-      $('.news-scroll').scrollTo({ top: 0, behavior: 'smooth' });
-    });
     timeline($('.tv-timeline'), cfg.timeline);
     on('news', (items) => this.onRealtime(items));
     on('newsReset', () => this.load());
@@ -122,8 +113,6 @@ export class NewsView {
     if (reset) {
       this.offset = 0;
       this.items = [];
-      this.pending = [];
-      $('.new-banner').classList.add('hidden');
       $('.news-list').innerHTML = '<div class="loading">Memuat berita</div>';
     }
     try {
@@ -163,17 +152,16 @@ export class NewsView {
   onRealtime(newItems) {
     const fresh = newItems.filter((i) => this.matches(i)).filter((i) => !this.items.some((x) => x.id === i.id));
     if (!fresh.length) return;
+    // New headlines go in immediately, newest first. A reader scrolled further down keeps their place:
+    // the scroll offset grows by the inserted height.
     const list = this.el.querySelector('.news-list');
-    if (this.el.querySelector('.news-scroll').scrollTop < 200 || !this.visible()) {
-      this.items = [...fresh, ...this.items];
-      list.querySelector('.empty')?.remove();
-      list.insertAdjacentHTML('afterbegin', fresh.map((i) => this.itemHtml(i, true)).join(''));
-    } else {
-      this.pending = [...fresh, ...this.pending];
-      const banner = this.el.querySelector('.new-banner');
-      banner.querySelector('span').textContent = this.pending.length;
-      banner.classList.remove('hidden');
-    }
+    const scroller = this.el.querySelector('.news-scroll');
+    const before = list.scrollHeight;
+    const keep = scroller.scrollTop > 0;
+    this.items = [...fresh, ...this.items];
+    list.querySelector('.empty')?.remove();
+    list.insertAdjacentHTML('afterbegin', fresh.map((i) => this.itemHtml(i, true)).join(''));
+    if (keep) scroller.scrollTop += list.scrollHeight - before;
   }
 
   show() { this.loadSentiment(); }

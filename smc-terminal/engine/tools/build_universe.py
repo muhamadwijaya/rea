@@ -71,11 +71,22 @@ COMMODITIES = [
     ("COFFEE", "Coffee futures", "KC=F", "ICEUS:KC1!", 2), ("SUGAR", "Sugar futures", "SB=F", "ICEUS:SB1!", 2),
     ("COCOA", "Cocoa futures", "CC=F", "ICEUS:CC1!", 0),
 ]
-STABLE_OR_WRAPPED = {"USDT", "USDC", "DAI", "FDUSD", "USDE", "PYUSD", "TUSD", "USDS", "USD1", "BUSD", "USDD", "FRAX", "RLUSD",
-                     "USDTB", "USDX", "USDF", "GHO", "USDO", "USDG", "USDAI", "BUIDL", "USYC", "SUSDE", "SUSDS", "EURC",
-                     "WBTC", "WETH", "STETH", "WSTETH", "WEETH", "WBETH", "RETH", "CBBTC", "CBETH", "METH", "LBTC", "SOLVBTC",
-                     "JITOSOL", "BNSOL", "MSOL", "BSC-USD", "XAUT", "PAXG", "BFUSD", "SYRUPUSDC", "STKAAVE", "OSETH", "EZETH",
-                     "RSETH", "LSETH", "CLBTC", "TBTC", "FBTC", "UBTC", "BTCB", "WHYPE", "KHYPE", "JLP", "SAVAX"}
+# Wrapped / staked / bridged copies duplicate their underlying coin, so they are left out.
+WRAPPED = {"WBTC", "WETH", "STETH", "WSTETH", "WEETH", "WBETH", "RETH", "CBBTC", "CBETH", "METH", "LBTC", "SOLVBTC",
+           "JITOSOL", "BNSOL", "MSOL", "BSC-USD", "SUSDE", "SUSDS", "SYRUPUSDC", "STKAAVE", "OSETH", "EZETH", "RSETH",
+           "LSETH", "CLBTC", "TBTC", "FBTC", "UBTC", "BTCB", "WHYPE", "KHYPE", "JLP", "SAVAX", "BUIDL", "USYC"}
+# ...and tokenized stocks / ETFs duplicate the real listings in the stock universe.
+WRAPPED_WORDS = ("wrapped", "bridged", "staked", "restaked", "liquid staking", "wormhole", "binance-peg", "(pos)", "xstock",
+                 "tokenized", "bstocks")
+CRYPTO_PAGES = 4  # 4 x 250 = the top 1,000 coins by market cap
+SEARCH_RANK = 500  # coins up to this rank are looked up by name when their plain Yahoo ticker fails
+# CoinGecko category -> map block; the first matching category wins.
+CRYPTO_CATEGORIES = [
+    ("stablecoins", "Stablecoin"), ("meme-token", "Meme"), ("artificial-intelligence", "AI"), ("layer-2", "Layer 2"),
+    ("exchange-based-tokens", "Token Exchange"), ("decentralized-finance-defi", "DeFi & RWA"),
+    ("real-world-assets-rwa", "DeFi & RWA"), ("oracle", "Infrastruktur & Oracle"), ("privacy-coins", "Privasi"),
+    ("gaming", "Gaming & Metaverse"), ("proof-of-work-pow", "Bitcoin & PoW"), ("layer-1", "Layer 1"),
+]
 
 
 def html_tables(url: str) -> list[pd.DataFrame]:
@@ -134,24 +145,77 @@ def idx_stocks() -> list[dict]:
              "class": "idx", "sector": i["sector"], "group": "BEI"} for i in items if f"{i['symbol']}.JK" in ok]
 
 
-def crypto(limit: int = 150) -> list[dict]:
-    coins = requests.get(
-        "https://api.coingecko.com/api/v3/coins/markets",
-        params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": limit, "page": 1},
-        headers=UA, timeout=40,
-    ).json()
-    picked = [c for c in coins if c["symbol"].upper() not in STABLE_OR_WRAPPED and c.get("current_price")]
+def _coingecko(params: dict) -> list[dict]:
+    for attempt in range(4):
+        r = requests.get("https://api.coingecko.com/api/v3/coins/markets", params=params, headers=UA, timeout=40)
+        if r.status_code == 429:  # public API rate limit: wait and retry
+            time.sleep(20 * (attempt + 1))
+            continue
+        r.raise_for_status()
+        time.sleep(4)
+        return r.json()
+    return []
+
+
+def crypto(pages: int = CRYPTO_PAGES) -> list[dict]:
+    coins: list[dict] = []
+    for page in range(1, pages + 1):
+        coins += _coingecko({"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": page})
+    category: dict[str, str] = {}
+    for cat_id, label in reversed(CRYPTO_CATEGORIES):  # reversed: earlier entries overwrite later ones
+        for page in (1, 2):
+            rows = _coingecko({"vs_currency": "usd", "category": cat_id, "order": "market_cap_desc", "per_page": 250, "page": page})
+            for c in rows:
+                category[c["id"]] = label
+            if len(rows) < 250:
+                break
+    picked, seen = [], set()
+    for c in coins:
+        sym = c["symbol"].upper()
+        name = c["name"].lower()
+        if sym in WRAPPED or any(w in name for w in WRAPPED_WORDS) or not c.get("current_price") or sym in seen:
+            continue
+        if not sym.isalnum():
+            continue
+        seen.add(sym)  # several coins share a ticker: keep the largest
+        picked.append(c)
     ok = last_closes([f"{c['symbol'].upper()}-USD" for c in picked])
+    matches = lambda price, c: price is not None and 0.85 <= price / c["current_price"] <= 1.15  # noqa: E731
+    yahoo = {c["id"]: f"{c['symbol'].upper()}-USD" for c in picked if matches(ok.get(f"{c['symbol'].upper()}-USD"), c)}
+    # Yahoo lists coins whose ticker is shared under numbered tickers (TON11419-USD, SUI20947-USD): find them by
+    # name for the larger coins and keep one only when its price matches CoinGecko's.
+    missing = [c for c in picked if c["id"] not in yahoo and (c.get("market_cap_rank") or 9999) <= SEARCH_RANK]
+    candidates: dict[str, str] = {}
+    for c in missing:
+        try:
+            quotes = yf.Search(c["name"], max_results=8, news_count=0).quotes
+        except Exception:  # search is best effort
+            continue
+        sym = c["symbol"].upper()
+        for q in quotes:
+            t = str(q.get("symbol") or "")
+            if q.get("quoteType") == "CRYPTOCURRENCY" and t.endswith("-USD") and t.startswith(sym) and t[len(sym):-4].isdigit():
+                candidates[c["id"]] = t
+                break
+        time.sleep(0.3)
+    found = last_closes(sorted(set(candidates.values()))) if candidates else {}
+    for c in missing:
+        t = candidates.get(c["id"])
+        if t and matches(found.get(t), c):
+            yahoo[c["id"]] = t
+            ok[t] = found[t]
+    print(f"  numbered Yahoo tickers found for {sum(1 for c in missing if c['id'] in yahoo)}/{len(missing)} coins", file=sys.stderr)
     out = []
     for c in picked:
         sym = c["symbol"].upper()
-        price = ok.get(f"{sym}-USD")
-        if price is None or not 0.85 <= price / c["current_price"] <= 1.15:
+        ticker = yahoo.get(c["id"])
+        if ticker is None:
             continue  # Yahoo ticker missing or points at a different coin
-        decimals = 2 if price >= 10 else 4 if price >= 0.1 else 6
-        out.append({"symbol": f"{sym}USD", "name": f"{c['name']} / US Dollar", "yahoo": f"{sym}-USD",
-                    "tv": f"CRYPTO:{sym}USD", "class": "crypto", "decimals": decimals, "group": f"Top {limit}",
-                    "rank": c.get("market_cap_rank")})
+        price = ok[ticker]
+        decimals = 2 if price >= 10 else 4 if price >= 0.1 else 6 if price >= 0.0001 else 8
+        out.append({"symbol": f"{sym}USD", "name": f"{c['name']} / US Dollar", "yahoo": ticker,
+                    "tv": f"CRYPTO:{sym}USD", "class": "crypto", "decimals": decimals, "sector": category.get(c["id"], ""),
+                    "group": f"Top {pages * 250}", "rank": c.get("market_cap_rank")})
     return out
 
 

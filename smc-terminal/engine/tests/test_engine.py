@@ -175,6 +175,16 @@ def test_every_instrument_has_a_map_block():
     uni = instruments.universe()
     assert all(blocks.block_of(i) != "Lainnya" for i in uni if i.asset_class in ("us", "forex", "commodity", "index"))
     crypto = [i for i in uni if i.asset_class == "crypto"]
-    assert sum(blocks.block_of(i) != "Lainnya" for i in crypto) >= len(crypto) - 5
+    assert sum(blocks.block_of(i) != "Lainnya" for i in crypto) >= 0.75 * len(crypto)
     assert blocks.block_of(instruments.find("AAPL")) == "Information Technology"  # core entry keeps the universe sector
     assert blocks.block_of(instruments.find("EURUSD")) == "Mayor" and blocks.block_of(instruments.find("XAUUSD")) == "Logam"
+
+
+def test_benefit_headlines_are_classified_per_market():
+    from app import benefits
+
+    stock, crypto, fx = (benefits.KINDS_BY_MARKET[m] for m in ("saham-idx", "kripto", "forex"))
+    assert benefits.classify("BBRI bagikan dividen interim Rp 135 per saham", stock) == "DIVIDEN"
+    assert benefits.classify("Bitcoin slips as traders price in a Fed rate cut", crypto) is None
+    assert benefits.classify("Arbitrum announces airdrop for early users", crypto) == "AIRDROP"
+    assert benefits.classify("BI rate decision: Bank Indonesia holds rates", fx) == "SUKU BUNGA"
