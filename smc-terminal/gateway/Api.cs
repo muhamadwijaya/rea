@@ -188,6 +188,28 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
+        // Voice assistant: speech synthesis (WAV), recorded answers and model downloads go to the engine as-is.
+        api.MapMethods("/voice/{**rest}", new[] { "GET", "POST" }, async (string rest, HttpContext context, EngineClient engine, CancellationToken ct) =>
+        {
+            if (rest is not ("status" or "setup" or "tts" or "stt"))
+            {
+                return Results.NotFound();
+            }
+            await engine.ForwardAsync(context, $"voice/{rest}", ct);
+            return Results.Empty;
+        });
+
+        // Full text of a stored headline's article (or its feed summary with the reason), for reading aloud.
+        api.MapGet("/news/article", async (string id, NewsStore news, EngineClient engine, CancellationToken ct) =>
+        {
+            if (news.Find(id) is not { } item)
+            {
+                return Results.NotFound(new { error = "not_found", message = "Berita tidak ditemukan." });
+            }
+            var response = await engine.PostJsonAsync("news/article", new { url = item.Link, title = item.Title, summary = item.Summary }, ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
         api.MapGet("/training/summary", async (EngineClient engine, CancellationToken ct) =>
         {
             var response = await engine.GetAsync("training/summary", ct);

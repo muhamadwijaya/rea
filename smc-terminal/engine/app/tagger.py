@@ -51,6 +51,7 @@ NAME_STOP = {
     "bank", "indonesia", "mandiri", "jaya", "sejahtera", "utama", "abadi", "makmur", "sentosa", "persada", "prima",
     "group", "holdings", "resources", "industries", "solutions", "systems", "technologies", "services", "partners",
     "trust", "gold", "oil", "coin", "token", "network", "protocol", "finance", "chain", "world", "pepe", "sui", "near",
+    "total", "harga", "pasar", "saham", "negara", "rakyat", "umum", "besar", "baru", "dunia", "kota", "raya",
 }
 
 SUFFIXES = re.compile(

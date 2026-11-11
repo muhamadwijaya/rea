@@ -42,6 +42,17 @@ if errorlevel 1 (
   "%VPY%" -m pip install --disable-pip-version-check -r "%ROOT%engine\requirements.txt" || goto :fail_pip
   copy /y "%ROOT%engine\requirements.txt" "%ROOT%engine\.venv\requirements.installed" >nul
 )
+rem Paket suara (opsional): Piper TTS offline, pengenal suara Whisper, pembaca artikel. Gagal = fitur suara nonaktif saja.
+fc /b "%ROOT%engine\requirements-voice.txt" "%ROOT%engine\.venv\requirements-voice.installed" >nul 2>nul
+if errorlevel 1 (
+  echo  [*] Menginstall paket suara ^(Piper TTS, pengenal suara, pembaca artikel^) ...
+  "%VPY%" -m pip install --disable-pip-version-check -r "%ROOT%engine\requirements-voice.txt"
+  if errorlevel 1 (
+    echo  [!] Paket suara gagal dipasang - fitur suara nonaktif, aplikasi tetap berjalan.
+  ) else (
+    copy /y "%ROOT%engine\requirements-voice.txt" "%ROOT%engine\.venv\requirements-voice.installed" >nul
+  )
+)
 
 rem ---------------------------------------------------------------- build aplikasi desktop (C#)
 if defined REBUILD del /q "%ROOT%app\VERSION" >nul 2>nul

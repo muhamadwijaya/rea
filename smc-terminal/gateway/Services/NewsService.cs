@@ -74,6 +74,14 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         }
     }
 
+    public NewsItem? Find(string id)
+    {
+        lock (_gate)
+        {
+            return _byId.GetValueOrDefault(id);
+        }
+    }
+
     public List<NewsItem> Query(string? market, string? category, string? asset, string? sentiment, string? q, int limit,
         int offset = 0, DateTimeOffset? since = null, string? symbol = null)
     {

@@ -12,10 +12,11 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, outlook, screener, sentiment, training
+from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, outlook, screener, sentiment, training, voice
 from .errors import EngineError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -163,6 +164,50 @@ class AiRequest(BaseModel):
 def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> dict:
     """Key arrives in the X-AI-Key header (never in the body, never logged)."""
     return ai.analyze(body.symbol, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(max_length=5000)
+    lang: str = "id"
+    rate: float = 1.0
+
+
+class VoiceSetupRequest(BaseModel):
+    items: list[str] = Field(default_factory=lambda: ["id", "stt"], max_length=4)
+
+
+class ArticleRequest(BaseModel):
+    url: str = Field(max_length=2000)
+    title: str = Field(default="", max_length=1000)
+    summary: str = Field(default="", max_length=5000)
+
+
+@app.get("/voice/status")
+def voice_status() -> dict:
+    return voice.status()
+
+
+@app.post("/voice/setup")
+def voice_setup(body: VoiceSetupRequest) -> dict:
+    return voice.setup(body.items)
+
+
+@app.post("/voice/tts")
+def voice_tts(body: TtsRequest) -> Response:
+    return Response(content=voice.speak(body.text, body.lang, body.rate), media_type="audio/wav")
+
+
+@app.post("/voice/stt")
+async def voice_stt(request: Request, lang: str = "id") -> dict:
+    audio = await request.body()
+    if len(audio) > 3_000_000:
+        raise voice.VoiceUnavailable("Rekaman terlalu panjang.")
+    return await run_in_threadpool(voice.transcribe, audio, lang)
+
+
+@app.post("/news/article")
+def news_article(body: ArticleRequest) -> dict:
+    return voice.article(body.url, body.title, body.summary)
 
 
 @app.get("/training/summary")

@@ -208,7 +208,9 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(DataDirectory, "WebView2"));
+            // The news voice assistant speaks without waiting for a click on every start.
+            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(DataDirectory, "WebView2"), options);
             await _web.EnsureCoreWebView2Async(env);
         }
         catch (WebView2RuntimeNotFoundException)
@@ -235,6 +237,16 @@ internal sealed class MainForm : Form
         };
         core.DocumentTitleChanged += (_, _) => Text = WindowTitle;
         core.WebMessageReceived += OnWebMessage;
+        core.PermissionRequested += (_, e) =>
+        {
+            // The microphone is used only for the spoken "ya / tidak" answer of the news assistant, and only
+            // for the app's own pages; every other permission keeps WebView2's default behaviour.
+            if (e.PermissionKind == CoreWebView2PermissionKind.Microphone
+                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && IsHome(uri))
+            {
+                e.State = CoreWebView2PermissionState.Allow;
+            }
+        };
         core.NewWindowRequested += (_, e) =>
         {
             // Links with target=_blank (news, TradingView) open in the default browser.

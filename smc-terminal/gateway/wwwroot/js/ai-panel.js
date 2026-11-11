@@ -9,12 +9,7 @@ const KEY_HINT = {
   custom: { placeholder: 'API key (kosongkan bila tidak perlu)', note: 'Endpoint apa pun yang kompatibel OpenAI /chat/completions (mis. Groq, Together, DeepSeek, LM Studio/Ollama lokal).' },
 };
 
-async function post(path, body, method = 'POST') {
-  const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
-  return data;
-}
+const post = (path, json, method = 'POST') => api(path, { method, json: json ?? undefined });
 
 const shortModel = (id) => String(id || '').replace(/:free$/, '');
 

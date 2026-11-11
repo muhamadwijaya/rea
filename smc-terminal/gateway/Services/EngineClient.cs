@@ -20,6 +20,38 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
     public static string? LastError { get; private set; }
     public static bool Online => LastOk is { } ok && DateTimeOffset.UtcNow - ok < TimeSpan.FromMinutes(5) && LastError is null;
 
+    /// <summary>
+    /// Relays a browser request (method, query, body, content type) to the engine and its response back
+    /// byte for byte — for binary payloads such as synthesized speech (WAV) and recorded answers.
+    /// </summary>
+    public async Task ForwardAsync(HttpContext context, string enginePath, CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), enginePath + context.Request.QueryString);
+            if (context.Request.ContentLength is > 0 || context.Request.Headers.TransferEncoding.Count > 0)
+            {
+                request.Content = new StreamContent(context.Request.Body);
+                if (context.Request.ContentType is { } type)
+                {
+                    request.Content.Headers.TryAddWithoutValidation("Content-Type", type);
+                }
+            }
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            MarkOk();
+            context.Response.StatusCode = (int)response.StatusCode;
+            context.Response.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            await response.Content.CopyToAsync(context.Response.Body, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            var failed = Fail(enginePath, ex);
+            context.Response.StatusCode = failed.Status;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(failed.Body, ct);
+        }
+    }
+
     public async Task<EngineResponse> GetAsync(string pathAndQuery, CancellationToken ct)
     {
         try

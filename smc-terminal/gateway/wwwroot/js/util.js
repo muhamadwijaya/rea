@@ -14,10 +14,16 @@ export class ApiError extends Error {
   constructor(message, status, body) { super(message); this.status = status; this.body = body; }
 }
 
-export async function api(path, { signal } = {}) {
+/** JSON request to the gateway; `json` (an object) is sent as the request body with POST unless `method` says otherwise. */
+export async function api(path, { signal, method, json } = {}) {
   let res;
   try {
-    res = await fetch(path, { signal, headers: { Accept: 'application/json' } });
+    res = await fetch(path, {
+      signal,
+      method: method || (json !== undefined ? 'POST' : 'GET'),
+      headers: { Accept: 'application/json', ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      body: json !== undefined ? JSON.stringify(json) : undefined,
+    });
   } catch (err) {
     if (err.name === 'AbortError') throw err;
     throw new ApiError('Gateway tidak dapat dihubungi. Pastikan start.bat masih berjalan.', 0, null);

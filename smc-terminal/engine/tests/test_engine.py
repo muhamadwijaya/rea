@@ -110,6 +110,7 @@ def test_sentiment_negation_and_assets():
         ("CEO says AI spending is up", "en", set()),
         # generic Indonesian words and index providers are not companies
         ("Pemanfaatan Teknologi AI Ubah Cara Investor Bertransaksi Saham", "id", set()),
+        ("Jalan Raya Sawangan Depok Ditutup Total Hingga 20 November", "id", set()),
         ("Gelagat Investor Asing di Saham BRPT & BRMS Jelang Review MSCI", "id", {("BRPT", 1), ("BRMS", 1)}),
         # a currency named only as the quote unit of a crypto headline is not tagged; explicit pairs are
         ("Bitcoin price in euro hits a record", "en", {("BTCUSD", 1)}),

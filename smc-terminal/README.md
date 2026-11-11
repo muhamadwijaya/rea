@@ -108,6 +108,34 @@ akhir **BELI / JUAL** bila keyakinan akhir ≥ 55, selain itu **NETRAL**. Hasil 
 mendatang, plan SMC 4H, model yang menjawab dan model yang dilewati. Keyakinan adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di
 pasar; karena itu aplikasi menampilkan akurasi nyata model aturan yang diverifikasi dengan reaksi harga setelah rilis data.
 
+## Asisten suara berita
+
+Tombol **🔊** di kanan atas mengaktifkan asisten suara (pengaturan disimpan di komputer ini):
+
+1. Saat berita baru yang **terkait aset** masuk, asisten membacakan tag-nya: aset, sentimen (naik / netral / turun)
+   dan judul berita.
+2. Lalu bertanya *"Mau saya bacakan berita lengkapnya, lalu jalankan analisa AI?"*. Jawab dengan **suara** ("ya" /
+   "tidak", dikenali offline lewat mikrofon), klik **YA / TIDAK**, atau tekan **Y / N**. Tanpa jawaban = dilewati.
+3. Bila **ya**: isi berita lengkap dibacakan, sementara **analisa AI** aset itu berjalan bersamaan; setelah berita selesai,
+   **hasil AI dibacakan** (sinyal BELI / JUAL / NETRAL, keyakinan, ringkasan, pendorong, risiko, konfluensi SMC).
+4. Tombol **🔊** di setiap berita (tab BERITA) langsung membacakan berita lengkap + hasil AI tanpa bertanya.
+
+Pilihan: semua berita bertag / hanya aset inti / hanya sentimen kuat; kecepatan & volume; mikrofon on/off; suara
+Piper atau suara Windows. Bila berita datang beruntun, hanya 3 terbaru yang dibacakan (yang lebih dari 5 menit dilewati).
+
+**Suara — gratis, tanpa batas, offline**: [Piper](https://github.com/OHF-Voice/piper1-gpl) (suara neural) dengan
+suara **Indonesia** `id_ID-news_tts-medium` dan **English** `en_US-lessac-medium` (masing-masing ±63 MB), serta
+pengenal jawaban **Whisper tiny** (±75 MB, via faster-whisper). Model diunduh sekali dari pengaturan suara (UNDUH SEMUA),
+diverifikasi checksum, disimpan di `%LOCALAPPDATA%\SharxInvest\voices` dan `\stt`; setelah itu tidak perlu internet
+untuk suara. Paket Python-nya (`engine/requirements-voice.txt`) dipasang `setup.bat`; bila gagal, aplikasi tetap
+berjalan dan memakai suara Windows. Lisensi: Piper GPL-3.0 (dipasang terpisah, tidak dibundel); model suara Piper
+mengikuti lisensi dataset masing-masing — untuk **pemakaian pribadi / non-komersial**. Kualitas Piper "medium":
+jelas dan natural, tetapi belum sehalus suara neural berbayar.
+
+**Isi berita lengkap** diambil dari halaman artikel seperti pembaca biasa (trafilatura). Situs yang menolak pembaca
+otomatis (HTTP 403/429, verifikasi bot, paywall) dan tautan Google News tidak diakali: asisten mengatakannya lalu
+membacakan ringkasan dari feed; tombol BUKA BERITA membuka artikel di browser.
+
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
 Setiap aset inti (TF 15M/1H/4H/1D) dan seluruh universe (TF 1D) dipantau. Strategi (kausal — hanya memakai bar
@@ -151,7 +179,8 @@ Engine Python — FastAPI (engine/)
    • pemindaian universe 1D/4H & harga seluruh aset di background (background.py)
    • analisa AI multi-provider (app/ai/: OpenRouter rotasi model gratis, Claude, OpenAI-compatible) +
      konfluensi dengan SMC; laporan perusahaan & pemegang saham (company.py), kinerja (profile.py);
-     blok sektor/kategori (blocks.py); dividen & benefit (benefits.py); virtual trading & tuner (training.py)
+     blok sektor/kategori (blocks.py); dividen & benefit (benefits.py); virtual trading & tuner (training.py);
+     suara offline & isi artikel untuk asisten berita (voice.py)
 ```
 
 ## Konfigurasi
@@ -175,6 +204,10 @@ Engine Python — FastAPI (engine/)
 | `GET /api/company?symbol=BBRI` | Laporan perusahaan: valuasi, analis, laba rugi/neraca/arus kas, pemegang saham |
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
 | `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade |
+| `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["id","en","stt"]}`) |
+| `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1}` | Suara Piper (audio/wav) |
+| `POST /api/voice/stt` (audio/wav 16 kHz) | Kenali jawaban singkat → `{"text","intent":"yes|no|null"}` |
+| `GET /api/news/article?id=…` | Isi lengkap berita (atau ringkasan + alasan) |
 | `GET /api/screener?market=all&tf=4h` | Screener (`market`: all, forex, saham-as, saham-idx, kripto) |
 | `GET /api/direction` | Arah market + sentimen berita + event high-impact |
 | `GET /api/news?market=kripto&category=&sentiment=&q=&limit=` | Berita per pasar (terbaru dulu) |

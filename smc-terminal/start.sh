@@ -12,6 +12,8 @@ command -v dotnet >/dev/null || { echo ".NET SDK 8+ tidak ditemukan"; exit 1; }
 if [ ! -x engine/.venv/bin/python ]; then "$PY" -m venv engine/.venv; fi
 if ! cmp -s engine/requirements.txt engine/.venv/requirements.installed; then
   engine/.venv/bin/python -m pip install --disable-pip-version-check -q -r engine/requirements.txt
+  # optional voice packages (offline TTS, spoken answers, article reader); failure only disables voice
+  engine/.venv/bin/python -m pip install --disable-pip-version-check -q -r engine/requirements-voice.txt || echo "Paket suara gagal dipasang: fitur suara nonaktif."
   cp engine/requirements.txt engine/.venv/requirements.installed
 fi
 dotnet build gateway/SmcTerminal.Gateway.csproj -c Release -nologo -v q

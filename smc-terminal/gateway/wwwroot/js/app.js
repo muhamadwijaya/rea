@@ -5,6 +5,7 @@ import dashboard from './dashboard.js';
 import calendar from './calendar.js';
 import method from './method.js';
 import { trainingPage } from './training.js';
+import { VoiceAssistant } from './voice.js';
 import { marketPage } from './market.js';
 import { MARKET_KEYS, MARKETS } from './markets.js';
 
@@ -56,6 +57,7 @@ async function openAnalysis(symbol, tf) {
 }
 
 window.SMC = { go, openAnalysis };
+window.SMC.voice = new VoiceAssistant(store); // news voice assistant (reads tagged headlines, asks, reads full + AI)
 
 function route() {
   const [name = 'dashboard', ...params] = location.hash.replace(/^#/, '').split('/').map(decodeURIComponent);
