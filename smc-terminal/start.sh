@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Linux/macOS equivalent of start.bat (Windows users: double-click start.bat).
+# Linux/macOS: runs the gateway (which supervises the Python engine) and serves the UI in the browser.
+# Windows users: double-click start.bat for the desktop app.
 set -euo pipefail
 cd "$(dirname "$0")"
-ENGINE_PORT="${ENGINE_PORT:-8765}"
 WEB_PORT="${WEB_PORT:-5080}"
 PY="${PYTHON:-python3}"
 
@@ -16,8 +16,5 @@ if ! cmp -s engine/requirements.txt engine/.venv/requirements.installed; then
 fi
 dotnet build gateway/SmcTerminal.Gateway.csproj -c Release -nologo -v q
 
-(cd engine && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port "$ENGINE_PORT") &
-ENGINE_PID=$!
-trap 'kill $ENGINE_PID 2>/dev/null || true' EXIT
-echo "SMC Terminal: http://localhost:$WEB_PORT/"
-cd gateway && dotnet run -c Release --no-build -- --urls "http://localhost:$WEB_PORT" --Terminal:EngineUrl="http://127.0.0.1:$ENGINE_PORT"
+echo "SMC Terminal: http://127.0.0.1:$WEB_PORT/  (Ctrl+C untuk berhenti)"
+cd gateway && exec dotnet run -c Release --no-build -- --urls "http://127.0.0.1:$WEB_PORT" --Terminal:ManageEngine=true

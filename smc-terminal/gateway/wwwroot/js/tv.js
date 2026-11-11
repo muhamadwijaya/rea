@@ -89,8 +89,8 @@ export function screenerWidget(el, market) {
   });
 }
 
-export function timeline(el, market) {
-  mountWidget(el, 'timeline', { feedMode: 'market', market, displayMode: 'regular', width: '100%', height: '100%' });
+export function timeline(el, feed) {
+  mountWidget(el, 'timeline', { displayMode: 'regular', width: '100%', height: '100%', ...feed });
 }
 
 export function economicCalendar(el) {
@@ -102,17 +102,37 @@ export function economicCalendar(el) {
   });
 }
 
-export function heatmap(el, kind) {
-  const currencies = ['EUR', 'USD', 'JPY', 'GBP', 'CHF', 'AUD', 'CAD', 'NZD'];
-  if (kind === 'cross') {
-    mountWidget(el, 'forex-cross-rates', { width: '100%', height: '100%', currencies });
-  } else if (kind === 'stocks') {
-    mountWidget(el, 'stock-heatmap', {
-      exchanges: [], dataSource: 'SPX500', grouping: 'sector', blockSize: 'market_cap_basic', blockColor: 'change',
-      hasTopBar: true, isDataSetEnabled: true, isZoomEnabled: true, hasSymbolTooltip: true, isMonoSize: false,
-      width: '100%', height: '100%',
-    });
-  } else {
-    mountWidget(el, 'forex-heat-map', { width: '100%', height: '100%', currencies });
+const CURRENCIES = ['EUR', 'USD', 'JPY', 'GBP', 'CHF', 'AUD', 'CAD', 'NZD'];
+const IDX_QUOTES = ['BBCA', 'BBRI', 'BMRI', 'BBNI', 'TLKM', 'ASII', 'GOTO', 'ANTM', 'ADRO', 'UNVR', 'ICBP', 'AMMN', 'MDKA', 'BRPT', 'PGAS', 'INDF'];
+
+function stockHeatmap(el, dataSource) {
+  mountWidget(el, 'stock-heatmap', {
+    exchanges: [], dataSource, grouping: 'sector', blockSize: 'market_cap_basic', blockColor: 'change',
+    hasTopBar: true, isDataSetEnabled: true, isZoomEnabled: true, hasSymbolTooltip: true, isMonoSize: false,
+    width: '100%', height: '100%',
+  });
+}
+
+/** Market map widgets used by the market overview pages. */
+export function widgetMap(el, kind) {
+  switch (kind) {
+    case 'cross':
+      return mountWidget(el, 'forex-cross-rates', { width: '100%', height: '100%', currencies: CURRENCIES });
+    case 'stocks':
+      return stockHeatmap(el, 'SPX500');
+    case 'nasdaq':
+      return stockHeatmap(el, 'NASDAQ100');
+    case 'crypto':
+      return mountWidget(el, 'crypto-coins-heatmap', {
+        dataSource: 'Crypto', blockSize: 'market_cap_calc', blockColor: 'change', hasTopBar: true,
+        isDataSetEnabled: true, isZoomEnabled: true, hasSymbolTooltip: true, isMonoSize: false, width: '100%', height: '100%',
+      });
+    case 'idx':
+      return mountWidget(el, 'market-quotes', {
+        width: '100%', height: '100%', showSymbolLogo: true,
+        symbolsGroups: [{ name: 'Saham IDX', symbols: IDX_QUOTES.map((s) => ({ name: `IDX:${s}`, displayName: s })) }],
+      });
+    default:
+      return mountWidget(el, 'forex-heat-map', { width: '100%', height: '100%', currencies: CURRENCIES });
   }
 }

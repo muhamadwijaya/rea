@@ -7,69 +7,91 @@ TradingView; overlay SMC digambar di atas TradingView Lightweight Charts.
 
 > Bukan saran investasi. Semua skor dan skenario dihasilkan aturan otomatis.
 
-## Menjalankan (Windows)
+## Menjalankan (Windows) — aplikasi desktop
 
 1. Install **Python 3.10+** — <https://www.python.org/downloads/> (centang *Add python.exe to PATH*).
 2. Install **.NET SDK 8** (atau lebih baru) — <https://dotnet.microsoft.com/download/dotnet/8.0>.
 3. Klik dua kali **`start.bat`**.
 
-Run pertama membuat virtualenv Python, menginstall dependensi, dan mem-build gateway C# (beberapa
-menit). Setelah itu dua jendela log terbuka (Engine Python & Gateway C#) dan browser membuka
-<http://localhost:5080>. Scan screener pertama butuh ±20 detik; berikutnya memakai cache.
+`start.bat` menjalankan `setup.bat` secara otomatis bila perlu (membuat virtualenv Python, menginstall
+dependensi, mem-build aplikasi ke folder `app\`), lalu membuka **SMC Terminal** sebagai aplikasi Windows
+dengan jendelanya sendiri — bukan di browser, tanpa jendela konsol. Engine Python berjalan tersembunyi
+di belakang aplikasi dan ikut berhenti saat jendela ditutup.
 
-Untuk berhenti: klik dua kali **`stop.bat`** (atau tutup kedua jendela log).
-
-Linux/macOS: `./start.sh`.
-
-## Tab
-
-| Tab | Isi |
+| File | Fungsi |
 | --- | --- |
-| **Dashboard** | Pencarian simbol, 7 langkah cara kerja, radar SMC seluruh watchlist, *verdict stack*, arah market hari ini, KPI, analisa terbaru, sinyal struktur, alert live |
-| **Screener** | Tabel SMC 49 instrumen (filter kelas aset / bias / TF 1H-4H-1D, sortir per kolom) + TradingView Screener realtime (forex, saham AS, saham Indonesia, kripto) |
-| **Analisa SMC** | Chart SMC (BOS/CHoCH swing & internal, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, garis entry/SL/TP), mode TradingView Live / Split, skor bias + komponennya, multi-timeframe 1D/4H/1H, skenario trading, narasi, level kunci, gauge teknikal TradingView, berita simbol |
-| **Arah Market** | Regime risk-on/risk-off, arah USD, saham AS, IHSG, emas, minyak, kripto, yield; kekuatan mata uang G8; event high-impact 48 jam; sentimen berita; heatmap forex & S&P 500 |
-| **Berita** | Berita realtime dari 19 sumber RSS (push via SignalR), sentimen & tag aset per headline, filter kategori/sentimen/kata kunci, TradingView News |
-| **Kalender** | Kalender ekonomi minggu ini (countdown event high-impact berikutnya, filter dampak & mata uang) + kalender TradingView |
+| `start.bat` | Buka aplikasi desktop (setup otomatis bila belum) |
+| `buat-shortcut.bat` | Buat ikon **SMC Terminal** di Desktop (langsung membuka `app\SMCTerminal.exe`) |
+| `setup.bat` | Install/build manual; `setup.bat --rebuild` untuk build ulang setelah mengubah kode |
+| `start-browser.bat` | Cadangan: server di satu jendela konsol, UI di browser (http://127.0.0.1:5080) |
+| `stop.bat` | Paksa hentikan semua proses SMC Terminal |
+
+Aplikasi desktop memakai **Microsoft Edge WebView2 Runtime** (sudah ada di Windows 10/11). Bila belum
+terpasang, aplikasi memberi tautan instalasi dan sementara membuka UI di browser.
+Pintasan: **F11** layar penuh, **F5** muat ulang. Tautan berita dibuka di browser default.
+Log ada di folder `logs\` (`gateway.log`, `engine.log`).
+
+Linux/macOS (mode browser): `./start.sh`.
+
+## Halaman
+
+| Halaman | Isi |
+| --- | --- |
+| **Dashboard** | Ringkasan semua pasar: kartu FOREX / SAHAM AS / SAHAM IDX / KRIPTO, radar SMC, *verdict stack*, arah market hari ini, KPI, sinyal struktur, alert live |
+| **Forex** · **Saham AS** · **Saham IDX** · **Kripto** | Tiap pasar punya 4 sub-tab sendiri ↓ |
+| ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP) atau chart TradingView live / split, skor bias, multi-timeframe 1D/4H/1H, skenario, narasi, level kunci, gauge teknikal, berita simbol |
+| ↳ Screener | Tabel SMC instrumen pasar itu (filter bias, TF 1H/4H/1D, sortir) + TradingView Screener realtime pasar itu |
+| ↳ Berita | Berita realtime khusus pasar itu (push SignalR), sentimen per aset, filter, TradingView News pasar itu, status sumber |
+| ↳ Arah Market | Breadth SMC, outlook (USD/emas/minyak, indeks AS & yield, IHSG, kripto), regime risk-on/off, kekuatan mata uang (forex), penggerak hari ini, break struktur terbaru, event high-impact, heatmap TradingView |
+| **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Semua aturan engine, bobot skor, sumber data dan keterbatasan |
+
+Watchlist bawaan: 13 forex + emas/perak/minyak + DXY (FOREX), 12 saham AS + SPX/NDX/DJI/VIX/US10Y
+(SAHAM AS), 12 saham BEI + IHSG (SAHAM IDX), 10 koin (KRIPTO). Berita dari 28 sumber RSS dibagi per pasar
+berdasarkan kategori feed dan aset yang disebut di judul.
 
 ## Arsitektur
 
 ```
-Browser (HTML/CSS/JS, Lightweight Charts, widget TradingView)
-   │  REST /api/*  +  SignalR /hub/market (push berita, screener, alert, statistik)
+SMCTerminal.exe — aplikasi desktop C# (WinForms + WebView2, desktop/)
+   │  menampilkan UI dalam jendela sendiri; menjalankan gateway di dalam proses
    ▼
-Gateway C# — ASP.NET Core 8  (gateway/, port 5080)
-   • menyajikan UI & API, push realtime
-   • agregasi 19 feed RSS (ETag/If-Modified-Since, dedup), kalender ForexFactory
-   • refresh screener & arah market berkala, deteksi alert (CHoCH/BOS baru, bias berubah,
-     berita bersentimen kuat, event high-impact ≤ 30 menit)
-   │  HTTP lokal 127.0.0.1:8765
+Gateway C# — ASP.NET Core 8 (gateway/)
+   • UI & REST API (/api/*), push realtime SignalR (/hub/market)
+   • 28 feed RSS (ETag/If-Modified-Since, dedup), klasifikasi berita per pasar, kalender ForexFactory
+   • refresh screener & arah market berkala, alert (CHoCH/BOS baru, bias berubah, berita kuat, event ≤ 30 mnt)
+   • EngineSupervisor: menjalankan engine Python tersembunyi, cek /health, restart otomatis bila crash,
+     proses anak terikat job object Windows sehingga tidak pernah tertinggal
+   │  HTTP lokal 127.0.0.1
    ▼
-Engine Python — FastAPI  (engine/)
-   • data OHLC Yahoo Finance (yfinance) + cache TTL per timeframe, unduhan batch
+Engine Python — FastAPI (engine/)
+   • data OHLC Yahoo Finance (yfinance) + cache TTL, unduhan batch
    • engine SMC (smc.py), skor bias, skenario & narasi (analysis.py)
-   • screener (screener.py), arah market & kekuatan mata uang (direction.py)
-   • sentimen headline EN/ID (sentiment.py)
+   • screener per pasar (screener.py), arah market & kekuatan mata uang (direction.py)
+   • sentimen headline EN/ID + tag aset (sentiment.py)
 ```
 
 ## Konfigurasi
 
 - **Watchlist**: `config/watchlist.json` — `symbol`, `name`, `yahoo` (ticker data), `tv` (simbol
-  TradingView), `class` (`forex | us | idx | index | commodity | crypto`). Simbol lain tetap bisa
+  TradingView), `class` (`forex | us | idx | index | commodity | crypto`), opsional `market`
+  (`forex | saham-as | saham-idx | kripto`) untuk menentukan halaman. Simbol lain tetap bisa
   dianalisa lewat kotak pencarian (mis. `IDX:ANTM`, `NYSE:KO`, `CADJPY`, `^FTSE`).
 - **Gateway**: `gateway/appsettings.json` → bagian `Terminal`: daftar feed berita, interval refresh
   berita/screener/arah market, timeframe screener default, URL kalender.
-- **Port**: variabel `ENGINE_PORT` dan `WEB_PORT` di awal `start.bat` / `stop.bat`.
+- **Port**: aplikasi desktop memakai port lokal bebas secara otomatis (utamakan 5080 dan 8765);
+  mode browser memakai `WEB_PORT` di `start-browser.bat`.
+- **Kategori berita → pasar**: `gateway/Services/Markets.cs`.
 
 ## API
 
 | Endpoint | Keterangan |
 | --- | --- |
 | `GET /api/analyze?symbol=EURUSD&tf=1h` | Analisa SMC lengkap + candle + MTF (`tf`: 15m, 1h, 4h, 1d, 1w) |
-| `GET /api/screener?group=all&tf=4h` | Screener (`group`: all, forex, us, idx, macro) |
+| `GET /api/screener?market=all&tf=4h` | Screener (`market`: all, forex, saham-as, saham-idx, kripto) |
 | `GET /api/direction` | Arah market + sentimen berita + event high-impact |
-| `GET /api/news?category=&sentiment=&q=&limit=` | Berita tersimpan (terbaru dulu) |
+| `GET /api/news?market=kripto&category=&sentiment=&q=&limit=` | Berita per pasar (terbaru dulu) |
+| `GET /api/news/sentiment?market=forex` | Ringkasan sentimen 12 jam per pasar |
 | `GET /api/symbol-news?symbol=AAPL` | Berita per simbol |
 | `GET /api/calendar` · `/api/alerts` · `/api/stats` · `/api/health` | Kalender, alert, KPI, status |
 
@@ -92,4 +114,5 @@ Engine Python — FastAPI  (engine/)
 ```bash
 cd engine && python -m pip install -r requirements.txt pytest && python -m pytest -q tests
 dotnet build gateway/SmcTerminal.Gateway.csproj -c Release
+dotnet publish desktop/SmcTerminal.Desktop.csproj -c Release -r win-x64 --self-contained false -o app   # Windows
 ```

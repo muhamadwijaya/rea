@@ -38,8 +38,8 @@ def health() -> dict:
 
 
 @app.get("/instruments")
-def list_instruments(group: str = "all") -> dict:
-    return {"group": group, "instruments": [i.to_json() for i in instruments.by_group(group)]}
+def list_instruments(market: str = "all") -> dict:
+    return {"market": market, "instruments": [i.to_json() for i in instruments.by_market(market)]}
 
 
 @app.get("/resolve")
@@ -68,8 +68,8 @@ def multi_timeframe(symbol: str) -> dict:
 
 
 @app.get("/screener")
-def screen(group: str = "all", tf: str = "4h") -> dict:
-    return screener.screen(group, tf)
+def screen(market: str = "all", tf: str = "4h") -> dict:
+    return screener.screen(market, tf)
 
 
 @app.get("/direction")

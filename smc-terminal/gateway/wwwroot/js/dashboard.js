@@ -1,5 +1,6 @@
 // Dashboard: hero, 7-step explainer, SMC engine radar, verdict stack, market direction strip, KPIs and live lists.
 import { $, esc, on, badge, dirClass, dirHex, fmtPct, fmtPrice, fmtScore, fmtTime, sparkline, timeAgo, arrow } from './util.js';
+import { MARKETS, MARKET_KEYS, rowsOf } from './markets.js';
 
 const STEPS = [
   ['STRUKTUR', 'Baca struktur pasar', 'Engine mencari swing high/low (pivot fractal) di dua skala: swing (besar) dan internal (kecil). Setiap pivot diberi label HH, HL, LH atau LL sehingga terlihat apakah pasar membuat puncak & lembah yang makin tinggi atau makin rendah.'],
@@ -12,8 +13,7 @@ const STEPS = [
 ];
 const STEP_POS = [[8, 22], [36, 22], [64, 22], [92, 22], [78, 78], [50, 78], [22, 78]];
 
-const CLASS_ORDER = ['forex', 'commodity', 'index', 'crypto', 'us', 'idx'];
-const CLASS_NAME = { forex: 'FOREX', commodity: 'KOMODITAS', index: 'INDEKS', crypto: 'KRIPTO', us: 'SAHAM AS', idx: 'SAHAM IDX' };
+const GROUP_NAME = Object.fromEntries(MARKET_KEYS.map((k) => [k, MARKETS[k].nav]));
 
 let step = 0;
 let stepTimer;
@@ -84,7 +84,7 @@ function renderChecks(stats) {
 // ------------------------------------------------------------------ radar
 function radarData(snapshot) {
   const rows = (snapshot?.rows || []).filter((r) => !r.error);
-  const ordered = CLASS_ORDER.flatMap((c) => rows.filter((r) => r.instrument.assetClass === c));
+  const ordered = MARKET_KEYS.flatMap((m) => rows.filter((r) => r.instrument.market === m));
   radar.rows = ordered;
   if (!radar.running) startRadar();
 }
@@ -130,12 +130,12 @@ function drawRadar(canvas, ctx) {
     const L = R * (0.3 + 0.7 * strength);
     const color = dirHex(r.direction);
     const cos = Math.cos(a), sin = Math.sin(a);
-    if (r.instrument.assetClass !== lastClass) {
-      lastClass = r.instrument.assetClass;
+    if (r.instrument.market !== lastClass) {
+      lastClass = r.instrument.market;
       ctx.strokeStyle = 'rgba(107,155,255,.35)'; ctx.beginPath();
       ctx.moveTo(cx + cos * R * 0.18, cy + sin * R * 0.18); ctx.lineTo(cx + cos * (R + 6), cy + sin * (R + 6)); ctx.stroke();
       ctx.save(); ctx.translate(cx + cos * (R + 14), cy + sin * (R + 14)); ctx.rotate(a + Math.PI / 2 + (sin > 0 ? Math.PI : 0));
-      ctx.fillStyle = '#6b9bff'; ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'left'; ctx.fillText(CLASS_NAME[lastClass], sin > 0 ? -60 : 2, 0); ctx.restore();
+      ctx.fillStyle = '#6b9bff'; ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'left'; ctx.fillText(GROUP_NAME[lastClass] || '', sin > 0 ? -60 : 2, 0); ctx.restore();
     }
     ctx.strokeStyle = `${color}40`; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(cx + cos * R * 0.14, cy + sin * R * 0.14); ctx.lineTo(cx + cos * L, cy + sin * L); ctx.stroke();
@@ -251,7 +251,7 @@ function renderDirection(d) {
   const reg = d.regime;
   const rc = reg.regime === 'RISK-ON' ? 'up' : reg.regime === 'RISK-OFF' ? 'down' : 'flat';
   el.innerHTML = `
-    <div class="regime" data-go="arah" style="cursor:pointer">
+    <div class="regime">
       <span class="eyebrow">ARAH MARKET HARI INI →</span>
       <span class="r ${rc}">${esc(reg.regime)}</span>
       <span class="h">${esc(d.headline)}</span>
@@ -270,17 +270,41 @@ function renderKpis(s) {
   const kpi = (t, v, sub, color = 'var(--text)') => `<div class="kpi"><div class="t">${t}</div><div class="v num" style="color:${color}">${v}</div><div class="s">${sub}</div></div>`;
   const pct = (n) => (s.instruments ? Math.round((n / s.instruments) * 100) : 0);
   $('#kpis').innerHTML = [
-    kpi(`INSTRUMEN · ${String(s.screenerTf || '').toUpperCase()}`, s.instruments ?? '–', s.engineOnline ? `refresh otomatis · <a data-go="screener">screener</a>` : '<span class="down">engine offline</span>'),
+    kpi(`INSTRUMEN · ${String(s.screenerTf || '').toUpperCase()}`, s.instruments ?? '–', s.engineOnline ? '4 pasar · refresh otomatis' : `<span class="down">${esc(s.engineError || 'engine offline')}</span>`),
     kpi('BIAS BULLISH', s.bullish ?? '–', `${pct(s.bullish)}% watchlist`, 'var(--bull)'),
     kpi('BIAS BEARISH', s.bearish ?? '–', `${pct(s.bearish)}% watchlist`, 'var(--bear)'),
     kpi('CHoCH BARU', s.chochRecent ?? '–', '≤ 6 bar terakhir', 'var(--neu)'),
-    kpi('BERITA · 24H', s.news24h ?? '–', `${s.feedsOk}/${s.feedsTotal} sumber aktif · <a data-go="berita">live</a>`, 'var(--accent)'),
+    kpi('BERITA · 24H', s.news24h ?? '–', `${s.feedsOk}/${s.feedsTotal} sumber aktif`, 'var(--accent)'),
     kpi('HIGH IMPACT · MINGGU', s.highImpactWeek ?? '–', next ? `${esc(next.currency)} ${esc(next.title)} · ${fmtTime(next.date, true)}` : '<a data-go="kalender">kalender</a>', 'var(--orange)'),
   ].join('');
 }
 
+function renderTiles() {
+  const el = $('#market-tiles');
+  el.innerHTML = MARKET_KEYS.map((k) => {
+    const cfg = MARKETS[k];
+    const rows = rowsOf(store.screener, k).filter((r) => !r.error);
+    const bull = rows.filter((r) => r.direction?.includes('bullish')).length;
+    const bear = rows.filter((r) => r.direction?.includes('bearish')).length;
+    const neu = rows.length - bull - bear;
+    const avg = rows.length ? rows.reduce((sum, r) => sum + r.score, 0) / rows.length : 0;
+    const top = [...rows].filter((r) => r.changePct != null).sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))[0];
+    const news = store.stats?.newsByMarket?.[k];
+    const pct = (n) => (rows.length ? (n / rows.length) * 100 : 0);
+    const dir = avg > 10 ? 'bull' : avg < -10 ? 'bear' : '';
+    return `<div class="panel market-tile" data-go="${k}">
+      <div class="mt-head"><b>${esc(cfg.nav)}</b><span class="muted">${rows.length} instrumen</span><span class="mt-go">BUKA →</span></div>
+      <div class="mt-dir" style="color:${dirHex(dir)}">${arrow(dir)} ${avg > 10 ? 'CONDONG NAIK' : avg < -10 ? 'CONDONG TURUN' : 'CAMPURAN'} <span class="num">${fmtScore(avg)}</span></div>
+      <div class="stack" style="height:6px"><i style="width:${pct(bull)}%;background:var(--bull)"></i><i style="width:${pct(neu)}%;background:var(--line-2)"></i><i style="width:${pct(bear)}%;background:var(--bear)"></i></div>
+      <div class="mt-foot"><span><span class="up">▲${bull}</span> <span class="down">▼${bear}</span></span>
+        <span>${top ? `${esc(top.instrument.symbol)} <span class="${top.changePct > 0 ? 'up' : 'down'}">${fmtPct(top.changePct)}</span>` : '–'}</span>
+        <span class="accent">${news ?? '–'} berita</span></div>
+    </div>`;
+  }).join('');
+}
+
 function quickChips() {
-  const picks = ['EURUSD', 'XAUUSD', 'GBPJPY', 'USDJPY', 'NVDA', 'AAPL', 'BBCA', 'BBRI', 'IHSG', 'BTCUSD'];
+  const picks = ['EURUSD', 'XAUUSD', 'GBPJPY', 'NVDA', 'AAPL', 'BBCA', 'BBRI', 'IHSG', 'BTCUSD', 'SOLUSD'];
   $('#quick').innerHTML = picks.map((p) => `<button type="button" data-sym="${p}">${p}</button>`).join('');
 }
 
@@ -306,15 +330,15 @@ export default {
     canvas.addEventListener('mouseleave', () => { $('#radar-tip').style.display = 'none'; });
     canvas.addEventListener('click', () => { if (radar.hover) window.SMC.openAnalysis(radar.hover.r.instrument.symbol, radar.hover.r.tf); });
 
-    on('stats', (st) => { renderChecks(st); renderKpis(st); });
-    on('screener', (snap) => { radarData(snap); renderSignals(); renderVerdicts(); });
+    on('stats', (st) => { renderChecks(st); renderKpis(st); renderTiles(); });
+    on('screener', (snap) => { radarData(snap); renderSignals(); renderVerdicts(); renderTiles(); });
     on('analyses', () => { renderRecent(); renderVerdicts(); });
     on('alerts', renderAlerts);
     on('alert', renderAlerts);
     on('direction', renderDirection);
     on('directionError', (e) => { $('#dir-strip').innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
 
-    renderChecks(store.stats); renderKpis(store.stats); renderRecent(); renderAlerts(); renderSignals(); renderVerdicts();
+    renderChecks(store.stats); renderKpis(store.stats); renderRecent(); renderAlerts(); renderSignals(); renderVerdicts(); renderTiles();
     if (store.screener) radarData(store.screener);
     if (store.direction) renderDirection(store.direction);
     setInterval(() => { renderRecent(); renderAlerts(); }, 60_000);

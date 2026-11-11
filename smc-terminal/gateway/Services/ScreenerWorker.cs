@@ -65,7 +65,7 @@ public sealed class ScreenerWorker(
     private async Task RefreshScreener(CancellationToken ct)
     {
         var tf = options.Value.ScreenerTimeframe;
-        var response = await engine.GetAsync($"screener?group=all&tf={Uri.EscapeDataString(tf)}", ct);
+        var response = await engine.GetAsync($"screener?market=all&tf={Uri.EscapeDataString(tf)}", ct);
         if (!response.Ok)
         {
             return;

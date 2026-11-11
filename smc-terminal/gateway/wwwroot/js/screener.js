@@ -1,28 +1,22 @@
-// SMC screener table (engine) + TradingView screener widget (realtime, whole market).
-import { $, api, esc, on, badge, fmtPct, fmtPrice, fmtScore, fmtTime, scoreBar, segmented, signClass, sparkline, trendText, dirHex, arrow, dirClass, CLASS_LABEL } from './util.js';
+// Screener view of one market page: SMC table for the market's instruments + TradingView screener (realtime).
+import { api, esc, on, badge, fmtPct, fmtPrice, fmtScore, fmtTime, scoreBar, segmented, signClass, sparkline, trendText, dirHex, arrow, dirClass, CLASS_LABEL } from './util.js';
 import { screenerWidget } from './tv.js';
+import { rowsOf } from './markets.js';
 
-const GROUP_CLASSES = { all: null, forex: ['forex'], us: ['us'], idx: ['idx'], macro: ['index', 'commodity', 'crypto'] };
 const COLUMNS = [
   ['symbol', 'SIMBOL'], ['price', 'HARGA', 'r'], ['changePct', '1D', 'r'], ['change5dPct', '5D', 'r'], ['spark', 'TREN 40 BAR'],
   ['swingTrend', 'SWING'], ['internalTrend', 'INTERNAL'], ['event', 'EVENT TERAKHIR'], ['zone', 'ZONA P/D'],
   ['ob', 'OB TERDEKAT', 'r'], ['fvg', 'FVG ▲/▼'], ['rsi', 'RSI', 'r'], ['score', 'SKOR', 'r'], ['direction', 'ARAH'],
 ];
 
-let store;
-let snapshot = null;
-let filters = { group: 'all', bias: 'all', tf: '4h', q: '' };
-let sort = { key: 'score', dir: -1 };
-let loadingTf = null;
-
-const sortValue = {
+const SORT_VALUE = {
   symbol: (r) => r.instrument.symbol,
   price: (r) => r.price ?? -Infinity,
   changePct: (r) => r.changePct ?? -Infinity,
   change5dPct: (r) => r.change5dPct ?? -Infinity,
   spark: (r) => r.changePct ?? -Infinity,
-  swingTrend: (r) => r.swingTrend,
-  internalTrend: (r) => r.internalTrend,
+  swingTrend: (r) => r.swingTrend ?? '',
+  internalTrend: (r) => r.internalTrend ?? '',
   event: (r) => (r.lastEvent ? -r.lastEvent.barsAgo : -9999),
   zone: (r) => r.zone?.position ?? -1,
   ob: (r) => (r.nearestOb ? Math.abs(r.nearestOb.distancePct) : Infinity),
@@ -31,20 +25,6 @@ const sortValue = {
   score: (r) => r.score ?? 0,
   direction: (r) => r.score ?? 0,
 };
-
-function filtered() {
-  const classes = GROUP_CLASSES[filters.group];
-  const q = filters.q.toUpperCase();
-  return (snapshot?.rows || []).filter((r) => {
-    if (classes && !classes.includes(r.instrument.assetClass)) return false;
-    if (q && !r.instrument.symbol.includes(q) && !r.instrument.name.toUpperCase().includes(q)) return false;
-    if (filters.bias !== 'all') {
-      if (r.error) return false;
-      if (filters.bias === 'neutral' ? r.direction !== 'neutral' : !r.direction?.includes(filters.bias)) return false;
-    }
-    return true;
-  });
-}
 
 function cell(r, key) {
   const d = r.instrument.decimals;
@@ -77,8 +57,7 @@ function cell(r, key) {
     case 'fvg': return `<td><span class="up">▲${r.openFvg?.bullish ?? 0}</span> <span class="down">▼${r.openFvg?.bearish ?? 0}</span></td>`;
     case 'rsi': {
       const v = r.rsi;
-      const cls = v >= 70 ? 'down' : v <= 30 ? 'up' : '';
-      return `<td class="r num ${cls}">${v == null ? '–' : v.toFixed(0)}</td>`;
+      return `<td class="r num ${v >= 70 ? 'down' : v <= 30 ? 'up' : ''}">${v == null ? '–' : v.toFixed(0)}</td>`;
     }
     case 'score': return `<td class="r"><span class="num" style="color:${dirHex(r.direction)}">${fmtScore(r.score)}</span> ${scoreBar(r.score)}</td>`;
     case 'direction': return `<td>${badge(r.direction, r.label)}</td>`;
@@ -86,76 +65,95 @@ function cell(r, key) {
   }
 }
 
-function render() {
-  const table = $('#scr-table');
-  if (!snapshot) {
-    table.innerHTML = `<tbody><tr><td class="loading">${loadingTf ? `Memindai watchlist ${loadingTf.toUpperCase()} (pertama kali bisa ±20 detik)` : 'Menunggu data screener'}</td></tr></tbody>`;
-    return;
-  }
-  const rows = filtered().sort((a, b) => {
-    const va = sortValue[sort.key](a), vb = sortValue[sort.key](b);
-    return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir;
-  });
-  const head = COLUMNS.map(([k, label, align]) =>
-    `<th data-k="${k}" class="${align || ''} ${sort.key === k ? 'sorted' : ''}" data-dir="${sort.dir > 0 ? '▲' : '▼'}">${label}</th>`).join('');
-  const body = rows.map((r) => r.error
-    ? `<tr data-sym="${esc(r.instrument.symbol)}">${cell(r, 'symbol')}<td colspan="${COLUMNS.length - 1}" class="down">${esc(r.error)}</td></tr>`
-    : `<tr data-sym="${esc(r.instrument.symbol)}">${COLUMNS.map(([k]) => cell(r, k)).join('')}</tr>`).join('');
-  table.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${COLUMNS.length}" class="empty">Tidak ada instrumen yang cocok dengan filter.</td></tr>`}</tbody>`;
-  const ok = (snapshot.rows || []).filter((r) => !r.error);
-  const bull = ok.filter((r) => r.direction?.includes('bullish')).length;
-  const bear = ok.filter((r) => r.direction?.includes('bearish')).length;
-  $('#scr-sub').innerHTML = `· ${rows.length} instrumen · TF ${esc(snapshot.tf.toUpperCase())} · <span class="up">▲${bull}</span> <span class="down">▼${bear}</span>`;
-  $('#scr-updated').textContent = `update ${fmtTime(snapshot.generatedAt)} · ${snapshot.elapsedMs} ms`;
-}
-
-async function loadTf(tf) {
-  if (tf === store.screener?.tf) { snapshot = store.screener; render(); return; }
-  snapshot = null;
-  loadingTf = tf;
-  render();
-  try {
-    snapshot = await api(`/api/screener?group=all&tf=${tf}`);
-  } catch (e) {
-    $('#scr-table').innerHTML = `<tbody><tr><td><div class="error-box">${esc(e.message)}</div></td></tr></tbody>`;
-    return;
-  } finally {
-    loadingTf = null;
-  }
-  render();
-}
-
-export default {
-  init(s) {
-    store = s;
-    snapshot = store.screener;
-    if (snapshot) filters.tf = snapshot.tf;
-    segmented($('#scr-group'), (v) => { filters.group = v; render(); });
-    segmented($('#scr-bias'), (v) => { filters.bias = v; render(); });
-    const tfSeg = segmented($('#scr-tf'), (v) => { filters.tf = v; loadTf(v); });
-    tfSeg.set(filters.tf);
-    $('#scr-search').addEventListener('input', (e) => { filters.q = e.target.value.trim(); render(); });
-    $('#scr-table').addEventListener('click', (e) => {
+export class ScreenerView {
+  constructor(el, cfg, store) {
+    this.el = el;
+    this.cfg = cfg;
+    this.store = store;
+    this.filters = { bias: 'all', tf: store.screener?.tf || '4h', q: '' };
+    this.sort = { key: 'score', dir: -1 };
+    this.snapshot = store.screener;
+    this.loadingTf = null;
+    el.innerHTML = `
+      <div class="toolbar">
+        <div class="seg scr-bias"><button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button></div>
+        <div class="seg scr-tf"><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button></div>
+        <input class="input scr-search" placeholder="cari simbol…">
+        <span class="grow"></span><span class="time scr-updated"></span>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="diamond">◆</span> SMC SCREENER · ${esc(cfg.nav)} <span class="sub scr-sub"></span><span class="right live-label">LIVE</span></div>
+        <div class="table-wrap" style="max-height: 640px"><table class="data scr-table"></table></div>
+      </div>
+      <div class="section-title"><h2>TradingView Screener · ${esc(cfg.nav)}</h2><span class="sub">data realtime langsung dari TradingView · seluruh pasar</span></div>
+      <div class="panel tv-box tv-screener"></div>`;
+    const $ = (s) => el.querySelector(s);
+    segmented($('.scr-bias'), (v) => { this.filters.bias = v; this.render(); });
+    segmented($('.scr-tf'), (v) => { this.filters.tf = v; this.loadTf(v); }).set(this.filters.tf);
+    $('.scr-search').addEventListener('input', (e) => { this.filters.q = e.target.value.trim(); this.render(); });
+    $('.scr-table').addEventListener('click', (e) => {
       const th = e.target.closest('th[data-k]');
       if (th) {
         const k = th.dataset.k;
-        sort = { key: k, dir: sort.key === k ? -sort.dir : k === 'symbol' ? 1 : -1 };
-        render();
+        this.sort = { key: k, dir: this.sort.key === k ? -this.sort.dir : k === 'symbol' ? 1 : -1 };
+        this.render();
         return;
       }
       const tr = e.target.closest('tr[data-sym]');
-      if (tr) window.SMC.openAnalysis(tr.dataset.sym, filters.tf);
+      if (tr) window.SMC.go(cfg.key, 'analisa', tr.dataset.sym, this.filters.tf);
     });
-    on('screener', (snap) => { if (snap.tf === filters.tf) { snapshot = snap; render(); } });
-    segmented($('#tvs-market'), (v) => screenerWidget($('#tv-screener'), v));
-    screenerWidget($('#tv-screener'), 'forex');
-    render();
-  },
-  show(params) {
-    if (params[0] && GROUP_CLASSES[params[0]] !== undefined) {
-      filters.group = params[0];
-      $('#scr-group').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.v === params[0]));
-      render();
+    on('screener', (snap) => { if (snap.tf === this.filters.tf) { this.snapshot = snap; this.render(); } });
+    screenerWidget($('.tv-screener'), cfg.tvScreener);
+    this.render();
+  }
+
+  rows() {
+    const q = this.filters.q.toUpperCase();
+    return rowsOf(this.snapshot, this.cfg.key).filter((r) => {
+      if (q && !r.instrument.symbol.includes(q) && !r.instrument.name.toUpperCase().includes(q)) return false;
+      if (this.filters.bias === 'all') return true;
+      if (r.error) return false;
+      return this.filters.bias === 'neutral' ? r.direction === 'neutral' : r.direction?.includes(this.filters.bias);
+    });
+  }
+
+  render() {
+    const table = this.el.querySelector('.scr-table');
+    if (!this.snapshot) {
+      table.innerHTML = `<tbody><tr><td class="loading">${this.loadingTf ? `Memindai ${this.loadingTf.toUpperCase()} (pertama kali bisa ±20 detik)` : 'Menunggu data screener'}</td></tr></tbody>`;
+      return;
     }
-  },
-};
+    const { key, dir } = this.sort;
+    const rows = this.rows().sort((a, b) => {
+      const va = SORT_VALUE[key](a), vb = SORT_VALUE[key](b);
+      return (va > vb ? 1 : va < vb ? -1 : 0) * dir;
+    });
+    const head = COLUMNS.map(([k, label, align]) =>
+      `<th data-k="${k}" class="${align || ''} ${key === k ? 'sorted' : ''}" data-dir="${dir > 0 ? '▲' : '▼'}">${label}</th>`).join('');
+    const body = rows.map((r) => r.error
+      ? `<tr data-sym="${esc(r.instrument.symbol)}">${cell(r, 'symbol')}<td colspan="${COLUMNS.length - 1}" class="down">${esc(r.error)}</td></tr>`
+      : `<tr data-sym="${esc(r.instrument.symbol)}">${COLUMNS.map(([k]) => cell(r, k)).join('')}</tr>`).join('');
+    table.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${COLUMNS.length}" class="empty">Tidak ada instrumen yang cocok dengan filter.</td></tr>`}</tbody>`;
+    const ok = rowsOf(this.snapshot, this.cfg.key).filter((r) => !r.error);
+    const bull = ok.filter((r) => r.direction?.includes('bullish')).length;
+    const bear = ok.filter((r) => r.direction?.includes('bearish')).length;
+    this.el.querySelector('.scr-sub').innerHTML = `· ${rows.length} instrumen · TF ${esc(this.snapshot.tf.toUpperCase())} · <span class="up">▲${bull}</span> <span class="down">▼${bear}</span>`;
+    this.el.querySelector('.scr-updated').textContent = `update ${fmtTime(this.snapshot.generatedAt)} · ${this.snapshot.elapsedMs} ms`;
+  }
+
+  async loadTf(tf) {
+    if (tf === this.store.screener?.tf) { this.snapshot = this.store.screener; this.render(); return; }
+    this.snapshot = null;
+    this.loadingTf = tf;
+    this.render();
+    try {
+      this.snapshot = await api(`/api/screener?market=${encodeURIComponent(this.cfg.key)}&tf=${tf}`);
+    } catch (e) {
+      this.el.querySelector('.scr-table').innerHTML = `<tbody><tr><td><div class="error-box">${esc(e.message)}</div></td></tr></tbody>`;
+      return;
+    } finally {
+      this.loadingTf = null;
+    }
+    this.render();
+  }
+}

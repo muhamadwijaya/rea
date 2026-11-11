@@ -25,10 +25,10 @@
       </div>
       <nav class="tabs" id="tabs">
         <button class="tab-btn active" data-tab="dashboard">DASHBOARD</button>
-        <button class="tab-btn" data-tab="screener">SCREENER</button>
-        <button class="tab-btn" data-tab="analisa">ANALISA SMC</button>
-        <button class="tab-btn" data-tab="arah">ARAH MARKET</button>
-        <button class="tab-btn" data-tab="berita">BERITA<span class="badge-dot hidden" id="news-dot"></span></button>
+        <button class="tab-btn" data-tab="forex">FOREX</button>
+        <button class="tab-btn" data-tab="saham-as">SAHAM AS</button>
+        <button class="tab-btn" data-tab="saham-idx">SAHAM IDX</button>
+        <button class="tab-btn" data-tab="kripto">KRIPTO</button>
         <button class="tab-btn" data-tab="kalender">KALENDER</button>
         <button class="tab-btn" data-tab="metode">METODOLOGI</button>
       </nav>
@@ -39,7 +39,7 @@
           <span class="lbl" id="live-label">CONNECTING</span>
           <b id="clock">--:--:--</b>
         </div>
-        <button class="btn-primary" data-go="analisa">▶ ANALISA</button>
+        <button class="btn-primary" data-focus-search>▶ ANALISA</button>
       </div>
     </div>
   </header>
@@ -57,10 +57,10 @@
         <div>
           <div class="eyebrow">Screener saham &amp; forex · Smart Money Concept</div>
           <h1>Harga bergerak ke likuiditas. <span class="accent">Lihat ke mana smart money mengarah.</span></h1>
-          <p class="lead">Ketik simbol forex, emas, indeks, saham AS atau saham IDX. Dalam beberapa detik kamu melihat struktur pasar, order block, FVG, zona premium/discount, skor bias multi-timeframe dan skenario trading-nya.</p>
+          <p class="lead">Ketik simbol forex, emas, kripto, saham AS atau saham IDX. Dalam beberapa detik kamu melihat struktur pasar, order block, FVG, zona premium/discount, skor bias multi-timeframe dan skenario trading-nya.</p>
           <form class="search" id="hero-search" autocomplete="off">
             <span class="prompt">&gt;</span>
-            <input id="hero-input" list="symbol-list" placeholder="ketik simbol · mis. EURUSD, XAUUSD, AAPL, BBCA" aria-label="Simbol">
+            <input id="hero-input" list="symbol-list" placeholder="ketik simbol · mis. EURUSD, XAUUSD, BTCUSD, AAPL, BBCA" aria-label="Simbol">
             <button type="submit">ANALISA</button>
           </form>
           <div class="quick" id="quick"></div>
@@ -89,6 +89,7 @@
         </div>
       </div>
 
+      <div class="market-tiles" id="market-tiles"></div>
       <div class="panel dir-strip" id="dir-strip"><div class="loading">Menghitung arah market</div></div>
       <div class="panel kpis" id="kpis"></div>
 
@@ -99,7 +100,7 @@
           <div class="list" id="recent-list"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><span class="diamond">◆</span> SINYAL STRUKTUR · RADAR <span class="right"><a data-go="screener">SEMUA →</a></span></div>
+          <div class="panel-head"><span class="diamond">◆</span> SINYAL STRUKTUR · RADAR <span class="right sub">semua pasar</span></div>
           <div class="list" id="signal-list"></div>
         </div>
         <div class="panel">
@@ -109,110 +110,11 @@
       </div>
     </section>
 
-    <!-- ============================================================ SCREENER -->
-    <section class="tab-panel" id="tab-screener">
-      <div class="toolbar">
-        <div class="seg" id="scr-group">
-          <button data-v="all" class="active">SEMUA</button><button data-v="forex">FOREX</button><button data-v="us">SAHAM AS</button><button data-v="idx">SAHAM IDX</button><button data-v="macro">INDEKS · KOMODITAS · KRIPTO</button>
-        </div>
-        <div class="seg" id="scr-bias">
-          <button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button>
-        </div>
-        <div class="seg" id="scr-tf">
-          <button data-v="1h">1H</button><button data-v="4h" class="active">4H</button><button data-v="1d">1D</button>
-        </div>
-        <input class="input" id="scr-search" placeholder="cari simbol…">
-        <span class="grow"></span>
-        <span class="time" id="scr-updated"></span>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><span class="diamond">◆</span> SMC SCREENER <span class="sub" id="scr-sub"></span><span class="right live-label">LIVE</span></div>
-        <div class="table-wrap" style="max-height: 640px"><table class="data" id="scr-table"></table></div>
-      </div>
-
-      <div class="section-title"><h2>TradingView Screener</h2><span class="sub">data realtime langsung dari TradingView · seluruh pasar</span></div>
-      <div class="toolbar">
-        <div class="seg" id="tvs-market">
-          <button data-v="forex" class="active">FOREX</button><button data-v="america">SAHAM AS</button><button data-v="indonesia">SAHAM INDONESIA</button><button data-v="crypto">KRIPTO</button>
-        </div>
-      </div>
-      <div class="panel tv-box" id="tv-screener"></div>
-    </section>
-
-    <!-- ============================================================ ANALISA -->
-    <section class="tab-panel" id="tab-analisa">
-      <div class="toolbar">
-        <form id="an-form" style="display:flex; gap:6px" autocomplete="off">
-          <input class="input" id="an-input" list="symbol-list" placeholder="simbol…" style="width: 180px">
-          <button class="btn" type="submit">MUAT</button>
-        </form>
-        <div class="seg" id="an-tf">
-          <button data-v="15m">15M</button><button data-v="1h" class="active">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button><button data-v="1w">1W</button>
-        </div>
-        <div class="seg" id="an-view">
-          <button data-v="smc" class="active">CHART SMC</button><button data-v="tv">TRADINGVIEW LIVE</button><button data-v="split">SPLIT</button>
-        </div>
-        <span class="grow"></span>
-        <span class="time" id="an-updated"></span>
-      </div>
-      <div class="toolbar" id="an-toggles"></div>
-      <div class="an-layout">
-        <div class="grid" id="an-main">
-          <div class="panel chart-shell" id="smc-shell">
-            <div class="chart-host" id="smc-chart"></div>
-            <div class="chart-legend" id="smc-legend"></div>
-          </div>
-          <div class="panel tv-live hidden" id="tv-live"></div>
-        </div>
-        <aside class="side" id="an-side"><div class="panel"><div class="loading">Pilih simbol untuk dianalisa</div></div></aside>
-      </div>
-    </section>
-
-    <!-- ============================================================ ARAH MARKET -->
-    <section class="tab-panel" id="tab-arah">
-      <div id="dir-content"><div class="loading">Menghitung arah market</div></div>
-      <div class="section-title"><h2>Peta Pasar Realtime</h2><span class="sub">widget TradingView</span></div>
-      <div class="toolbar">
-        <div class="seg" id="heat-tab">
-          <button data-v="fx" class="active">HEATMAP FOREX</button><button data-v="cross">CROSS RATES</button><button data-v="stocks">HEATMAP S&amp;P 500</button>
-        </div>
-      </div>
-      <div class="panel tv-box" id="tv-heat"></div>
-    </section>
-
-    <!-- ============================================================ BERITA -->
-    <section class="tab-panel" id="tab-berita">
-      <div class="panel" style="margin-bottom:14px"><div class="panel-head"><span class="diamond">◆</span> SENTIMEN BERITA · 12 JAM <span class="right time" id="sent-updated"></span></div><div class="panel-body"><div class="sent-bars" id="sent-bars"></div></div></div>
-      <div class="toolbar">
-        <div class="chips" id="news-cats"></div>
-        <div class="seg" id="news-sent">
-          <button data-v="all" class="active">SEMUA</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">NETRAL</button>
-        </div>
-        <input class="input" id="news-q" placeholder="cari berita…">
-      </div>
-      <div class="news-layout">
-        <div>
-          <div class="new-banner hidden" id="news-new"><button>↑ <span></span> berita baru</button></div>
-          <div class="panel">
-            <div class="panel-head"><span class="diamond">◆</span> BERITA REALTIME <span class="sub" id="news-sub"></span><span class="right live-label">LIVE</span></div>
-            <div id="news-list"></div>
-            <div style="padding:12px; text-align:center"><button class="btn" id="news-more">MUAT LEBIH BANYAK</button></div>
-          </div>
-        </div>
-        <aside class="side">
-          <div class="panel">
-            <div class="panel-head"><span class="diamond">◆</span> TRADINGVIEW NEWS
-              <span class="right"><select class="input" id="tl-market" style="min-width:0; padding:3px 6px"><option value="forex">Forex</option><option value="stock">Saham</option><option value="index">Indeks</option><option value="crypto">Kripto</option></select></span>
-            </div>
-            <div style="height: 640px" id="tv-timeline"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-head"><span class="diamond">◆</span> SUMBER BERITA <span class="right sub" id="src-sum"></span></div>
-            <div class="panel-body" id="news-sources"></div>
-          </div>
-        </aside>
-      </div>
-    </section>
+    <!-- ============================================================ MARKET PAGES (built by js/market.js) -->
+    <section class="tab-panel market-page" id="tab-forex"></section>
+    <section class="tab-panel market-page" id="tab-saham-as"></section>
+    <section class="tab-panel market-page" id="tab-saham-idx"></section>
+    <section class="tab-panel market-page" id="tab-kripto"></section>
 
     <!-- ============================================================ KALENDER -->
     <section class="tab-panel" id="tab-kalender">

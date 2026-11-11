@@ -18,13 +18,15 @@ from .errors import InvalidSymbol
 
 ASSET_CLASSES = ("forex", "commodity", "index", "crypto", "us", "idx")
 
-# Screener groups exposed to the UI -> asset classes they contain.
-GROUPS: dict[str, tuple[str, ...]] = {
-    "all": ASSET_CLASSES,
-    "forex": ("forex",),
-    "us": ("us",),
-    "idx": ("idx",),
-    "macro": ("index", "commodity", "crypto"),
+# Market pages of the UI. Every instrument belongs to exactly one market.
+MARKETS = ("forex", "saham-as", "saham-idx", "kripto")
+DEFAULT_MARKET = {
+    "forex": "forex",
+    "commodity": "forex",
+    "us": "saham-as",
+    "index": "saham-as",
+    "idx": "saham-idx",
+    "crypto": "kripto",
 }
 
 CURRENCIES = {
@@ -33,7 +35,7 @@ CURRENCIES = {
     "THB", "MYR", "PHP", "XAU", "XAG",
 }
 
-CRYPTO_COINS = {"BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "TON"}
+CRYPTO_COINS = {"BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "AVAX", "LINK", "LTC", "DOT", "TON"}
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.^=:/_\-!&]{1,24}$")
 
@@ -46,6 +48,11 @@ class Instrument:
     tv: str
     asset_class: str
     decimals: int | None = None
+    market_override: str | None = None
+
+    @property
+    def market(self) -> str:
+        return self.market_override or DEFAULT_MARKET[self.asset_class]
 
     def price_decimals(self, price: float | None = None) -> int:
         if self.decimals is not None:
@@ -61,6 +68,8 @@ class Instrument:
     def to_json(self) -> dict:
         data = asdict(self)
         data["assetClass"] = data.pop("asset_class")
+        data.pop("market_override")
+        data["market"] = self.market
         data["decimals"] = self.price_decimals()
         return data
 
@@ -88,16 +97,24 @@ def watchlist() -> tuple[Instrument, ...]:
                 tv=entry.get("tv", entry["symbol"]),
                 asset_class=asset_class,
                 decimals=entry.get("decimals"),
+                market_override=_market(entry.get("market"), entry),
             )
         )
     return tuple(items)
 
 
-def by_group(group: str) -> list[Instrument]:
-    classes = GROUPS.get(group)
-    if classes is None:
-        raise InvalidSymbol(f"Grup tidak dikenal: {group!r}. Pilihan: {', '.join(GROUPS)}")
-    return [i for i in watchlist() if i.asset_class in classes]
+def _market(value: str | None, entry: dict) -> str | None:
+    if value is not None and value not in MARKETS:
+        raise ValueError(f"watchlist: market tidak dikenal {value!r} untuk {entry}")
+    return value
+
+
+def by_market(market: str) -> list[Instrument]:
+    if market == "all":
+        return list(watchlist())
+    if market not in MARKETS:
+        raise InvalidSymbol(f"Market tidak dikenal: {market!r}. Pilihan: all, {', '.join(MARKETS)}")
+    return [i for i in watchlist() if i.market == market]
 
 
 def find(symbol: str) -> Instrument | None:

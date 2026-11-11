@@ -34,7 +34,8 @@ public sealed class SymbolNewsService(IHttpClientFactory httpFactory, EngineClie
         try
         {
             var xml = await httpFactory.CreateClient(NewsWorker.HttpName).GetStringAsync(feed.Url, ct);
-            items = FeedParser.Parse(xml, feed, now).OrderByDescending(i => i.Published).Take(25).ToList();
+            items = FeedParser.Parse(xml, feed, now).OrderByDescending(i => i.Published).Take(25)
+                .Select(i => i with { Markets = Markets.ForCategory(i.Category) }).ToList();
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -42,7 +43,7 @@ public sealed class SymbolNewsService(IHttpClientFactory httpFactory, EngineClie
         }
 
         // Headlines already in the live store that mention the symbol.
-        var local = store.Query(null, null, null, key, 15);
+        var local = store.Query(null, null, null, null, key, 15);
         items = items.Concat(local).GroupBy(i => i.Id).Select(g => g.First())
             .OrderByDescending(i => i.Published).Take(30).ToList();
         items = await Score(items, ct);
@@ -52,29 +53,8 @@ public sealed class SymbolNewsService(IHttpClientFactory httpFactory, EngineClie
 
     private async Task<List<NewsItem>> Score(List<NewsItem> items, CancellationToken ct)
     {
-        var pending = items.Where(i => i.Sentiment is null).ToList();
-        if (pending.Count == 0)
-        {
-            return items;
-        }
-        var response = await engine.PostJsonAsync("sentiment",
-            new { items = pending.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary }) }, ct);
-        if (!response.Ok)
-        {
-            return items;
-        }
-        using var doc = JsonDocument.Parse(response.Body);
-        var scores = doc.RootElement.GetProperty("items").EnumerateArray()
-            .ToDictionary(e => e.GetProperty("id").GetString()!, e => e.Clone());
-        return items.Select(i => scores.TryGetValue(i.Id, out var s)
-            ? i with
-            {
-                Sentiment = s.GetProperty("score").GetDouble(),
-                SentimentLabel = s.GetProperty("label").GetString(),
-                Terms = s.GetProperty("terms").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
-                Assets = s.GetProperty("assets").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
-            }
-            : i).ToList();
+        var scores = await engine.ScoreSentimentAsync(items.Where(i => i.Sentiment is null), ct);
+        return items.Select(i => scores.TryGetValue(i.Id, out var s) ? i.WithSentiment(s) : i).ToList();
     }
 
     private static FeedConfig FeedFor(string symbol, string name, string yahoo, string cls)

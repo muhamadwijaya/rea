@@ -5,3 +5,7 @@ engine/.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+logs/
+desktop/bin/
+desktop/obj/
+app/

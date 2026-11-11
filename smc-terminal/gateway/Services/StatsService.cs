@@ -16,7 +16,7 @@ public sealed class StatsService(MarketState state, NewsStore news, CalendarStor
         {
             generatedAt = now,
             engineOnline = EngineClient.Online,
-            engineError = EngineClient.LastError,
+            engineError = EngineSupervisor.Status.Failure ?? EngineClient.LastError,
             screenerAt = state.ScreenerAt,
             screenerTf = state.ScreenerTf,
             instruments = rows.Count,
@@ -30,6 +30,7 @@ public sealed class StatsService(MarketState state, NewsStore news, CalendarStor
             inDiscount = rows.Count(r => r.ZoneArea == "discount"),
             inPremium = rows.Count(r => r.ZoneArea == "premium"),
             news24h = news.CountSince(now.AddHours(-24)),
+            newsByMarket = Markets.All.ToDictionary(m => m, m => news.CountSince(now.AddHours(-24), m)),
             newsTotal = news.Total,
             newsAt = news.LastUpdate,
             feedsOk = feeds.Count(f => f.LastError is null && f.LastOk is not null),

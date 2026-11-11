@@ -1,5 +1,5 @@
 {
-  "comment": "Daftar instrumen screener. symbol = nama tampilan, yahoo = ticker data (yfinance), tv = simbol TradingView, class = forex | us | idx | index | commodity | crypto.",
+  "comment": "Daftar instrumen. symbol = nama tampilan, yahoo = ticker data (yfinance), tv = simbol TradingView, class = forex | us | idx | index | commodity | crypto. market (opsional) = halaman tujuan: forex | saham-as | saham-idx | kripto (default diturunkan dari class).",
   "instruments": [
     { "symbol": "EURUSD", "name": "Euro / US Dollar", "yahoo": "EURUSD=X", "tv": "FX:EURUSD", "class": "forex" },
     { "symbol": "GBPUSD", "name": "British Pound / US Dollar", "yahoo": "GBPUSD=X", "tv": "FX:GBPUSD", "class": "forex" },
@@ -13,23 +13,27 @@
     { "symbol": "EURGBP", "name": "Euro / British Pound", "yahoo": "EURGBP=X", "tv": "FX:EURGBP", "class": "forex" },
     { "symbol": "AUDJPY", "name": "Australian Dollar / Japanese Yen", "yahoo": "AUDJPY=X", "tv": "FX:AUDJPY", "class": "forex" },
     { "symbol": "EURAUD", "name": "Euro / Australian Dollar", "yahoo": "EURAUD=X", "tv": "FX:EURAUD", "class": "forex" },
-    { "symbol": "USDIDR", "name": "US Dollar / Rupiah", "yahoo": "USDIDR=X", "tv": "FX_IDC:USDIDR", "class": "forex", "decimals": 0 },
-
+    { "symbol": "USDIDR", "name": "US Dollar / Rupiah", "yahoo": "USDIDR=X", "tv": "FX_IDC:USDIDR", "class": "forex", "decimals": 0, "market": "forex" },
     { "symbol": "XAUUSD", "name": "Gold (futures proxy)", "yahoo": "GC=F", "tv": "OANDA:XAUUSD", "class": "commodity", "decimals": 2 },
     { "symbol": "XAGUSD", "name": "Silver (futures proxy)", "yahoo": "SI=F", "tv": "OANDA:XAGUSD", "class": "commodity", "decimals": 3 },
     { "symbol": "USOIL", "name": "WTI Crude Oil", "yahoo": "CL=F", "tv": "TVC:USOIL", "class": "commodity", "decimals": 2 },
-
-    { "symbol": "DXY", "name": "US Dollar Index", "yahoo": "DX-Y.NYB", "tv": "TVC:DXY", "class": "index", "decimals": 3 },
+    { "symbol": "DXY", "name": "US Dollar Index", "yahoo": "DX-Y.NYB", "tv": "TVC:DXY", "class": "index", "decimals": 3, "market": "forex" },
     { "symbol": "SPX", "name": "S&P 500", "yahoo": "^GSPC", "tv": "SP:SPX", "class": "index", "decimals": 2 },
     { "symbol": "NDX", "name": "Nasdaq 100", "yahoo": "^NDX", "tv": "NASDAQ:NDX", "class": "index", "decimals": 2 },
     { "symbol": "DJI", "name": "Dow Jones Industrial", "yahoo": "^DJI", "tv": "DJ:DJI", "class": "index", "decimals": 2 },
-    { "symbol": "IHSG", "name": "IDX Composite (IHSG)", "yahoo": "^JKSE", "tv": "IDX:COMPOSITE", "class": "index", "decimals": 2 },
+    { "symbol": "IHSG", "name": "IDX Composite (IHSG)", "yahoo": "^JKSE", "tv": "IDX:COMPOSITE", "class": "index", "decimals": 2, "market": "saham-idx" },
     { "symbol": "VIX", "name": "CBOE Volatility Index", "yahoo": "^VIX", "tv": "TVC:VIX", "class": "index", "decimals": 2 },
     { "symbol": "US10Y", "name": "US 10Y Treasury Yield", "yahoo": "^TNX", "tv": "TVC:US10Y", "class": "index", "decimals": 3 },
-
-    { "symbol": "BTCUSD", "name": "Bitcoin / US Dollar", "yahoo": "BTC-USD", "tv": "BITSTAMP:BTCUSD", "class": "crypto", "decimals": 0 },
-    { "symbol": "ETHUSD", "name": "Ethereum / US Dollar", "yahoo": "ETH-USD", "tv": "BITSTAMP:ETHUSD", "class": "crypto", "decimals": 2 },
-
+    { "symbol": "BTCUSD", "name": "Bitcoin / US Dollar", "yahoo": "BTC-USD", "tv": "BINANCE:BTCUSDT", "class": "crypto", "decimals": 0 },
+    { "symbol": "ETHUSD", "name": "Ethereum / US Dollar", "yahoo": "ETH-USD", "tv": "BINANCE:ETHUSDT", "class": "crypto", "decimals": 2 },
+    { "symbol": "SOLUSD", "name": "Solana / US Dollar", "yahoo": "SOL-USD", "tv": "BINANCE:SOLUSDT", "class": "crypto", "decimals": 2 },
+    { "symbol": "BNBUSD", "name": "BNB / US Dollar", "yahoo": "BNB-USD", "tv": "BINANCE:BNBUSDT", "class": "crypto", "decimals": 2 },
+    { "symbol": "XRPUSD", "name": "XRP / US Dollar", "yahoo": "XRP-USD", "tv": "BINANCE:XRPUSDT", "class": "crypto", "decimals": 4 },
+    { "symbol": "DOGEUSD", "name": "Dogecoin / US Dollar", "yahoo": "DOGE-USD", "tv": "BINANCE:DOGEUSDT", "class": "crypto", "decimals": 5 },
+    { "symbol": "ADAUSD", "name": "Cardano / US Dollar", "yahoo": "ADA-USD", "tv": "BINANCE:ADAUSDT", "class": "crypto", "decimals": 4 },
+    { "symbol": "AVAXUSD", "name": "Avalanche / US Dollar", "yahoo": "AVAX-USD", "tv": "BINANCE:AVAXUSDT", "class": "crypto", "decimals": 2 },
+    { "symbol": "LINKUSD", "name": "Chainlink / US Dollar", "yahoo": "LINK-USD", "tv": "BINANCE:LINKUSDT", "class": "crypto", "decimals": 3 },
+    { "symbol": "LTCUSD", "name": "Litecoin / US Dollar", "yahoo": "LTC-USD", "tv": "BINANCE:LTCUSDT", "class": "crypto", "decimals": 2 },
     { "symbol": "AAPL", "name": "Apple Inc.", "yahoo": "AAPL", "tv": "NASDAQ:AAPL", "class": "us" },
     { "symbol": "MSFT", "name": "Microsoft Corp.", "yahoo": "MSFT", "tv": "NASDAQ:MSFT", "class": "us" },
     { "symbol": "NVDA", "name": "NVIDIA Corp.", "yahoo": "NVDA", "tv": "NASDAQ:NVDA", "class": "us" },
@@ -42,7 +46,6 @@
     { "symbol": "JPM", "name": "JPMorgan Chase", "yahoo": "JPM", "tv": "NYSE:JPM", "class": "us" },
     { "symbol": "AVGO", "name": "Broadcom Inc.", "yahoo": "AVGO", "tv": "NASDAQ:AVGO", "class": "us" },
     { "symbol": "PLTR", "name": "Palantir Technologies", "yahoo": "PLTR", "tv": "NASDAQ:PLTR", "class": "us" },
-
     { "symbol": "BBCA", "name": "Bank Central Asia", "yahoo": "BBCA.JK", "tv": "IDX:BBCA", "class": "idx" },
     { "symbol": "BBRI", "name": "Bank Rakyat Indonesia", "yahoo": "BBRI.JK", "tv": "IDX:BBRI", "class": "idx" },
     { "symbol": "BMRI", "name": "Bank Mandiri", "yahoo": "BMRI.JK", "tv": "IDX:BMRI", "class": "idx" },

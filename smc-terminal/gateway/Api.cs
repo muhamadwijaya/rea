@@ -8,7 +8,7 @@ namespace SmcTerminal.Gateway;
 public static class Api
 {
     private static readonly HashSet<string> Timeframes = new() { "15m", "1h", "4h", "1d", "1w" };
-    private static readonly HashSet<string> Groups = new() { "all", "forex", "us", "idx", "macro" };
+    private static readonly HashSet<string> MarketKeys = new(Markets.All.Append("all"));
 
     public static void MapTerminalApi(this WebApplication app)
     {
@@ -17,7 +17,11 @@ public static class Api
         api.MapGet("/health", (MarketState state, NewsStore news, CalendarStore calendar) => Results.Json(new
         {
             gateway = "ok",
-            engine = new { online = EngineClient.Online, lastOk = EngineClient.LastOk, error = EngineClient.LastError },
+            engine = new
+            {
+                online = EngineClient.Online, lastOk = EngineClient.LastOk, error = EngineClient.LastError,
+                supervisor = EngineSupervisor.Status,
+            },
             screenerAt = state.ScreenerAt,
             directionAt = state.DirectionAt,
             news = new { total = news.Total, updated = news.LastUpdate },
@@ -26,20 +30,20 @@ public static class Api
 
         api.MapGet("/stats", (StatsService stats) => Results.Json(stats.Build()));
 
-        api.MapGet("/screener", async (string? group, string? tf, MarketState state, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/screener", async (string? market, string? tf, MarketState state, EngineClient engine, CancellationToken ct) =>
         {
-            group = string.IsNullOrWhiteSpace(group) ? "all" : group.ToLowerInvariant();
+            market = string.IsNullOrWhiteSpace(market) ? "all" : market.ToLowerInvariant();
             tf = string.IsNullOrWhiteSpace(tf) ? state.ScreenerTf : tf.ToLowerInvariant();
-            if (!Groups.Contains(group) || !Timeframes.Contains(tf))
+            if (!MarketKeys.Contains(market) || !Timeframes.Contains(tf))
             {
-                return Results.BadRequest(new { error = "invalid_argument", message = "group/tf tidak dikenal" });
+                return Results.BadRequest(new { error = "invalid_argument", message = "market/tf tidak dikenal" });
             }
             // The worker keeps the default snapshot warm; other combinations go straight to the engine cache.
-            if (group == "all" && tf == state.ScreenerTf && state.ScreenerJson is { } cached)
+            if (market == "all" && tf == state.ScreenerTf && state.ScreenerJson is { } cached)
             {
                 return Results.Content(cached, "application/json");
             }
-            var response = await engine.GetAsync($"screener?group={group}&tf={tf}", ct);
+            var response = await engine.GetAsync($"screener?market={market}&tf={tf}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -71,10 +75,10 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/instruments", async (string? group, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/instruments", async (string? market, EngineClient engine, CancellationToken ct) =>
         {
-            var g = string.IsNullOrWhiteSpace(group) ? "all" : group;
-            var response = await engine.GetAsync($"instruments?group={Uri.EscapeDataString(g)}", ct);
+            var m = string.IsNullOrWhiteSpace(market) ? "all" : market;
+            var response = await engine.GetAsync($"instruments?market={Uri.EscapeDataString(m)}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -96,22 +100,26 @@ public static class Api
             return Results.Content(root.ToJsonString(), "application/json");
         });
 
-        api.MapGet("/news", (string? category, string? asset, string? sentiment, string? q, int? limit, int? offset, NewsStore news) =>
+        api.MapGet("/news", (string? market, string? category, string? asset, string? sentiment, string? q, int? limit, int? offset, NewsStore news) =>
             Results.Json(new
             {
                 total = news.Total,
+                market,
                 updated = news.LastUpdate,
-                items = news.Query(category, asset, sentiment, q, limit ?? 80, offset ?? 0),
+                items = news.Query(market, category, asset, sentiment, q, limit ?? 80, offset ?? 0),
             }));
 
-        api.MapGet("/news/sources", () => Results.Json(NewsWorker.Statuses.Select(s => new
+        api.MapGet("/news/sources", (string? market) => Results.Json(NewsWorker.Statuses
+            .Where(s => !Markets.IsKnown(market) || s.Markets.Contains(market!))
+            .Select(s => new
         {
-            s.Name, s.Category, s.LastOk, s.LastError, s.LastItemCount, s.ConsecutiveFailures,
+            s.Name, s.Category, s.Markets, s.LastOk, s.LastError, s.LastItemCount, s.ConsecutiveFailures,
             host = Uri.TryCreate(s.Url, UriKind.Absolute, out var u) ? u.Host : s.Url,
         })));
 
-        api.MapGet("/news/sentiment", (int? hours, NewsStore news) =>
-            Results.Json(news.SentimentSummary(TimeSpan.FromHours(Math.Clamp(hours ?? 12, 1, 96)), DateTimeOffset.UtcNow)));
+        api.MapGet("/news/sentiment", (int? hours, string? market, NewsStore news) =>
+            Results.Json(news.SentimentSummary(TimeSpan.FromHours(Math.Clamp(hours ?? 12, 1, 96)), DateTimeOffset.UtcNow,
+                Markets.IsKnown(market) ? market : null)));
 
         api.MapGet("/symbol-news", async (string symbol, SymbolNewsService service, CancellationToken ct) =>
         {

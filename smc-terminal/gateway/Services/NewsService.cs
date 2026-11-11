@@ -37,9 +37,10 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
                 {
                     continue;
                 }
-                _byId[item.Id] = item;
+                var classified = item with { Markets = Markets.Classify(item.Category, item.Assets) };
+                _byId[item.Id] = classified;
                 _titleKeys[titleKey] = item.Id;
-                added.Add(item);
+                added.Add(classified);
             }
             if (added.Count > 0)
             {
@@ -58,7 +59,7 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
             {
                 if (_byId.TryGetValue(id, out var item))
                 {
-                    _byId[id] = item with { Sentiment = s.Score, SentimentLabel = s.Label, Terms = s.Terms, Assets = s.Assets };
+                    _byId[id] = item.WithSentiment(s);
                 }
             }
             _sorted = _sorted.Select(i => _byId.TryGetValue(i.Id, out var updated) ? updated : i).ToList();
@@ -73,11 +74,15 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         }
     }
 
-    public List<NewsItem> Query(string? category, string? asset, string? sentiment, string? q, int limit, int offset = 0)
+    public List<NewsItem> Query(string? market, string? category, string? asset, string? sentiment, string? q, int limit, int offset = 0)
     {
         lock (_gate)
         {
             IEnumerable<NewsItem> query = _sorted;
+            if (Markets.IsKnown(market))
+            {
+                query = query.Where(i => i.Markets.Contains(market!));
+            }
             if (!string.IsNullOrWhiteSpace(category) && category != "all")
             {
                 query = query.Where(i => i.Category == category);
@@ -99,11 +104,11 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         }
     }
 
-    public int CountSince(DateTimeOffset since)
+    public int CountSince(DateTimeOffset since, string? market = null)
     {
         lock (_gate)
         {
-            return _sorted.Count(i => i.Published >= since);
+            return _sorted.Count(i => i.Published >= since && (market is null || i.Markets.Contains(market)));
         }
     }
 
@@ -113,13 +118,15 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
     }
 
     /// <summary>Average headline sentiment per category and per tagged asset over a window.</summary>
-    public object SentimentSummary(TimeSpan window, DateTimeOffset now)
+    public object SentimentSummary(TimeSpan window, DateTimeOffset now, string? market = null)
     {
         List<NewsItem> recent;
         lock (_gate)
         {
-            recent = _sorted.Where(i => i.Published >= now - window && i.Sentiment is not null).ToList();
+            recent = _sorted.Where(i => i.Published >= now - window && i.Sentiment is not null &&
+                                        (market is null || i.Markets.Contains(market))).ToList();
         }
+        var categories = Markets.IsKnown(market) ? Markets.CategoriesOf(market!) : Categories;
 
         static SentimentBucket Summarize(string key, IEnumerable<NewsItem> items)
         {
@@ -136,9 +143,10 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         return new
         {
             windowHours = window.TotalHours,
+            market,
             total = recent.Count,
             overall = Summarize("all", recent),
-            categories = Categories.Select(c => Summarize(c, recent.Where(i => i.Category == c))).ToList(),
+            categories = categories.Select(c => Summarize(c, recent.Where(i => i.Category == c))).ToList(),
             assets = recent.SelectMany(i => i.Assets).Distinct()
                 .Select(a => Summarize(a, recent.Where(i => i.Assets.Contains(a))))
                 .OrderByDescending(x => x.Count)
@@ -172,6 +180,19 @@ public sealed record SentimentBucket(string Key, int Count, double Score, int Bu
 
 public sealed record SentimentScore(double Score, string Label, IReadOnlyList<string> Terms, IReadOnlyList<string> Assets);
 
+public static class NewsItemExtensions
+{
+    /// <summary>Applies an engine sentiment result; market membership follows the newly tagged assets.</summary>
+    public static NewsItem WithSentiment(this NewsItem item, SentimentScore s) => item with
+    {
+        Sentiment = s.Score,
+        SentimentLabel = s.Label,
+        Terms = s.Terms,
+        Assets = s.Assets,
+        Markets = Markets.Classify(item.Category, s.Assets),
+    };
+}
+
 /// <summary>Polls every configured feed, scores new headlines through the engine and pushes them live.</summary>
 public sealed class NewsWorker(
     IHttpClientFactory httpFactory,
@@ -191,7 +212,10 @@ public sealed class NewsWorker(
     {
         foreach (var feed in options.Value.Feeds)
         {
-            _status[feed.Url] = new FeedStatus { Name = feed.Name, Url = feed.Url, Category = feed.Category };
+            _status[feed.Url] = new FeedStatus
+            {
+                Name = feed.Name, Url = feed.Url, Category = feed.Category, Markets = Markets.ForCategory(feed.Category),
+            };
         }
         Statuses = _status.Values.ToList();
 
@@ -245,7 +269,7 @@ public sealed class NewsWorker(
             return;
         }
         var ids = added.Select(a => a.Id).ToHashSet();
-        var fresh = store.Query(null, null, null, null, 300).Where(i => ids.Contains(i.Id)).ToList();
+        var fresh = store.Query(null, null, null, null, null, 300).Where(i => ids.Contains(i.Id)).ToList();
         await broadcaster.Send("news", fresh, ct);
         foreach (var item in fresh.Where(i => Math.Abs(i.Sentiment ?? 0) >= 0.75 && i.Published > now.AddMinutes(-30)).Take(3))
         {
@@ -259,32 +283,10 @@ public sealed class NewsWorker(
     private async Task ScoreUnscored(CancellationToken ct)
     {
         var pending = store.Unscored(400);
-        if (pending.Count == 0)
+        if (pending.Count > 0)
         {
-            return;
+            store.ApplySentiment(await engine.ScoreSentimentAsync(pending, ct));
         }
-        var payload = new { items = pending.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary }) };
-        var response = await engine.PostJsonAsync("sentiment", payload, ct);
-        if (!response.Ok)
-        {
-            return;
-        }
-        using var doc = JsonDocument.Parse(response.Body);
-        var scores = new Dictionary<string, SentimentScore>();
-        foreach (var e in doc.RootElement.GetProperty("items").EnumerateArray())
-        {
-            var id = e.GetProperty("id").GetString();
-            if (id is null)
-            {
-                continue;
-            }
-            scores[id] = new SentimentScore(
-                e.GetProperty("score").GetDouble(),
-                e.GetProperty("label").GetString() ?? "neutral",
-                e.GetProperty("terms").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
-                e.GetProperty("assets").EnumerateArray().Select(x => x.GetString() ?? "").ToList());
-        }
-        store.ApplySentiment(scores);
     }
 
     private async Task<List<NewsItem>> FetchFeed(FeedConfig feed, DateTimeOffset now, CancellationToken ct)

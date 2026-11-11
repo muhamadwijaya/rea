@@ -76,6 +76,15 @@ def test_resolve(query, symbol, yahoo, cls):
     assert (inst.symbol, inst.yahoo, inst.asset_class) == (symbol, yahoo, cls)
 
 
+def test_every_watchlist_instrument_has_a_market():
+    for inst in instruments.watchlist():
+        assert inst.market in instruments.MARKETS
+    assert instruments.find("IHSG").market == "saham-idx"
+    assert instruments.find("DXY").market == "forex"
+    assert instruments.find("SOLUSD").market == "kripto"
+    assert {i.symbol for i in instruments.by_market("kripto")} >= {"BTCUSD", "ETHUSD"}
+
+
 def test_resolve_rejects_garbage():
     with pytest.raises(InvalidSymbol):
         instruments.resolve("<script>")

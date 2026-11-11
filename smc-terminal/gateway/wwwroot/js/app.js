@@ -2,12 +2,10 @@
 import { $, $$, api, emit, esc, on, dirClass, toast } from './util.js';
 import * as tv from './tv.js';
 import dashboard from './dashboard.js';
-import screener from './screener.js';
-import analysis from './analysis.js';
-import direction from './direction.js';
-import news from './news.js';
 import calendar from './calendar.js';
 import method from './method.js';
+import { marketPage } from './market.js';
+import { MARKET_KEYS, MARKETS } from './markets.js';
 
 export const store = {
   stats: null,
@@ -20,7 +18,12 @@ export const store = {
   connected: false,
 };
 
-const modules = { dashboard, screener, analisa: analysis, arah: direction, berita: news, kalender: calendar, metode: method };
+const modules = {
+  dashboard,
+  ...Object.fromEntries(MARKET_KEYS.map((k) => [k, marketPage(k)])),
+  kalender: calendar,
+  metode: method,
+};
 const initialized = new Set();
 let current = null;
 
@@ -30,7 +33,25 @@ export function go(tab, ...params) {
   if (location.hash === hash) route();
   else location.hash = hash;
 }
-window.SMC = { go, openAnalysis: (symbol, tf) => go('analisa', symbol, tf) };
+// Which market page owns a symbol: the engine's instrument catalogue decides (instrument.market).
+async function marketFor(symbol) {
+  const key = String(symbol).toUpperCase();
+  const known = store.instruments.find((i) => i.symbol === key);
+  if (known) return { market: known.market, symbol: known.symbol };
+  try {
+    const inst = await api(`/api/resolve?q=${encodeURIComponent(symbol)}`);
+    return { market: inst.market, symbol: inst.symbol };
+  } catch {
+    return { market: 'forex', symbol: key };
+  }
+}
+
+async function openAnalysis(symbol, tf) {
+  const { market, symbol: resolved } = await marketFor(symbol);
+  go(MARKETS[market] ? market : 'forex', 'analisa', resolved, tf);
+}
+
+window.SMC = { go, openAnalysis };
 
 function route() {
   const [name = 'dashboard', ...params] = location.hash.replace(/^#/, '').split('/').map(decodeURIComponent);
@@ -44,10 +65,23 @@ function route() {
   modules[tab].show?.(params, store);
   if (current !== tab) window.scrollTo({ top: 0 });
   current = tab;
-  if (tab === 'berita') $('#news-dot').classList.add('hidden');
+  $(`.tab-btn[data-tab="${tab}"] .badge-dot`)?.remove();
+}
+
+function markNewNews(items) {
+  const markets = new Set(items.flatMap((i) => i.markets || []));
+  for (const m of markets) {
+    const btn = $(`.tab-btn[data-tab="${m}"]`);
+    if (btn && m !== current && !btn.querySelector('.badge-dot')) btn.insertAdjacentHTML('beforeend', '<span class="badge-dot" title="berita baru"></span>');
+  }
 }
 
 document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-focus-search]')) {
+    go('dashboard');
+    setTimeout(() => $('#hero-input')?.focus(), 50);
+    return;
+  }
   const t = e.target.closest('[data-tab],[data-go]');
   if (!t) return;
   e.preventDefault();
@@ -83,7 +117,7 @@ async function connectRealtime() {
   conn.on('news', (items) => {
     pushHeadlines(items);
     emit('news', items);
-    if (current !== 'berita') $('#news-dot').classList.remove('hidden');
+    markNewNews(items);
   });
   conn.on('newsReset', () => { loadHeadlines(); emit('newsReset'); });
   conn.on('screener', (snap) => { store.screener = snap; emit('screener', snap); });
@@ -101,7 +135,7 @@ async function connectRealtime() {
   conn.on('alert', (a) => {
     store.alerts = [a, ...store.alerts].slice(0, 100);
     emit('alert', a);
-    if (a.severity !== 'info') toast(a.title, a.detail, () => a.symbol && a.kind !== 'calendar' && go('analisa', a.symbol));
+    if (a.severity !== 'info') toast(a.title, a.detail, () => a.symbol && a.kind !== 'calendar' && a.kind !== 'news' && openAnalysis(a.symbol));
   });
   conn.onreconnecting(() => { store.connected = false; setLive('', 'RECONNECT'); });
   conn.onreconnected(() => { store.connected = true; updateLiveLabel(); refreshAll(); });

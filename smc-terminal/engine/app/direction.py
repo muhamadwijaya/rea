@@ -17,7 +17,7 @@ from .market_data import Bars
 
 G8 = ("USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF")
 CORE = ("DXY", "EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "USOIL", "SPX", "NDX", "IHSG", "VIX", "US10Y",
-        "BTCUSD", "USDIDR")
+        "BTCUSD", "ETHUSD", "USDIDR")
 WEIGHT_D1, WEIGHT_H4 = 0.55, 0.45
 
 
@@ -47,6 +47,7 @@ def _instrument_view(inst: instruments.Instrument, d1: Bars, h4: Bars | None) ->
         "name": inst.name,
         "tv": inst.tv,
         "assetClass": inst.asset_class,
+        "market": inst.market,
         "decimals": inst.price_decimals(float(d1.close[-1])),
         "price": float(d1.close[-1]),
         "changePct": _pct(d1, 1),
@@ -99,7 +100,7 @@ def _strength_of(strength: list[dict], currency: str) -> float:
     return 0.0
 
 
-def _outlook(key: str, title: str, parts: list[tuple[str, float, float]], views: dict[str, dict],
+def _outlook(key: str, title: str, market: str, parts: list[tuple[str, float, float]], views: dict[str, dict],
              extra: list[str] | None = None) -> dict | None:
     """parts: (symbol, weight, sign). A negative sign means the instrument moves against the asset."""
     used = [(views[s], w, sign) for s, w, sign in parts if s in views]
@@ -117,6 +118,7 @@ def _outlook(key: str, title: str, parts: list[tuple[str, float, float]], views:
     return {
         "key": key,
         "title": title,
+        "market": market,
         "score": round(float(score), 1),
         "direction": direction,
         "label": label,
@@ -167,14 +169,14 @@ def market_direction() -> dict:
     strength = currency_strength(views)
     usd_strength = _strength_of(strength, "USD")
     outlooks = [
-        _outlook("usd", "Dolar AS", [("DXY", 1.0, 1)], views,
+        _outlook("usd", "Dolar AS", "forex", [("DXY", 1.0, 1)], views,
                  [f"Kekuatan USD vs G8: {usd_strength:+.0f}"] if strength else None),
-        _outlook("us_equities", "Saham AS", [("SPX", 1.0, 1), ("NDX", 1.0, 1)], views),
-        _outlook("idx", "IHSG", [("IHSG", 0.7, 1), ("USDIDR", 0.3, -1)], views),
-        _outlook("gold", "Emas", [("XAUUSD", 1.0, 1)], views),
-        _outlook("oil", "Minyak WTI", [("USOIL", 1.0, 1)], views),
-        _outlook("crypto", "Kripto", [("BTCUSD", 1.0, 1)], views),
-        _outlook("yields", "Yield US10Y", [("US10Y", 1.0, 1)], views),
+        _outlook("us_equities", "Saham AS", "saham-as", [("SPX", 1.0, 1), ("NDX", 1.0, 1)], views),
+        _outlook("idx", "IHSG", "saham-idx", [("IHSG", 0.7, 1), ("USDIDR", 0.3, -1)], views),
+        _outlook("gold", "Emas", "forex", [("XAUUSD", 1.0, 1)], views),
+        _outlook("oil", "Minyak WTI", "forex", [("USOIL", 1.0, 1)], views),
+        _outlook("crypto", "Kripto", "kripto", [("BTCUSD", 0.6, 1), ("ETHUSD", 0.4, 1)], views),
+        _outlook("yields", "Yield US10Y", "saham-as", [("US10Y", 1.0, 1)], views),
     ]
     outlooks = [o for o in outlooks if o]
 

@@ -12,6 +12,12 @@ public sealed class TerminalOptions
     public string CalendarUrl { get; set; } = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
     public int MaxNewsItems { get; set; } = 800;
     public int MaxNewsAgeHours { get; set; } = 96;
+    /// <summary>Start and supervise the Python engine as a hidden child process.</summary>
+    public bool ManageEngine { get; set; }
+    /// <summary>Python interpreter for the managed engine; defaults to engine/.venv.</summary>
+    public string? EnginePython { get; set; }
+    /// <summary>When set, gateway and engine logs are written to files in this folder.</summary>
+    public string? LogDirectory { get; set; }
     public List<FeedConfig> Feeds { get; set; } = new();
 }
 
@@ -40,6 +46,7 @@ public sealed record NewsItem
     public string? SentimentLabel { get; init; }
     public IReadOnlyList<string> Terms { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Assets { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> Markets { get; init; } = Array.Empty<string>();
 }
 
 public sealed class FeedStatus
@@ -47,6 +54,7 @@ public sealed class FeedStatus
     public required string Name { get; init; }
     public required string Url { get; init; }
     public required string Category { get; init; }
+    public IReadOnlyList<string> Markets { get; init; } = Array.Empty<string>();
     public DateTimeOffset? LastAttempt { get; set; }
     public DateTimeOffset? LastOk { get; set; }
     public string? LastError { get; set; }

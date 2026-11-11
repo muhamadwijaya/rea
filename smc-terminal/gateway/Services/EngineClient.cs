@@ -51,6 +51,36 @@ public sealed class EngineClient(HttpClient http, ILogger<EngineClient> log)
         }
     }
 
+    /// <summary>Scores headlines through the engine; returns an empty map when the engine is unavailable.</summary>
+    public async Task<Dictionary<string, SentimentScore>> ScoreSentimentAsync(IEnumerable<SmcTerminal.Gateway.Models.NewsItem> items, CancellationToken ct)
+    {
+        var batch = items.Select(i => new { id = i.Id, title = i.Title, summary = i.Summary }).ToList();
+        var scores = new Dictionary<string, SentimentScore>();
+        if (batch.Count == 0)
+        {
+            return scores;
+        }
+        var response = await PostJsonAsync("sentiment", new { items = batch }, ct);
+        if (!response.Ok)
+        {
+            return scores;
+        }
+        using var doc = JsonDocument.Parse(response.Body);
+        foreach (var e in doc.RootElement.GetProperty("items").EnumerateArray())
+        {
+            if (e.GetProperty("id").GetString() is not { } id)
+            {
+                continue;
+            }
+            scores[id] = new SentimentScore(
+                e.GetProperty("score").GetDouble(),
+                e.GetProperty("label").GetString() ?? "neutral",
+                e.GetProperty("terms").EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
+                e.GetProperty("assets").EnumerateArray().Select(x => x.GetString() ?? "").ToList());
+        }
+        return scores;
+    }
+
     private static void MarkOk()
     {
         LastOk = DateTimeOffset.UtcNow;

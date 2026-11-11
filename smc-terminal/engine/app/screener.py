@@ -15,10 +15,10 @@ def _change(bars: Bars | Exception | None, lookback: int = 1) -> float | None:
     return round((bars.close[-1] / prev - 1.0) * 100.0, 3) if prev else None
 
 
-def screen(group: str = "all", tf_key: str = "4h") -> dict:
+def screen(market: str = "all", tf_key: str = "4h") -> dict:
     started = time.perf_counter()
     tf = market_data.timeframe(tf_key)
-    insts = instruments.by_group(group)
+    insts = instruments.by_market(market)
     bars_map = market_data.load_many(insts, tf.key)
     daily_map = bars_map if tf.key == "1d" else market_data.load_many(insts, "1d")
 
@@ -43,7 +43,7 @@ def screen(group: str = "all", tf_key: str = "4h") -> dict:
             "spark": [round(float(x), 6) for x in closes],
         })
     return {
-        "group": group,
+        "market": market,
         "tf": tf.key,
         "generatedAt": int(time.time()),
         "elapsedMs": int((time.perf_counter() - started) * 1000),
