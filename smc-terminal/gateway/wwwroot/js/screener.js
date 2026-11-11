@@ -75,18 +75,20 @@ export class ScreenerView {
     this.snapshot = store.screener;
     this.loadingTf = null;
     el.innerHTML = `
-      <div class="toolbar">
-        <div class="seg scr-bias"><button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button></div>
-        <div class="seg scr-tf"><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button></div>
-        <input class="input scr-search" placeholder="cari simbol…">
-        <span class="grow"></span><span class="time scr-updated"></span>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><span class="diamond">◆</span> SMC SCREENER · ${esc(cfg.nav)} <span class="sub scr-sub"></span><span class="right live-label">LIVE</span></div>
-        <div class="table-wrap" style="max-height: 640px"><table class="data scr-table"></table></div>
-      </div>
-      <div class="section-title"><h2>TradingView Screener · ${esc(cfg.nav)}</h2><span class="sub">data realtime langsung dari TradingView · seluruh pasar</span></div>
-      <div class="panel tv-box tv-screener"></div>`;
+      <div class="panel tabbed fill">
+        <div class="ptabs"><button data-t="smc" class="active">SMC SCREENER · ${esc(cfg.nav)}</button><button data-t="tv">TRADINGVIEW SCREENER (REALTIME)</button></div>
+        <div class="pane active" data-t="smc">
+          <div class="toolbar" style="padding:8px 10px;border-bottom:1px solid var(--line)">
+            <div class="seg scr-bias"><button data-v="all" class="active">SEMUA BIAS</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">SIDEWAYS</button></div>
+            <div class="seg scr-tf"><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button></div>
+            <input class="input scr-search" placeholder="cari simbol…">
+            <span class="sub scr-sub muted"></span>
+            <span class="grow"></span><span class="time scr-updated"></span><span class="live-label">LIVE</span>
+          </div>
+          <div class="table-wrap"><table class="data scr-table"></table></div>
+        </div>
+        <div class="pane" data-t="tv"><div class="tv-fill tv-screener"></div></div>
+      </div>`;
     const $ = (s) => el.querySelector(s);
     segmented($('.scr-bias'), (v) => { this.filters.bias = v; this.render(); });
     segmented($('.scr-tf'), (v) => { this.filters.tf = v; this.loadTf(v); }).set(this.filters.tf);
@@ -103,7 +105,10 @@ export class ScreenerView {
       if (tr) window.SMC.go(cfg.key, 'analisa', tr.dataset.sym, this.filters.tf);
     });
     on('screener', (snap) => { if (snap.tf === this.filters.tf) { this.snapshot = snap; this.render(); } });
-    screenerWidget($('.tv-screener'), cfg.tvScreener);
+    // TradingView widget is mounted the first time its tab is opened (it needs a visible, sized container).
+    el.querySelector('.pane[data-t="tv"]').addEventListener('tabshow', () => {
+      if (!this.tvMounted) { this.tvMounted = true; screenerWidget($('.tv-screener'), cfg.tvScreener); }
+    });
     this.render();
   }
 

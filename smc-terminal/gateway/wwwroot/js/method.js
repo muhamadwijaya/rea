@@ -1,5 +1,39 @@
-// Metodologi: static explanation of every rule the engine applies.
-import { $ } from './util.js';
+// Metodologi: every rule the engine applies, split over tabs (no page scroll). First tab is the 7-step walkthrough.
+import { $, esc } from './util.js';
+
+const STEPS = [
+  ['STRUKTUR', 'Baca struktur pasar', 'Engine mencari swing high/low (pivot fractal) di dua skala: swing (besar) dan internal (kecil). Setiap pivot diberi label HH, HL, LH atau LL sehingga terlihat apakah pasar membuat puncak & lembah yang makin tinggi atau makin rendah.'],
+  ['BOS/CHoCH', 'Deteksi break struktur', 'Close yang menembus swing high/low terakhir dicatat. Searah tren = BOS (Break of Structure, tren berlanjut). Berlawanan tren = CHoCH (Change of Character, tanda awal pembalikan). Tidak ada look-ahead: pivot baru dianggap ada setelah bar konfirmasinya tutup.'],
+  ['ORDER BLOCK', 'Tandai order block', 'Setiap break menghasilkan order block: candle asal dorongan (low terendah sebelum break bullish / high tertinggi sebelum break bearish). OB dilacak sampai disentuh ulang (tapped) atau ditembus close (invalid).'],
+  ['FVG', 'Temukan imbalance', 'Fair Value Gap = celah tiga candle (low candle ke-3 di atas high candle ke-1, atau sebaliknya) yang cukup besar terhadap ATR. Engine mencatat persentase terisi dan kapan gap tertutup penuh.'],
+  ['LIKUIDITAS', 'Petakan likuiditas', 'Equal highs/lows (EQH/EQL) dan swing high/low yang belum tersentuh adalah kolam stop-loss (buy-side & sell-side liquidity). Harga cenderung bergerak ke sana — dipakai sebagai target.'],
+  ['ZONA P/D', 'Premium vs discount', 'Dealing range = swing high & low aktif. Di atas 50% = premium (mahal, area jual), di bawah 50% = discount (murah, area beli). Strong/weak high-low ditentukan dari arah tren swing.'],
+  ['BIAS', 'Skor bias & skenario', 'Tujuh komponen (struktur swing & internal, CHoCH terbaru, EMA 50/200, posisi premium/discount, momentum RSI, reaksi OB) digabung menjadi skor −100…+100, diperkuat konfluensi 1D/4H/1H, lalu dibuat skenario entry, invalidasi dan target likuiditas.'],
+];
+const STEP_POS = [[8, 22], [36, 22], [64, 22], [92, 22], [78, 78], [50, 78], [22, 78]];
+
+function renderSteps() {
+  const root = $('#method');
+  const nodes = STEP_POS.map(([x, y], i) => `
+    <div class="step-node ${i === step ? 'active' : i < step ? 'done' : ''}" data-step="${i}" style="left:${x}%;top:${y}%">
+      <div class="dot">${i + 1}</div><div class="lbl">${STEPS[i][0]}</div>
+    </div>`).join('');
+  const pts = STEP_POS.map(([x, y]) => [x, y - 9]);
+  const path = `M${pts[0][0]} ${pts[0][1]} L${pts[3][0]} ${pts[3][1]} C${pts[3][0] + 8} ${pts[3][1]}, ${pts[3][0] + 8} ${pts[4][1]}, ${pts[4][0]} ${pts[4][1]} L${pts[6][0]} ${pts[6][1]}`;
+  root.querySelector('.steps').innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="#3b4a66" stroke-width="0.6" stroke-dasharray="0.6 1.4" vector-effect="non-scaling-stroke"/></svg>${nodes}`;
+  const [, title, text] = STEPS[step];
+  root.querySelector('.step-card').innerHTML = `
+    <div class="top"><span class="n">LANGKAH ${step + 1} / 7</span>
+      <span class="step-nav"><button data-d="-1" aria-label="sebelumnya">‹</button><button data-d="1" aria-label="berikutnya">›</button></span></div>
+    <h3>${esc(title)}</h3><p>${esc(text)}</p>`;
+}
+
+function setStep(i, manual) {
+  step = (i + STEPS.length) % STEPS.length;
+  renderSteps();
+  if (manual) { clearInterval(stepTimer); stepTimer = setInterval(() => setStep(step + 1), 9000); }
+}
+
 
 const CARDS = [
   ['1 · Struktur pasar (pivot)', `<p>Pivot = bar yang high-nya tertinggi (atau low-nya terendah) di jendela <code>2×N+1</code> bar. N swing / internal per timeframe: 15M 15/4 · 1H 12/4 · 4H 10/3 · 1D 10/3 · 1W 8/3. Pivot baru diketahui setelah N bar di kanannya tutup (tanpa look-ahead).</p><p>Label: <b>HH</b> higher high, <b>LH</b> lower high, <b>HL</b> higher low, <b>LL</b> lower low.</p>`],
@@ -17,8 +51,33 @@ const CARDS = [
   ['Arsitektur', `<p><b>Aplikasi desktop (C# WinForms + WebView2)</b> — jendela sendiri, menjalankan gateway di dalam proses. <b>Gateway C# (ASP.NET Core 8)</b> — API, agregasi RSS realtime, kalender, alert, push SignalR, serta mengelola engine Python sebagai proses tersembunyi (restart otomatis bila crash). <b>Engine Python (FastAPI)</b> — data harga, SMC, skor bias, screener, arah market, sentimen. Log: folder <code>logs/</code>.</p>`],
 ];
 
+// Card titles grouped into tabs.
+const TABS = [
+  ['cara', 'CARA KERJA · 7 LANGKAH', null],
+  ['struktur', 'STRUKTUR & BOS/CHoCH', ['1 · Struktur pasar (pivot)', '2 · BOS & CHoCH']],
+  ['zona', 'OB · FVG · LIKUIDITAS', ['3 · Order block', '4 · Fair Value Gap', '5 · Likuiditas', '6 · Premium / Discount']],
+  ['skor', 'SKOR & SKENARIO', ['7 · Skor bias (−100…+100)', 'Skenario trading']],
+  ['arah', 'ARAH MARKET & BERITA', ['Arah market', 'Sentimen berita', 'Halaman per pasar']],
+  ['data', 'DATA & ARSITEKTUR', ['Sumber data & keterbatasan', 'Arsitektur']],
+];
+
+let step = 0;
+let stepTimer;
+
 export default {
   init() {
-    $('#method').innerHTML = CARDS.map(([t, body]) => `<div class="panel"><div class="panel-body"><h3>${t}</h3>${body}</div></div>`).join('');
+    const byTitle = Object.fromEntries(CARDS.map(([t, body]) => [t, body]));
+    const card = (t) => `<div class="panel"><div class="panel-body"><h3>${t}</h3>${byTitle[t]}</div></div>`;
+    $('#method').innerHTML = `
+      <div class="ptabs">${TABS.map(([k, l], i) => `<button data-t="${k}" class="${i ? '' : 'active'}">${l}</button>`).join('')}</div>
+      ${TABS.map(([k, , titles], i) => `<div class="pane ${i ? '' : 'active'}" data-t="${k}"><div class="panel-body">${titles
+        ? `<div class="method-grid">${titles.map(card).join('')}</div>`
+        : `<div class="steps-wrap"><div class="steps"></div><div class="step-card"></div></div>
+           <p class="note" style="margin-top:22px">Klik nomor langkah untuk detail. Rincian aturan & bobot ada di tab berikutnya. Semua output adalah hasil aturan otomatis, bukan saran investasi.</p>`}</div></div>`).join('')}`;
+    const root = $('#method');
+    root.querySelector('.steps').addEventListener('click', (e) => { const n = e.target.closest('[data-step]'); if (n) setStep(+n.dataset.step, true); });
+    root.querySelector('.step-card').addEventListener('click', (e) => { const b = e.target.closest('button[data-d]'); if (b) setStep(step + +b.dataset.d, true); });
+    renderSteps();
+    stepTimer = setInterval(() => setStep(step + 1), 9000);
   },
 };

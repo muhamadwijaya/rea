@@ -9,6 +9,7 @@ const LAYERS = [
   ['swing', 'Struktur swing'], ['internal', 'Internal'], ['pivots', 'HH/HL/LH/LL'], ['ob', 'Order block'],
   ['fvg', 'FVG'], ['eq', 'EQH/EQL'], ['liquidity', 'Likuiditas'], ['zones', 'Premium/Discount'], ['ema', 'EMA 50/200'], ['plan', 'Trade plan'],
 ];
+const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['tv', 'TV'], ['berita', 'BERITA']];
 const LEGEND = [
   ['#2fd28c', 'bull'], ['#ff4d5e', 'bear'], ['#38d3f5', 'FVG bull'], ['#ff9f43', 'FVG bear'], ['#6b9bff', 'EMA50'], ['#f2c94c', 'EMA200 · likuiditas'],
 ];
@@ -37,6 +38,7 @@ export class AnalysisView {
     this.tvMounted = '';
     this.chart = null;
     this.controller = null;
+    this.sideTab = 'bias';
     this.render();
     on('screener', () => this.renderWatch());
     setInterval(() => {
@@ -59,16 +61,27 @@ export class AnalysisView {
           <div class="toolbar">
             <div class="seg an-tf"><button data-v="15m">15M</button><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button><button data-v="1w">1W</button></div>
             <div class="seg an-view"><button data-v="smc" class="active">CHART SMC</button><button data-v="tv">TRADINGVIEW LIVE</button><button data-v="split">SPLIT</button></div>
+            <div class="layers">
+              <button class="btn layers-btn" type="button">LAYER SMC ▾</button>
+              <div class="layers-pop hidden">
+                ${LAYERS.map(([k, label]) => `<label class="check"><input type="checkbox" data-layer="${k}" checked> ${label}</label>`).join('')}
+                <div class="legend-row">${LEGEND.map(([c, l]) => `<span class="check"><span class="sw" style="background:${c}"></span>${l}</span>`).join('')}</div>
+              </div>
+            </div>
             <span class="grow"></span><span class="time an-updated"></span>
           </div>
-          <div class="toolbar an-toggles">${LAYERS.map(([k, label]) => `<label class="check"><input type="checkbox" data-layer="${k}" checked> ${label}</label>`).join('')}</div>
-          <div class="grid an-main">
+          <div class="an-main">
             <div class="panel chart-shell"><div class="chart-host"></div><div class="chart-legend"></div></div>
             <div class="panel tv-live hidden"></div>
           </div>
-          <div class="legend-row">${LEGEND.map(([c, l]) => `<span class="check"><span class="sw" style="background:${c}"></span>${l}</span>`).join('')}</div>
         </div>
-        <aside class="side an-side"><div class="panel"><div class="loading">Memuat analisa</div></div></aside>
+        <aside class="an-side">
+          <div class="panel an-card"><div class="panel-body"><div class="loading">Memuat analisa</div></div></div>
+          <div class="panel tabbed an-tabs">
+            <div class="ptabs">${SIDE_TABS.map(([k, l]) => `<button data-t="${k}" class="${k === this.sideTab ? 'active' : ''}">${l}</button>`).join('')}</div>
+            ${SIDE_TABS.map(([k]) => `<div class="pane ${k === this.sideTab ? 'active' : ''}" data-t="${k}"><div class="panel-body"></div></div>`).join('')}
+          </div>
+        </aside>
       </div>`;
     this.tfSeg = segmented(this.$('.an-tf'), (v) => this.load(this.current.symbol, v));
     this.tfSeg.set(this.current.tf);
@@ -82,11 +95,16 @@ export class AnalysisView {
       const row = e.target.closest('[data-sym]');
       if (row) this.load(row.dataset.sym, this.current.tf);
     });
-    this.$('.an-toggles').addEventListener('change', (e) => {
+    const pop = this.$('.layers-pop');
+    this.$('.layers-btn').addEventListener('click', (e) => { e.stopPropagation(); pop.classList.toggle('hidden'); });
+    document.addEventListener('click', (e) => { if (!e.target.closest('.layers')) pop.classList.add('hidden'); });
+    pop.addEventListener('change', (e) => {
       const k = e.target.dataset.layer;
       if (k) this.chart?.setLayers({ [k]: e.target.checked });
     });
-    this.$('.an-side').addEventListener('click', (e) => {
+    this.$('.an-tabs').addEventListener('click', (e) => {
+      const t = e.target.closest('.ptabs button[data-t]');
+      if (t) this.sideTab = t.dataset.t;
       const row = e.target.closest('.mtf-row[data-tf]');
       if (row) this.load(this.current.symbol, row.dataset.tf);
     });
@@ -121,9 +139,9 @@ export class AnalysisView {
     this.$('.an-main').classList.toggle('view-split', v === 'split');
     this.$('.chart-shell').classList.toggle('hidden', v === 'tv');
     this.$('.tv-live').classList.toggle('hidden', v === 'smc');
-    this.$('.an-toggles').classList.toggle('hidden', v === 'tv');
+    this.$('.layers').classList.toggle('hidden', v === 'tv');
     if (v !== 'smc') this.mountTv();
-    this.chart?.requestDraw();
+    if (v !== 'tv') requestAnimationFrame(() => this.chart?.reveal());
   }
 
   mountTv() {
@@ -141,7 +159,7 @@ export class AnalysisView {
     this.controller?.abort();
     this.controller = new AbortController();
     if (!silent) {
-      this.$('.an-side').innerHTML = '<div class="panel"><div class="loading">Menganalisa struktur pasar</div></div>';
+      this.$('.an-card .panel-body').innerHTML = '<div class="loading">Menganalisa struktur pasar</div>';
       this.$('.an-updated').textContent = '';
     }
     try {
@@ -151,7 +169,7 @@ export class AnalysisView {
       this.current.symbol = d.instrument.symbol;
       this.ensureChart()?.setData(d, { keepRange: sameView });
       this.renderLegend(d);
-      if (!silent || this.$('.an-side .badge')?.textContent !== d.bias.label) this.renderSide(d);
+      if (!silent || this.$('.an-card .badge')?.textContent !== d.bias.label) this.renderSide(d);
       else {
         const p = this.$('.an-head .p');
         if (p) p.textContent = fmtPrice(d.price, d.instrument.decimals);
@@ -164,8 +182,8 @@ export class AnalysisView {
     } catch (e) {
       if (e.name === 'AbortError') return;
       if (!silent) {
-        this.$('.an-side').innerHTML = `<div class="panel"><div class="panel-body"><div class="error-box"><b>Analisa gagal.</b><br>${esc(e.message)}</div>
-          <div class="note">Contoh simbol: EURUSD, XAUUSD, AAPL, NVDA, BBCA, TLKM, IHSG, BTCUSD, SOLUSD, IDX:ANTM, NYSE:KO.</div></div></div>`;
+        this.$('.an-card .panel-body').innerHTML = `<div class="error-box"><b>Analisa gagal.</b><br>${esc(e.message)}</div>
+          <div class="note">Contoh simbol: EURUSD, XAUUSD, AAPL, NVDA, BBCA, TLKM, IHSG, BTCUSD, SOLUSD, IDX:ANTM, NYSE:KO.</div>`;
       }
     }
   }
@@ -206,30 +224,24 @@ export class AnalysisView {
             <div><div class="k">ATR</div><div class="v">${fmt(d.indicators.atr)}</div></div>
           </div><div class="note">${esc(plan.note)}</div>`;
 
-    this.$('.an-side').innerHTML = `
-      <div class="panel"><div class="panel-body">
-        <div class="an-head"><span class="s">${esc(inst.symbol)}</span><span class="cls">${CLASS_LABEL[inst.assetClass] || ''}</span><span class="p num">${fmt(d.price)}</span></div>
-        <div class="muted" style="font-size:11.5px">${esc(inst.name)} · TF ${esc(d.tfLabel)} · bar terakhir ${fmtTime(d.asOf, true)} · ${esc(inst.tv)}</div>
-      </div></div>
+    const pane = (k, html) => { this.$(`.an-tabs .pane[data-t="${k}"] .panel-body`).innerHTML = html; };
+    this.$('.an-card .panel-body').innerHTML = `
+      <div class="an-head"><span class="s">${esc(inst.symbol)}</span><span class="cls">${CLASS_LABEL[inst.assetClass] || ''}</span><span class="p num">${fmt(d.price)}</span><span class="grow"></span>${badge(b.direction, b.label)}</div>
+      <div class="muted" style="font-size:11px">${esc(inst.name)} · TF ${esc(d.tfLabel)} · bar ${fmtTime(d.asOf, true)} · ${esc(inst.tv)}</div>`;
 
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> BIAS ${esc(d.tfLabel)}<span class="right">${badge(b.direction, b.label)}</span></div>
-        <div class="panel-body">
-          <div class="gauge-wrap">${gauge(b.score, b.direction, this.cfg.key)}<div><div class="gauge-label" style="color:${dirHex(b.direction)}">${arrow(b.direction)} ${esc(b.label)}</div><div class="muted" style="font-size:11px">skor −100 (turun kuat) … +100 (naik kuat)</div></div></div>
-          ${b.components.map((c) => `<div class="comp"><span class="n">${esc(c.name)}<small>${esc(c.note)}</small></span>${divBar(c.value, c.max)}<span class="v" style="color:${c.value > 0 ? 'var(--bull)' : c.value < 0 ? 'var(--bear)' : 'var(--dim)'}">${fmtScore(c.value)}</span></div>`).join('')}
-        </div></div>
+    pane('bias', `
+      <div class="gauge-wrap">${gauge(b.score, b.direction, this.cfg.key)}<div><div class="gauge-label" style="color:${dirHex(b.direction)}">${arrow(b.direction)} ${esc(b.label)}</div><div class="muted" style="font-size:11px">Bias ${esc(d.tfLabel)} · skor −100 (turun kuat) … +100 (naik kuat)</div></div></div>
+      ${b.components.map((c) => `<div class="comp"><span class="n">${esc(c.name)}<small>${esc(c.note)}</small></span>${divBar(c.value, c.max)}<span class="v" style="color:${c.value > 0 ? 'var(--bull)' : c.value < 0 ? 'var(--bear)' : 'var(--dim)'}">${fmtScore(c.value)}</span></div>`).join('')}`);
 
-      ${mtf ? `<div class="panel"><div class="panel-head"><span class="diamond">◆</span> MULTI-TIMEFRAME<span class="right">${badge(mtf.direction, mtf.label)}</span></div>
-        <div class="panel-body">
-          ${mtf.timeframes.map((t) => t.error ? `<div class="mtf-row"><b>${esc(t.tf.toUpperCase())}</b><span class="down" style="grid-column: span 3">${esc(t.error)}</span></div>` : `
-            <div class="mtf-row" data-tf="${esc(t.tf)}" style="cursor:pointer"><b>${esc(t.tf.toUpperCase())}</b><span>${trendText(t.swingTrend)} <span class="dim">swing</span></span><span>${trendText(t.internalTrend)} <span class="dim">int</span></span><span class="num" style="text-align:right;color:${dirHex(t.direction)}">${fmtScore(t.score)}</span></div>`).join('')}
-          <div class="note">${mtf.aligned ? '✔ ' : '⚠ '}${esc(mtf.note)} Skor gabungan ${fmtScore(mtf.score)} (bobot 1D 45% · 4H 35% · 1H 20%).</div>
-        </div></div>` : ''}
+    pane('mtf', mtf ? `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>KONFLUENSI MULTI-TIMEFRAME</b>${badge(mtf.direction, mtf.label)}</div>
+      ${mtf.timeframes.map((t) => t.error ? `<div class="mtf-row"><b>${esc(t.tf.toUpperCase())}</b><span class="down" style="grid-column: span 3">${esc(t.error)}</span></div>` : `
+        <div class="mtf-row" data-tf="${esc(t.tf)}" style="cursor:pointer" title="Buka TF ${esc(t.tf.toUpperCase())}"><b>${esc(t.tf.toUpperCase())}</b><span>${trendText(t.swingTrend)} <span class="dim">swing</span></span><span>${trendText(t.internalTrend)} <span class="dim">int</span></span><span class="num" style="text-align:right;color:${dirHex(t.direction)}">${fmtScore(t.score)}</span></div>`).join('')}
+      <div class="note">${mtf.aligned ? '✔ ' : '⚠ '}${esc(mtf.note)} Skor gabungan ${fmtScore(mtf.score)} (bobot 1D 45% · 4H 35% · 1H 20%). Klik baris untuk membuka timeframe itu.</div>` : '<div class="empty">Tidak tersedia.</div>');
 
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> SKENARIO TRADING<span class="right sub">otomatis · bukan saran</span></div><div class="panel-body">${planHtml}</div></div>
-
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> NARASI ANALISA</div><div class="panel-body"><ul class="narr">${d.narrative.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div></div>
-
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> LEVEL KUNCI</div><div class="panel-body levels">
+    pane('plan', `${planHtml}<div class="note">Skenario dibuat otomatis dari aturan SMC — bukan saran investasi.</div>`);
+    pane('narasi', `<ul class="narr">${d.narrative.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`);
+    pane('level', `<div class="levels">
         ${(liq.above || []).slice(0, 2).reverse().map((l) => `<div><span class="flat">BSL · ${esc(l.kind)}</span><b class="num">${fmt(l.price)}</b></div>`).join('')}
         ${z ? `<div><span class="down">Range high (${z.strong === 'high' ? 'strong' : 'weak'})</span><b class="num">${fmt(z.top)}</b></div>
                <div><span class="muted">Equilibrium</span><b class="num">${fmt(z.equilibrium)}</b></div>
@@ -238,13 +250,10 @@ export class AnalysisView {
         ${obBull ? `<div><span class="up">OB bullish ${esc(obBull.scope)}</span><b class="num">${fmt(obBull.bottom)} – ${fmt(obBull.top)}</b></div>` : ''}
         ${(liq.below || []).slice(0, 2).map((l) => `<div><span class="flat">SSL · ${esc(l.kind)}</span><b class="num">${fmt(l.price)}</b></div>`).join('')}
         <div><span class="muted">EMA50 / EMA200</span><b class="num">${fmt(d.indicators.ema50)} / ${fmt(d.indicators.ema200)}</b></div>
-        <div><span class="muted">RSI(14)</span><b class="num">${d.indicators.rsi?.toFixed(1) ?? '–'}</b></div>
-      </div></div>
-
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> TEKNIKAL TRADINGVIEW<span class="right sub">realtime</span></div><div style="height:420px" class="tv-gauge"></div></div>
-
-      <div class="panel"><div class="panel-head"><span class="diamond">◆</span> BERITA ${esc(inst.symbol)}<span class="right live-label">LIVE</span></div><div class="panel-body sym-news"><div class="loading">Memuat berita</div></div></div>
-      <div class="note">${esc(d.source)}. Chart SMC diperbarui tiap 60 detik; mode TRADINGVIEW LIVE / SPLIT untuk harga tick realtime.</div>`;
+        <div><span class="muted">RSI(14) · ATR</span><b class="num">${d.indicators.rsi?.toFixed(1) ?? '–'} · ${fmt(d.indicators.atr)}</b></div>
+      </div><div class="note">${esc(d.source)}. Chart SMC diperbarui tiap 60 detik; mode TRADINGVIEW LIVE / SPLIT untuk harga tick realtime.</div>`);
+    pane('tv', '<div class="tv-gauge" style="height:100%;min-height:380px"></div>');
+    pane('berita', '<div class="sym-news"><div class="loading">Memuat berita</div></div>');
 
     technicalGauge(this.$('.tv-gauge'), inst.tv, this.current.tf);
     this.loadSymbolNews(inst.symbol);
@@ -267,6 +276,6 @@ export class AnalysisView {
     const symbol = params[0] || this.current.symbol;
     const tf = params[1] || this.current.tf;
     if (!this.data || symbol.toUpperCase() !== this.data.instrument.symbol || tf !== this.data.tf) this.load(symbol, tf);
-    else this.chart?.requestDraw();
+    else this.chart?.reveal();
   }
 }

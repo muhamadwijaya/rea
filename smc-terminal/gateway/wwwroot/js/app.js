@@ -76,6 +76,21 @@ function markNewNews(items) {
   }
 }
 
+// Generic panel tabs: <div class="tabbed"><div class="ptabs"><button data-t>…</div><div class="pane" data-t>…</div></div>.
+// The newly shown pane receives a 'tabshow' event so views can mount heavy widgets lazily.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.ptabs button[data-t]');
+  if (!btn) return;
+  const box = btn.closest('.tabbed');
+  if (!box) return;
+  box.querySelectorAll(':scope > .ptabs button').forEach((b) => b.classList.toggle('active', b === btn));
+  box.querySelectorAll(':scope > .pane').forEach((p) => {
+    const on = p.dataset.t === btn.dataset.t;
+    p.classList.toggle('active', on);
+    if (on) p.dispatchEvent(new CustomEvent('tabshow'));
+  });
+});
+
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-focus-search]')) {
     go('dashboard');
@@ -96,7 +111,20 @@ function setLive(state, label) {
   $('#live-label').textContent = label;
 }
 
+function statusLine(s) {
+  if (!s) return;
+  const parts = [
+    s.engineOnline ? 'engine OK' : `engine: ${s.engineError || 'offline'}`,
+    s.screenerAt ? `screener ${new Date(s.screenerAt).toLocaleTimeString('id-ID', { hour12: false })}` : 'screener …',
+    `${s.instruments} instrumen`,
+    `${s.newsTotal} berita · ${s.feedsOk}/${s.feedsTotal} sumber`,
+    `${s.alerts24h} alert 24j`,
+  ];
+  $('#status-left').textContent = `SMC Terminal · ${parts.join(' · ')}`;
+}
+
 function updateLiveLabel() {
+  statusLine(store.stats);
   if (!store.connected) return setLive('off', 'OFFLINE');
   if (store.stats && !store.stats.engineOnline) return setLive('off', 'ENGINE OFF');
   setLive('on', 'LIVE');
@@ -236,8 +264,108 @@ function tick() {
   }).join('');
 }
 
+// ------------------------------------------------------------------ boot screen
+const BOOT_STEPS = [
+  ['gateway', 'Gateway C# & server lokal'],
+  ['realtime', 'Koneksi realtime'],
+  ['engine', 'Engine analisa Python'],
+  ['screener', 'Data harga & screener SMC'],
+  ['direction', 'Model arah market'],
+  ['news', 'Berita realtime'],
+  ['calendar', 'Kalender ekonomi'],
+];
+
+function bootState(h) {
+  const sup = h?.engine?.supervisor;
+  const st = {};
+  st.gateway = h ? ['ok'] : ['run', 'menghubungkan…'];
+  st.realtime = store.connected ? ['ok'] : window.signalR ? ['run'] : ['warn', 'mode polling'];
+  if (h?.engine?.online) st.engine = ['ok'];
+  else if (sup?.failure) st.engine = ['fail', sup.failure];
+  else st.engine = ['run', sup?.managed ? `status: ${sup.state}` : 'menunggu engine…'];
+  st.screener = h?.screenerAt ? ['ok'] : ['run', 'memindai seluruh watchlist (pertama kali ±20–40 dtk)'];
+  st.direction = h?.directionAt ? ['ok'] : ['run'];
+  st.news = h?.news?.total > 0 ? ['ok', `${h.news.total} headline`] : ['run', 'mengambil 28 sumber RSS…'];
+  st.calendar = h?.calendar?.updated ? ['ok'] : h?.calendar?.error ? ['warn', 'gagal dimuat, dicoba lagi nanti'] : ['run'];
+  return st;
+}
+
+function runBoot() {
+  const el = $('#boot');
+  const started = Date.now();
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    $('#boot-bar').style.width = '100%';
+    $('#boot-msg').textContent = 'Siap.';
+    refreshAll();
+    setTimeout(() => el.classList.add('done'), 350);
+    setTimeout(() => el.remove(), 1000);
+  };
+  $('#boot-skip').addEventListener('click', finish);
+  const poll = async () => {
+    if (finished) return;
+    let h = null;
+    try { h = await api('/api/health'); } catch { /* gateway not up yet */ }
+    const st = bootState(h);
+    const done = BOOT_STEPS.filter(([k]) => st[k][0] === 'ok' || st[k][0] === 'warn').length;
+    const firstRun = BOOT_STEPS.find(([k]) => st[k][0] === 'run');
+    $('#boot-steps').innerHTML = BOOT_STEPS.map(([k, label]) => {
+      const [state, detail] = st[k];
+      const cls = state === 'run' && firstRun?.[0] !== k ? '' : state;
+      return `<li class="${cls}"><span class="st"></span><span>${esc(label)}${detail ? ` <small>· ${esc(detail)}</small>` : ''}</span><small>${state === 'ok' ? 'OK' : state === 'fail' ? 'GAGAL' : state === 'warn' ? '!' : ''}</small></li>`;
+    }).join('');
+    $('#boot-bar').style.width = `${Math.round((done / BOOT_STEPS.length) * 100)}%`;
+    const secs = Math.round((Date.now() - started) / 1000);
+    $('#boot-msg').textContent = firstRun ? `${firstRun[1]}… (${secs} dtk)` : 'Siap.';
+    if (done === BOOT_STEPS.length) return finish();
+    if (st.engine[0] === 'fail' || secs > 75) $('#boot-skip').classList.remove('hidden');
+    setTimeout(poll, 700);
+  };
+  poll();
+}
+
+// ------------------------------------------------------------------ desktop window integration (WebView2)
+function desktopIntegration() {
+  const host = window.chrome?.webview;
+  const send = (msg) => host?.postMessage(msg);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F11' && host) { e.preventDefault(); send('window:toggle-fullscreen'); }
+  });
+  if (!host) return;
+  $('#winctl').classList.remove('hidden');
+  host.addEventListener('message', (e) => {
+    if (e.data === 'fullscreen:1') { $('#win-fs').textContent = '❐'; $('#win-fs').title = 'Mode jendela (F11)'; }
+    if (e.data === 'fullscreen:0') { $('#win-fs').textContent = '⛶'; $('#win-fs').title = 'Layar penuh (F11)'; }
+  });
+  $('#winctl').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-win]');
+    if (!b) return;
+    if (b.dataset.win === 'close') confirmExit().then((ok) => ok && send('window:close'));
+    else send(`window:${b.dataset.win}`);
+  });
+  send('ui:ready');
+}
+
+function confirmExit() {
+  return new Promise((resolve) => {
+    const modal = $('#modal');
+    $('#modal-text').innerHTML = '<b>Keluar dari SMC Terminal?</b><div class="note">Engine analisa dan pengambilan berita akan dihentikan.</div>';
+    modal.classList.remove('hidden');
+    const done = (ok) => { modal.classList.add('hidden'); modal.onclick = null; resolve(ok); };
+    modal.onclick = (e) => {
+      const a = e.target.closest('[data-modal]');
+      if (a) done(a.dataset.modal === 'ok');
+      else if (e.target === modal) done(false);
+    };
+  });
+}
+
 // ------------------------------------------------------------------ boot
 function boot() {
+  runBoot();
+  desktopIntegration();
   tick();
   setInterval(tick, 1000);
   tv.tickerTape($('#tv-tape'));

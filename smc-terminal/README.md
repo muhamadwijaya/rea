@@ -26,25 +26,34 @@ di belakang aplikasi dan ikut berhenti saat jendela ditutup.
 | `start-browser.bat` | Cadangan: server di satu jendela konsol, UI di browser (http://127.0.0.1:5080) |
 | `stop.bat` | Paksa hentikan semua proses SMC Terminal |
 
+Setiap kali dibuka, aplikasi tampil **layar penuh** (tanpa title bar/tombol close Windows) dan menampilkan
+**loading screen** berisi tahapan — gateway, koneksi realtime, engine Python, data harga & screener, arah
+market, berita, kalender — sampai semuanya siap. Kontrol jendela ada di pojok kanan atas aplikasi:
+**─** minimize, **❐** mode jendela/layar penuh (juga **F11**), **✕** keluar. **F5** memuat ulang tampilan.
+Tautan berita dibuka di browser default.
+
 Aplikasi desktop memakai **Microsoft Edge WebView2 Runtime** (sudah ada di Windows 10/11). Bila belum
 terpasang, aplikasi memberi tautan instalasi dan sementara membuka UI di browser.
-Pintasan: **F11** layar penuh, **F5** muat ulang. Tautan berita dibuka di browser default.
 Log ada di folder `logs\` (`gateway.log`, `engine.log`).
 
 Linux/macOS (mode browser): `./start.sh`.
 
 ## Halaman
 
+Semua halaman muat dalam satu layar (tanpa scroll halaman, diuji pada 1920×1080 dan 1366×768). Info yang
+banyak dipisah ke **tab** di dalam panel; hanya daftar yang memang panjang (berita, tabel screener,
+watchlist) yang bergulir di dalam panelnya sendiri.
+
 | Halaman | Isi |
 | --- | --- |
-| **Dashboard** | Ringkasan semua pasar: kartu FOREX / SAHAM AS / SAHAM IDX / KRIPTO, radar SMC, *verdict stack*, arah market hari ini, KPI, sinyal struktur, alert live |
+| **Dashboard** | KPI, pencarian simbol, kartu FOREX / SAHAM AS / SAHAM IDX / KRIPTO, radar SMC + *verdict stack*, tab ARAH MARKET · SINYAL · ALERT · ANALISA |
 | **Forex** · **Saham AS** · **Saham IDX** · **Kripto** | Tiap pasar punya 4 sub-tab sendiri ↓ |
-| ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP) atau chart TradingView live / split, skor bias, multi-timeframe 1D/4H/1H, skenario, narasi, level kunci, gauge teknikal, berita simbol |
-| ↳ Screener | Tabel SMC instrumen pasar itu (filter bias, TF 1H/4H/1D, sortir) + TradingView Screener realtime pasar itu |
+| ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP; layer lewat menu LAYER SMC) atau chart TradingView live / split; panel kanan bertab BIAS · MTF · PLAN · NARASI · LEVEL · TV · BERITA |
+| ↳ Screener | Tab SMC SCREENER (filter bias, TF 1H/4H/1D, sortir) · tab TRADINGVIEW SCREENER realtime pasar itu |
 | ↳ Berita | Berita realtime khusus pasar itu (push SignalR), sentimen per aset, filter, TradingView News pasar itu, status sumber |
-| ↳ Arah Market | Breadth SMC, outlook (USD/emas/minyak, indeks AS & yield, IHSG, kripto), regime risk-on/off, kekuatan mata uang (forex), penggerak hari ini, break struktur terbaru, event high-impact, heatmap TradingView |
+| ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
-| **Metodologi** | Semua aturan engine, bobot skor, sumber data dan keterbatasan |
+| **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
 
 Watchlist bawaan: 13 forex + emas/perak/minyak + DXY (FOREX), 12 saham AS + SPX/NDX/DJI/VIX/US10Y
 (SAHAM AS), 12 saham BEI + IHSG (SAHAM IDX), 10 koin (KRIPTO). Berita dari 28 sumber RSS dibagi per pasar

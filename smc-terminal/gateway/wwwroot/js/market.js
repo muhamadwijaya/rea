@@ -48,10 +48,10 @@ export function marketPage(key) {
       root = $(`#tab-${key}`);
       root.innerHTML = `
         <div class="mkt-head">
-          <div class="mkt-title"><span class="eyebrow">PASAR</span><h1>${esc(cfg.title)}</h1><span class="muted">${esc(cfg.desc)}</span></div>
+          <div class="mkt-title"><h1>${esc(cfg.title)}</h1><span class="muted">${esc(cfg.desc)}</span></div>
+          <nav class="subtabs">${SUBS.map(([k, l]) => `<button class="subtab" data-sub="${k}">${l}</button>`).join('')}</nav>
           <div class="mkt-stats"></div>
         </div>
-        <nav class="subtabs">${SUBS.map(([k, l]) => `<button class="subtab" data-sub="${k}">${l}</button>`).join('')}</nav>
         ${SUBS.map(([k]) => `<div class="sub-panel" data-sub="${k}"></div>`).join('')}`;
       root.querySelector('.subtabs').addEventListener('click', (e) => {
         const b = e.target.closest('[data-sub]');

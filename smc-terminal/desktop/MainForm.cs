@@ -9,14 +9,16 @@ using SmcTerminal.Gateway.Services;
 namespace SmcTerminal.Desktop;
 
 /// <summary>
-/// Native application window. Hosts the C# gateway in-process (which supervises the hidden
-/// Python engine) and renders the UI in an embedded WebView2 — no browser, no console windows.
+/// Native application window. Starts in borderless full screen (no Windows title bar or close button;
+/// the UI has its own minimize / window / exit controls), hosts the C# gateway in-process (which
+/// supervises the hidden Python engine) and renders the UI in an embedded WebView2.
 /// Closing the window stops the gateway and the engine.
 /// </summary>
 internal sealed class MainForm : Form
 {
     public const string WindowTitle = "SMC Terminal — Saham · Forex · Kripto";
     private static readonly Color Background = Color.FromArgb(10, 14, 22);
+    private static readonly Color Accent = Color.FromArgb(107, 155, 255);
 
     public static string DataDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SMCTerminal");
@@ -26,8 +28,13 @@ internal sealed class MainForm : Form
     private readonly Panel _splash = new() { Dock = DockStyle.Fill, BackColor = Background };
     private readonly Label _status = new();
     private readonly Label _detail = new();
+    private readonly Panel _track = new() { Height = 3, Width = 420, BackColor = Color.FromArgb(28, 38, 55) };
+    private readonly Panel _bar = new() { Height = 3, Width = 120, BackColor = Accent };
+    private readonly System.Windows.Forms.Timer _anim = new() { Interval = 16 };
     private WebApplication? _gateway;
     private Uri? _home;
+    private bool _fullScreen;
+    private FormWindowState _windowedState = FormWindowState.Maximized;
     private bool _shuttingDown;
     private bool _shutdownComplete;
 
@@ -40,6 +47,8 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(1100, 680);
         KeyPreview = true;
         WindowSettings.Restore(this);
+        _windowedState = WindowState == FormWindowState.Minimized ? FormWindowState.Maximized : WindowState;
+        EnterFullScreen();
         BuildSplash();
         Controls.Add(_web);
         Controls.Add(_splash);
@@ -57,18 +66,18 @@ internal sealed class MainForm : Form
 
     private string LogDirectory => Path.Combine(_root, "logs");
 
+    // ------------------------------------------------------------------ splash (until the web UI takes over)
+
     private void BuildSplash()
     {
         var mono = FontFamily.Families.Any(f => f.Name == "Cascadia Mono") ? "Cascadia Mono" : "Consolas";
         var brand = new Label
         {
-            Text = "SMC TERMINAL", ForeColor = Color.FromArgb(230, 235, 243), Font = new Font(mono, 26, FontStyle.Bold),
-            AutoSize = true,
+            Text = "SMC TERMINAL", ForeColor = Color.FromArgb(230, 235, 243), Font = new Font(mono, 26, FontStyle.Bold), AutoSize = true,
         };
         var sub = new Label
         {
-            Text = "SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT", ForeColor = Color.FromArgb(107, 155, 255),
-            Font = new Font(mono, 10), AutoSize = true,
+            Text = "SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT", ForeColor = Accent, Font = new Font(mono, 10), AutoSize = true,
         };
         _status.ForeColor = Color.FromArgb(195, 203, 216);
         _status.Font = new Font(mono, 11);
@@ -77,14 +86,22 @@ internal sealed class MainForm : Form
         _detail.Font = new Font(mono, 9);
         _detail.AutoSize = true;
         _detail.MaximumSize = new Size(900, 0);
+        _track.Controls.Add(_bar);
         var stack = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown, AutoSize = true, BackColor = Background, WrapContents = false,
         };
-        stack.Controls.AddRange(new Control[] { brand, sub, new Label { Height = 24 }, _status, _detail });
+        stack.Controls.AddRange(new Control[] { brand, sub, new Label { Height = 28 }, _track, new Label { Height = 10 }, _status, _detail });
         _splash.Controls.Add(stack);
         _splash.Resize += (_, _) => stack.Location = new Point(
             Math.Max(20, (_splash.Width - stack.Width) / 2), Math.Max(20, (_splash.Height - stack.Height) / 2 - 40));
+        var x = 0;
+        _anim.Tick += (_, _) =>
+        {
+            x = (x + 6) % (_track.Width + _bar.Width);
+            _bar.Left = x - _bar.Width;
+        };
+        _anim.Start();
     }
 
     private void SetStatus(string status, string detail = "")
@@ -93,6 +110,21 @@ internal sealed class MainForm : Form
         _detail.Text = detail;
         _splash.PerformLayout();
     }
+
+    private void HideSplash()
+    {
+        _anim.Stop();
+        _splash.Visible = false;
+    }
+
+    private void ShowSplash(string status, string detail)
+    {
+        _splash.Visible = true;
+        _anim.Start();
+        SetStatus(status, detail);
+    }
+
+    // ------------------------------------------------------------------ startup
 
     private async Task StartAsync()
     {
@@ -109,30 +141,16 @@ internal sealed class MainForm : Form
             }, Path.Combine(_root, "gateway"));
             await _gateway.StartAsync();
 
-            SetStatus("Menyiapkan tampilan …");
-            var ready = await InitWebView();
-
-            var supervisor = _gateway.Services.GetService<EngineSupervisor>();
-            if (supervisor is not null && !supervisor.Ready.IsCompleted)
+            SetStatus("Menyiapkan tampilan …", "Engine Python, data pasar dan berita dimuat di layar berikutnya.");
+            if (await InitWebView())
             {
-                SetStatus("Memulai engine analisa Python …", "Run pertama bisa butuh ±20–40 detik. Log: " + Path.Combine(LogDirectory, "engine.log"));
-                await Task.WhenAny(supervisor.Ready, Task.Delay(TimeSpan.FromSeconds(60)));
-                var failure = EngineSupervisor.Status.Failure;
-                if (!supervisor.Ready.IsCompleted && failure is not null)
-                {
-                    SetStatus("Engine Python belum siap — membuka aplikasi dengan data terbatas …", failure);
-                    await Task.Delay(2500);
-                }
-            }
-
-            if (ready)
-            {
+                // The web UI shows its own boot screen and waits until engine, screener, news and calendar are ready.
                 _web.CoreWebView2.Navigate(_home.ToString());
             }
         }
         catch (Exception ex)
         {
-            SetStatus("SMC Terminal gagal dijalankan.", $"{ex.Message}\n\nLog: {LogDirectory}");
+            ShowSplash("SMC Terminal gagal dijalankan.", $"{ex.Message}\n\nLog: {LogDirectory}");
         }
     }
 
@@ -140,13 +158,13 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
-            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(DataDirectory, "WebView2"), options);
+            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(DataDirectory, "WebView2"));
             await _web.EnsureCoreWebView2Async(env);
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            SetStatus(
+            ExitFullScreen();
+            ShowSplash(
                 "Microsoft Edge WebView2 Runtime belum terpasang — aplikasi dibuka di browser untuk sementara.",
                 "Install WebView2 (gratis): https://go.microsoft.com/fwlink/p/?LinkId=2124703 lalu jalankan ulang.\n" +
                 "Biarkan jendela ini terbuka selama memakai SMC Terminal; menutupnya akan menghentikan server.");
@@ -159,6 +177,7 @@ internal sealed class MainForm : Form
         core.Settings.AreDevToolsEnabled = Environment.GetEnvironmentVariable("SMC_DEVTOOLS") == "1";
         core.Settings.IsZoomControlEnabled = true;
         core.DocumentTitleChanged += (_, _) => Text = WindowTitle;
+        core.WebMessageReceived += OnWebMessage;
         core.NewWindowRequested += (_, e) =>
         {
             // Links with target=_blank (news, TradingView) open in the default browser.
@@ -180,21 +199,48 @@ internal sealed class MainForm : Form
         {
             if (e.IsSuccess)
             {
-                _splash.Visible = false;
+                HideSplash();
+                PostWindowState();
             }
             else
             {
-                _splash.Visible = true;
-                SetStatus("Gagal memuat tampilan.", $"Kode: {e.WebErrorStatus}. Tekan F5 untuk mencoba lagi.");
+                ShowSplash("Gagal memuat tampilan.", $"Kode: {e.WebErrorStatus}. Tekan F5 untuk mencoba lagi.");
             }
         };
-        core.ProcessFailed += (_, _) =>
-        {
-            _splash.Visible = true;
-            SetStatus("Tampilan berhenti tak terduga.", "Tekan F5 untuk memuat ulang.");
-        };
+        core.ProcessFailed += (_, _) => ShowSplash("Tampilan berhenti tak terduga.", "Tekan F5 untuk memuat ulang.");
         return true;
     }
+
+    /// <summary>Window commands sent by the UI (its own title-bar buttons and F11).</summary>
+    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        string message;
+        try
+        {
+            message = e.TryGetWebMessageAsString();
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        switch (message)
+        {
+            case "window:minimize":
+                WindowState = FormWindowState.Minimized;
+                break;
+            case "window:toggle-fullscreen":
+                ToggleFullScreen();
+                break;
+            case "window:close":
+                BeginInvoke(Close);
+                break;
+            case "ui:ready":
+                PostWindowState();
+                break;
+        }
+    }
+
+    private void PostWindowState() => _web.CoreWebView2?.PostWebMessageAsString(_fullScreen ? "fullscreen:1" : "fullscreen:0");
 
     private bool IsHome(Uri uri) => _home is not null && uri.Host == _home.Host && uri.Port == _home.Port;
 
@@ -214,8 +260,11 @@ internal sealed class MainForm : Form
         }
     }
 
+    // ------------------------------------------------------------------ full screen
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        // Only reached while the native splash has focus; inside the UI the page forwards F11 itself.
         if (e.KeyCode == Keys.F11)
         {
             ToggleFullScreen();
@@ -228,23 +277,48 @@ internal sealed class MainForm : Form
         }
     }
 
-    private FormWindowState _beforeFullScreen = FormWindowState.Maximized;
-
     private void ToggleFullScreen()
     {
-        if (FormBorderStyle == FormBorderStyle.None)
+        if (_fullScreen)
         {
-            FormBorderStyle = FormBorderStyle.Sizable;
-            WindowState = _beforeFullScreen;
+            ExitFullScreen();
         }
         else
         {
-            _beforeFullScreen = WindowState;
-            FormBorderStyle = FormBorderStyle.None;
-            WindowState = FormWindowState.Normal;
-            WindowState = FormWindowState.Maximized;
+            EnterFullScreen();
         }
+        PostWindowState();
     }
+
+    private void EnterFullScreen()
+    {
+        if (_fullScreen)
+        {
+            return;
+        }
+        if (WindowState != FormWindowState.Minimized)
+        {
+            _windowedState = WindowState;
+        }
+        _fullScreen = true;
+        // Borderless + maximized covers the whole monitor, taskbar included, with no title bar or close button.
+        FormBorderStyle = FormBorderStyle.None;
+        WindowState = FormWindowState.Normal;
+        WindowState = FormWindowState.Maximized;
+    }
+
+    private void ExitFullScreen()
+    {
+        if (!_fullScreen)
+        {
+            return;
+        }
+        _fullScreen = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        WindowState = _windowedState == FormWindowState.Maximized ? FormWindowState.Maximized : FormWindowState.Normal;
+    }
+
+    // ------------------------------------------------------------------ shutdown
 
     private async void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
@@ -258,10 +332,7 @@ internal sealed class MainForm : Form
             return;
         }
         _shuttingDown = true;
-        if (FormBorderStyle != FormBorderStyle.None)
-        {
-            WindowSettings.Save(this);
-        }
+        WindowSettings.Save(this, _fullScreen ? _windowedState : WindowState);
         Hide();
         try
         {

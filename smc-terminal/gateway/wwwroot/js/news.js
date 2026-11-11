@@ -17,25 +17,27 @@ export class NewsView {
     this.pending = [];
     this.offset = 0;
     el.innerHTML = `
-      <div class="panel" style="margin-bottom:14px"><div class="panel-head"><span class="diamond">◆</span> SENTIMEN BERITA ${esc(cfg.nav)} · 12 JAM <span class="right time sent-updated"></span></div><div class="panel-body"><div class="sent-bars"></div></div></div>
+      <div class="sent-strip sent-bars"></div>
       <div class="toolbar">
         ${cfg.newsCats ? `<div class="chips news-cats">${cfg.newsCats.map(([k, l]) => `<button class="chip ${k === 'all' ? 'active' : ''}" data-v="${k}">${l}</button>`).join('')}</div>` : ''}
         <div class="seg news-sent"><button data-v="all" class="active">SEMUA</button><button data-v="bullish">BULLISH</button><button data-v="bearish">BEARISH</button><button data-v="neutral">NETRAL</button></div>
         <input class="input news-q" placeholder="cari berita…">
+        <span class="grow"></span><span class="time sent-updated"></span>
       </div>
-      <div class="news-layout">
-        <div>
-          <div class="new-banner hidden"><button>↑ <span></span> berita baru</button></div>
-          <div class="panel">
-            <div class="panel-head"><span class="diamond">◆</span> BERITA ${esc(cfg.nav)} REALTIME <span class="sub news-sub"></span><span class="right live-label">LIVE</span></div>
+      <div class="split-2">
+        <div class="panel col-panel">
+          <div class="panel-head"><span class="diamond">◆</span> BERITA ${esc(cfg.nav)} REALTIME <span class="sub news-sub"></span><span class="right live-label">LIVE</span></div>
+          <div class="scroll news-scroll">
+            <div class="new-banner hidden"><button>↑ <span></span> berita baru</button></div>
             <div class="news-list"></div>
             <div style="padding:12px; text-align:center"><button class="btn news-more">MUAT LEBIH BANYAK</button></div>
           </div>
         </div>
-        <aside class="side">
-          <div class="panel"><div class="panel-head"><span class="diamond">◆</span> TRADINGVIEW NEWS · ${esc(cfg.nav)}</div><div style="height: 640px" class="tv-timeline"></div></div>
-          <div class="panel"><div class="panel-head"><span class="diamond">◆</span> SUMBER BERITA <span class="right sub src-sum"></span></div><div class="panel-body news-sources"></div></div>
-        </aside>
+        <div class="panel tabbed">
+          <div class="ptabs"><button data-t="tv" class="active">TRADINGVIEW NEWS</button><button data-t="src">SUMBER BERITA <span class="src-sum"></span></button></div>
+          <div class="pane active" data-t="tv"><div class="tv-fill tv-timeline"></div></div>
+          <div class="pane" data-t="src"><div class="panel-body news-sources"></div></div>
+        </div>
       </div>`;
     const $ = (s) => el.querySelector(s);
     $('.news-cats')?.addEventListener('click', (e) => {
@@ -57,7 +59,7 @@ export class NewsView {
       this.pending = [];
       $('.new-banner').classList.add('hidden');
       this.renderList();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      $('.news-scroll').scrollTo({ top: 0, behavior: 'smooth' });
     });
     timeline($('.tv-timeline'), cfg.timeline);
     on('news', (items) => this.onRealtime(items));
@@ -150,7 +152,7 @@ export class NewsView {
     try {
       const list = await api(`/api/news/sources?market=${encodeURIComponent(this.cfg.key)}`);
       const ok = list.filter((s) => s.lastOk && !s.lastError).length;
-      this.el.querySelector('.src-sum').textContent = `${ok}/${list.length} aktif`;
+      this.el.querySelector('.src-sum').textContent = `· ${ok}/${list.length}`;
       this.el.querySelector('.news-sources').innerHTML = list.map((s) => `
         <div class="src-row" title="${esc(s.lastError || '')}"><span class="dot ${s.lastError ? 'bad' : s.lastOk ? 'ok' : ''}"></span>
         <span>${esc(s.name)} <span class="dim">· ${esc(s.host)}</span></span>
@@ -162,7 +164,7 @@ export class NewsView {
     const fresh = newItems.filter((i) => this.matches(i)).filter((i) => !this.items.some((x) => x.id === i.id));
     if (!fresh.length) return;
     const list = this.el.querySelector('.news-list');
-    if (window.scrollY < 300 || !this.visible()) {
+    if (this.el.querySelector('.news-scroll').scrollTop < 200 || !this.visible()) {
       this.items = [...fresh, ...this.items];
       list.querySelector('.empty')?.remove();
       list.insertAdjacentHTML('afterbegin', fresh.map((i) => this.itemHtml(i, true)).join(''));

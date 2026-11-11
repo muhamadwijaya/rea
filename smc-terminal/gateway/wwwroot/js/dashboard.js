@@ -1,45 +1,11 @@
-// Dashboard: hero, 7-step explainer, SMC engine radar, verdict stack, market direction strip, KPIs and live lists.
+// Dashboard: KPIs, search, market tiles, SMC engine radar + verdict stack, and tabbed direction / signals / alerts / recent analyses.
 import { $, esc, on, badge, dirClass, dirHex, fmtPct, fmtPrice, fmtScore, fmtTime, sparkline, timeAgo, arrow } from './util.js';
 import { MARKETS, MARKET_KEYS, rowsOf } from './markets.js';
 
-const STEPS = [
-  ['STRUKTUR', 'Baca struktur pasar', 'Engine mencari swing high/low (pivot fractal) di dua skala: swing (besar) dan internal (kecil). Setiap pivot diberi label HH, HL, LH atau LL sehingga terlihat apakah pasar membuat puncak & lembah yang makin tinggi atau makin rendah.'],
-  ['BOS/CHoCH', 'Deteksi break struktur', 'Close yang menembus swing high/low terakhir dicatat. Searah tren = BOS (Break of Structure, tren berlanjut). Berlawanan tren = CHoCH (Change of Character, tanda awal pembalikan). Tidak ada look-ahead: pivot baru dianggap ada setelah bar konfirmasinya tutup.'],
-  ['ORDER BLOCK', 'Tandai order block', 'Setiap break menghasilkan order block: candle asal dorongan (low terendah sebelum break bullish / high tertinggi sebelum break bearish). OB dilacak sampai disentuh ulang (tapped) atau ditembus close (invalid).'],
-  ['FVG', 'Temukan imbalance', 'Fair Value Gap = celah tiga candle (low candle ke-3 di atas high candle ke-1, atau sebaliknya) yang cukup besar terhadap ATR. Engine mencatat persentase terisi dan kapan gap tertutup penuh.'],
-  ['LIKUIDITAS', 'Petakan likuiditas', 'Equal highs/lows (EQH/EQL) dan swing high/low yang belum tersentuh adalah kolam stop-loss (buy-side & sell-side liquidity). Harga cenderung bergerak ke sana — dipakai sebagai target.'],
-  ['ZONA P/D', 'Premium vs discount', 'Dealing range = swing high & low aktif. Di atas 50% = premium (mahal, area jual), di bawah 50% = discount (murah, area beli). Strong/weak high-low ditentukan dari arah tren swing.'],
-  ['BIAS', 'Skor bias & skenario', 'Tujuh komponen (struktur swing & internal, CHoCH terbaru, EMA 50/200, posisi premium/discount, momentum RSI, reaksi OB) digabung menjadi skor −100…+100, diperkuat konfluensi 1D/4H/1H, lalu dibuat skenario entry, invalidasi dan target likuiditas.'],
-];
-const STEP_POS = [[8, 22], [36, 22], [64, 22], [92, 22], [78, 78], [50, 78], [22, 78]];
-
 const GROUP_NAME = Object.fromEntries(MARKET_KEYS.map((k) => [k, MARKETS[k].nav]));
 
-let step = 0;
-let stepTimer;
 let store;
 let radar = { rows: [], tips: [], rot: 0, running: false };
-
-function renderSteps() {
-  const nodes = STEP_POS.map(([x, y], i) => `
-    <div class="step-node ${i === step ? 'active' : i < step ? 'done' : ''}" data-step="${i}" style="left:${x}%;top:${y}%">
-      <div class="dot">${i + 1}</div><div class="lbl">${STEPS[i][0]}</div>
-    </div>`).join('');
-  const pts = STEP_POS.map(([x, y]) => [x, y - 9]);
-  const path = `M${pts[0][0]} ${pts[0][1]} L${pts[3][0]} ${pts[3][1]} C${pts[3][0] + 8} ${pts[3][1]}, ${pts[3][0] + 8} ${pts[4][1]}, ${pts[4][0]} ${pts[4][1]} L${pts[6][0]} ${pts[6][1]}`;
-  $('#steps').innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="#3b4a66" stroke-width="0.6" stroke-dasharray="0.6 1.4" vector-effect="non-scaling-stroke"/></svg>${nodes}`;
-  const [, title, text] = STEPS[step];
-  $('#step-card').innerHTML = `
-    <div class="top"><span class="n">LANGKAH ${step + 1} / 7</span>
-      <span class="step-nav"><button data-d="-1" aria-label="sebelumnya">‹</button><button data-d="1" aria-label="berikutnya">›</button></span></div>
-    <h3>${esc(title)}</h3><p>${esc(text)}</p>`;
-}
-
-function setStep(i, manual) {
-  step = (i + STEPS.length) % STEPS.length;
-  renderSteps();
-  if (manual) { clearInterval(stepTimer); stepTimer = setInterval(() => setStep(step + 1), 9000); }
-}
 
 // ------------------------------------------------------------------ engine checks
 const ICONS = {
@@ -61,22 +27,22 @@ function renderChecks(stats) {
     </div>`;
   $('#engine-checks').innerHTML = `
     <div class="cap">LIMA CEK<span>DIUKUR TIAP REFRESH</span></div>
-    ${card('BIAS BULLISH', '% WATCHLIST', last('bullishPct') != null ? `${last('bullishPct')}%` : null, '#2fd28c', series('bullishPct'))}
-    ${card('BIAS BEARISH', '% WATCHLIST', last('bearishPct') != null ? `${last('bearishPct')}%` : null, '#ff4d5e', series('bearishPct'))}
+    ${card('BULLISH', '% WATCHLIST', last('bullishPct') != null ? `${last('bullishPct')}%` : null, '#2fd28c', series('bullishPct'))}
+    ${card('BEARISH', '% WATCHLIST', last('bearishPct') != null ? `${last('bearishPct')}%` : null, '#ff4d5e', series('bearishPct'))}
     ${card('CHoCH BARU', '≤ 6 BAR TERAKHIR', last('chochRecent'), '#f2c94c', series('chochRecent'))}
-    ${card('OB DEKAT HARGA', '≤ 3 ATR · AKTIF', last('nearOb'), '#a78bfa', series('nearOb'))}
-    ${card('DI DISCOUNT', '% WATCHLIST', last('discountPct') != null ? `${last('discountPct')}%` : null, '#38d3f5', series('discountPct'))}`;
+    ${card('OB DEKAT', '≤ 3 ATR · AKTIF', last('nearOb'), '#a78bfa', series('nearOb'))}
+    ${card('DISCOUNT', '% WATCHLIST', last('discountPct') != null ? `${last('discountPct')}%` : null, '#38d3f5', series('discountPct'))}`;
 
   const s = stats || {};
-  const node = (icon, k, n, d, val, color) => `
-    <div class="check-node" data-go="metode"><div class="ic" style="border-color:${color}66">${ICONS[icon]}</div>
-      <div class="k" style="color:${color}">${k}</div><div class="n">${n}</div><div class="d">${d}</div><div class="val" style="color:${color}">${val}</div></div>`;
+  const node = (icon, k, val, color) => `
+    <div class="check-node" data-go="metode" title="Klik untuk penjelasan"><div class="ic" style="border-color:${color}66">${ICONS[icon]}</div>
+      <div><div class="k" style="color:${color}">${k}</div><div class="val" style="color:${color}">${val}</div></div></div>`;
   $('#checks-row').innerHTML = [
-    node('struct', 'STR · SWING', 'STRUKTUR', 'bull vs bear', `▲${s.bullish ?? '–'} ▼${s.bearish ?? '–'}`, '#6b9bff'),
-    node('choch', 'CHOCH · BOS', 'BREAK STRUKTUR', 'CHoCH ≤ 6 bar', s.chochRecent ?? '–', '#f2c94c'),
-    node('ob', 'OB · AKTIF', 'ORDER BLOCK', 'dekat harga', s.nearOb ?? '–', '#a78bfa'),
-    node('fvg', 'FVG · OPEN', 'FAIR VALUE GAP', 'belum terisi', s.nearFvg ?? '–', '#38d3f5'),
-    node('zone', 'P/D · RANGE', 'PREMIUM/DISCOUNT', 'discount / premium', `${s.inDiscount ?? '–'} / ${s.inPremium ?? '–'}`, '#2fd28c'),
+    node('struct', 'STRUKTUR ▲/▼', `▲${s.bullish ?? '–'} ▼${s.bearish ?? '–'}`, '#6b9bff'),
+    node('choch', 'CHoCH ≤ 6 BAR', s.chochRecent ?? '–', '#f2c94c'),
+    node('ob', 'OB DEKAT HARGA', s.nearOb ?? '–', '#a78bfa'),
+    node('fvg', 'FVG TERBUKA', s.nearFvg ?? '–', '#38d3f5'),
+    node('zone', 'DISCOUNT / PREMIUM', `${s.inDiscount ?? '–'} / ${s.inPremium ?? '–'}`, '#2fd28c'),
   ].join('');
   $('#engine-updated').textContent = s.screenerAt ? `update ${fmtTime(s.screenerAt)} · ${String(s.screenerTf || '').toUpperCase()}` : '';
 }
@@ -237,7 +203,7 @@ function renderSignals() {
 
 function renderAlerts() {
   const list = store.alerts || [];
-  $('#alert-count').textContent = list.length ? `· ${list.length}` : '';
+  $('#alert-count').textContent = list.length ? `(${list.length})` : '';
   $('#alert-list').innerHTML = list.length ? list.slice(0, 30).map((a) => `
     <div class="alert-row sev-${esc(a.severity)}" ${a.symbol && a.kind !== 'calendar' && a.kind !== 'news' ? `data-sym="${esc(a.symbol)}"` : ''}>
       <div class="h"><span class="tag ${a.kind === 'calendar' ? 'neu' : dirClass(a.direction)}">${esc(a.kind.toUpperCase())}</span><b>${esc(a.title)}</b><span class="time">${timeAgo(a.time)}</span></div>
@@ -246,22 +212,22 @@ function renderAlerts() {
 }
 
 function renderDirection(d) {
-  const el = $('#dir-strip');
   if (!d) return;
   const reg = d.regime;
   const rc = reg.regime === 'RISK-ON' ? 'up' : reg.regime === 'RISK-OFF' ? 'down' : 'flat';
-  el.innerHTML = `
+  $('#dir-strip').innerHTML = `<div class="dir-list">
     <div class="regime">
-      <span class="eyebrow">ARAH MARKET HARI INI →</span>
+      <span class="eyebrow">REGIME PASAR HARI INI</span>
       <span class="r ${rc}">${esc(reg.regime)}</span>
-      <span class="h">${esc(d.headline)}</span>
+      <span class="h">${esc(reg.text)}</span>
     </div>
-    ${d.outlooks.slice(0, 6).map((o) => `
-      <div class="mini-dir" data-sym="${esc(o.symbols[0])}" data-tf="1d" style="cursor:pointer">
-        <div class="t">${esc(o.title.toUpperCase())}</div>
-        <div class="v" style="color:${dirHex(o.direction)}">${arrow(o.direction)} ${esc(o.label)}</div>
-        <div class="c">skor ${fmtScore(o.score)} · keyakinan ${esc(o.confidence)}</div>
-      </div>`).join('')}`;
+    ${d.outlooks.map((o) => `
+      <div class="mini-dir" data-sym="${esc(o.symbols[0])}" data-tf="1d">
+        <span class="t">${esc(o.title.toUpperCase())}</span>
+        <span class="v" style="color:${dirHex(o.direction)}">${arrow(o.direction)} ${esc(o.label)}</span>
+        <span class="c">skor ${fmtScore(o.score)} · keyakinan ${esc(o.confidence)} · ${esc(o.drivers[0] || '')}</span>
+      </div>`).join('')}
+  </div>`;
 }
 
 function renderKpis(s) {
@@ -296,9 +262,11 @@ function renderTiles() {
       <div class="mt-head"><b>${esc(cfg.nav)}</b><span class="muted">${rows.length} instrumen</span><span class="mt-go">BUKA →</span></div>
       <div class="mt-dir" style="color:${dirHex(dir)}">${arrow(dir)} ${avg > 10 ? 'CONDONG NAIK' : avg < -10 ? 'CONDONG TURUN' : 'CAMPURAN'} <span class="num">${fmtScore(avg)}</span></div>
       <div class="stack" style="height:6px"><i style="width:${pct(bull)}%;background:var(--bull)"></i><i style="width:${pct(neu)}%;background:var(--line-2)"></i><i style="width:${pct(bear)}%;background:var(--bear)"></i></div>
-      <div class="mt-foot"><span><span class="up">▲${bull}</span> <span class="down">▼${bear}</span></span>
-        <span>${top ? `${esc(top.instrument.symbol)} <span class="${top.changePct > 0 ? 'up' : 'down'}">${fmtPct(top.changePct)}</span>` : '–'}</span>
-        <span class="accent">${news ?? '–'} berita</span></div>
+      <div class="mt-foot">
+        <span><span>breadth SMC</span><span><span class="up">▲${bull}</span> <span class="down">▼${bear}</span> <span class="dim">◆${neu}</span></span></span>
+        <span><span>penggerak</span><span>${top ? `${esc(top.instrument.symbol)} <span class="${top.changePct > 0 ? 'up' : 'down'}">${fmtPct(top.changePct)}</span>` : '–'}</span></span>
+        <span><span>berita 24 jam</span><span class="accent">${news ?? '–'}</span></span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -311,11 +279,7 @@ function quickChips() {
 export default {
   init(s) {
     store = s;
-    renderSteps();
-    stepTimer = setInterval(() => setStep(step + 1), 9000);
     quickChips();
-    $('#steps').addEventListener('click', (e) => { const n = e.target.closest('[data-step]'); if (n) setStep(+n.dataset.step, true); });
-    $('#step-card').addEventListener('click', (e) => { const b = e.target.closest('button[data-d]'); if (b) setStep(step + +b.dataset.d, true); });
     $('#hero-search').addEventListener('submit', (e) => {
       e.preventDefault();
       const v = $('#hero-input').value.trim();

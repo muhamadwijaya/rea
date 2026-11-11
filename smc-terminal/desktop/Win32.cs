@@ -109,13 +109,14 @@ internal static class WindowSettings
         }
     }
 
-    public static void Save(Form form)
+    /// <summary>Saves the windowed (non full-screen) placement; <paramref name="windowedState"/> is the state to restore to.</summary>
+    public static void Save(Form form, FormWindowState windowedState)
     {
         try
         {
-            var b = form.WindowState == FormWindowState.Normal ? form.Bounds : form.RestoreBounds;
+            var b = form.WindowState == FormWindowState.Normal && form.FormBorderStyle != FormBorderStyle.None ? form.Bounds : form.RestoreBounds;
             Directory.CreateDirectory(MainForm.DataDirectory);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(new State(b.X, b.Y, b.Width, b.Height, form.WindowState == FormWindowState.Maximized)));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(new State(b.X, b.Y, b.Width, b.Height, windowedState == FormWindowState.Maximized)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

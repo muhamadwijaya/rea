@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SMC Terminal</title>
-  <meta name="description" content="Screener saham & forex dengan analisa Smart Money Concept, berita realtime, kalender ekonomi dan arah market.">
+  <meta name="description" content="Screener saham, forex & kripto dengan analisa Smart Money Concept, berita realtime, kalender ekonomi dan arah market.">
   <link rel="icon" href="img/logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,32 +14,46 @@
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+  <!-- ============================================================ BOOT SCREEN -->
+  <div id="boot" class="boot">
+    <div class="boot-card">
+      <div class="boot-brand"><img src="img/logo.svg" width="56" height="56" alt=""><div><div class="brand-name">SMC<b>TERMINAL</b></div><div class="brand-sub">SAHAM · FOREX · KRIPTO · SMART MONEY CONCEPT</div></div></div>
+      <div class="boot-radar"><span></span><span></span><span></span><i></i></div>
+      <ul class="boot-steps" id="boot-steps"></ul>
+      <div class="boot-bar"><i id="boot-bar"></i></div>
+      <div class="boot-foot"><span id="boot-msg">Menyiapkan…</span><button class="btn hidden" id="boot-skip">LANJUTKAN</button></div>
+    </div>
+  </div>
+
   <header class="topbar">
-    <div class="wrap">
-      <div class="brand" data-go="dashboard">
-        <div class="brand-logo"><img src="img/logo.svg" width="24" height="24" alt=""></div>
-        <div>
-          <div class="brand-name">SMC<b>TERMINAL</b></div>
-          <div class="brand-sub">SAHAM · FOREX · SMART MONEY</div>
-        </div>
+    <div class="brand" data-go="dashboard">
+      <div class="brand-logo"><img src="img/logo.svg" width="22" height="22" alt=""></div>
+      <div>
+        <div class="brand-name">SMC<b>TERMINAL</b></div>
+        <div class="brand-sub">SAHAM · FOREX · KRIPTO</div>
       </div>
-      <nav class="tabs" id="tabs">
-        <button class="tab-btn active" data-tab="dashboard">DASHBOARD</button>
-        <button class="tab-btn" data-tab="forex">FOREX</button>
-        <button class="tab-btn" data-tab="saham-as">SAHAM AS</button>
-        <button class="tab-btn" data-tab="saham-idx">SAHAM IDX</button>
-        <button class="tab-btn" data-tab="kripto">KRIPTO</button>
-        <button class="tab-btn" data-tab="kalender">KALENDER</button>
-        <button class="tab-btn" data-tab="metode">METODOLOGI</button>
-      </nav>
-      <div class="top-right">
-        <div class="sessions" id="sessions"></div>
-        <div class="chip-status" title="Status koneksi realtime & engine">
-          <span class="live-dot" id="live-dot"></span>
-          <span class="lbl" id="live-label">CONNECTING</span>
-          <b id="clock">--:--:--</b>
-        </div>
-        <button class="btn-primary" data-focus-search>▶ ANALISA</button>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-tab="dashboard">DASHBOARD</button>
+      <button class="tab-btn" data-tab="forex">FOREX</button>
+      <button class="tab-btn" data-tab="saham-as">SAHAM AS</button>
+      <button class="tab-btn" data-tab="saham-idx">SAHAM IDX</button>
+      <button class="tab-btn" data-tab="kripto">KRIPTO</button>
+      <button class="tab-btn" data-tab="kalender">KALENDER</button>
+      <button class="tab-btn" data-tab="metode">METODOLOGI</button>
+    </nav>
+    <div class="top-right">
+      <div class="sessions" id="sessions"></div>
+      <div class="chip-status" title="Status koneksi realtime & engine">
+        <span class="live-dot" id="live-dot"></span>
+        <span class="lbl" id="live-label">CONNECTING</span>
+        <b id="clock">--:--:--</b>
+      </div>
+      <button class="btn-primary" data-focus-search>▶ ANALISA</button>
+      <div class="winctl hidden" id="winctl">
+        <button data-win="minimize" title="Minimize">─</button>
+        <button data-win="toggle-fullscreen" title="Layar penuh / jendela (F11)" id="win-fs">❐</button>
+        <button data-win="close" class="close" title="Keluar">✕</button>
       </div>
     </div>
   </header>
@@ -50,24 +64,23 @@
   </div>
   <div class="tv-tape" id="tv-tape"></div>
 
-  <main class="wrap">
+  <main id="main">
     <!-- ============================================================ DASHBOARD -->
     <section class="tab-panel active" id="tab-dashboard">
-      <div class="hero">
-        <div>
-          <div class="eyebrow">Screener saham &amp; forex · Smart Money Concept</div>
-          <h1>Harga bergerak ke likuiditas. <span class="accent">Lihat ke mana smart money mengarah.</span></h1>
-          <p class="lead">Ketik simbol forex, emas, kripto, saham AS atau saham IDX. Dalam beberapa detik kamu melihat struktur pasar, order block, FVG, zona premium/discount, skor bias multi-timeframe dan skenario trading-nya.</p>
-          <form class="search" id="hero-search" autocomplete="off">
-            <span class="prompt">&gt;</span>
-            <input id="hero-input" list="symbol-list" placeholder="ketik simbol · mis. EURUSD, XAUUSD, BTCUSD, AAPL, BBCA" aria-label="Simbol">
-            <button type="submit">ANALISA</button>
-          </form>
-          <div class="quick" id="quick"></div>
-
-          <div class="steps-head"><span class="accent">CARA KERJA · 7 LANGKAH</span><a class="accent" data-go="metode">SEMUA ATURAN →</a></div>
-          <div class="steps" id="steps"></div>
-          <div class="step-card" id="step-card"></div>
+      <div class="panel kpis" id="kpis"></div>
+      <div class="dash-grid">
+        <div class="dash-col">
+          <div class="panel hero-card">
+            <div class="eyebrow">Screener saham, forex &amp; kripto · Smart Money Concept</div>
+            <h1>Harga bergerak ke likuiditas. <span class="accent">Lihat ke mana smart money mengarah.</span></h1>
+            <form class="search" id="hero-search" autocomplete="off">
+              <span class="prompt">&gt;</span>
+              <input id="hero-input" list="symbol-list" placeholder="simbol · mis. EURUSD, XAUUSD, BTCUSD, AAPL, BBCA" aria-label="Simbol">
+              <button type="submit">ANALISA</button>
+            </form>
+            <div class="quick" id="quick"></div>
+          </div>
+          <div class="market-tiles" id="market-tiles"></div>
         </div>
 
         <div class="panel engine" id="engine">
@@ -83,29 +96,21 @@
             <div class="verdict-stack" id="verdict-stack"></div>
           </div>
           <div class="engine-bottom">
-            <div class="cap">CEK SMC<span>KLIK UNTUK PENJELASAN</span></div>
             <div class="checks-row" id="checks-row"></div>
           </div>
         </div>
-      </div>
 
-      <div class="market-tiles" id="market-tiles"></div>
-      <div class="panel dir-strip" id="dir-strip"><div class="loading">Menghitung arah market</div></div>
-      <div class="panel kpis" id="kpis"></div>
-
-      <div class="three">
-        <div class="panel">
-          <div class="panel-head"><span class="diamond">◆</span> ANALISA TERBARU <span class="right live-label">LIVE</span></div>
-          <div class="list-head cols-4"><span>Simbol</span><span>Verdict</span><span>Skor</span><span>Waktu</span></div>
-          <div class="list" id="recent-list"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="diamond">◆</span> SINYAL STRUKTUR · RADAR <span class="right sub">semua pasar</span></div>
-          <div class="list" id="signal-list"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="diamond">◆</span> ALERT <span class="sub" id="alert-count"></span><span class="right live-label">LIVE</span></div>
-          <div class="list" id="alert-list"></div>
+        <div class="panel tabbed dash-tabs">
+          <div class="ptabs">
+            <button data-t="arah" class="active">ARAH MARKET</button><button data-t="sinyal">SINYAL</button><button data-t="alert">ALERT <span id="alert-count"></span></button><button data-t="recent">ANALISA</button>
+          </div>
+          <div class="pane active" data-t="arah"><div class="scroll" id="dir-strip"><div class="loading">Menghitung arah market</div></div></div>
+          <div class="pane" data-t="sinyal"><div class="scroll" id="signal-list"></div></div>
+          <div class="pane" data-t="alert"><div class="scroll" id="alert-list"></div></div>
+          <div class="pane" data-t="recent">
+            <div class="list-head cols-4"><span>Simbol</span><span>Verdict</span><span>Skor</span><span>Waktu</span></div>
+            <div class="scroll" id="recent-list"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -118,36 +123,32 @@
 
     <!-- ============================================================ KALENDER -->
     <section class="tab-panel" id="tab-kalender">
-      <div class="panel countdown" id="cal-next"></div>
-      <div class="toolbar" style="margin-top:14px">
-        <div class="seg" id="cal-impact">
-          <button data-v="all">SEMUA</button><button data-v="medium" class="active">MEDIUM+</button><button data-v="high">HIGH</button>
+      <div class="cal-top">
+        <div class="panel countdown" id="cal-next"></div>
+        <div class="toolbar">
+          <div class="seg" id="cal-impact"><button data-v="all">SEMUA</button><button data-v="medium" class="active">MEDIUM+</button><button data-v="high">HIGH</button></div>
+          <div class="chips" id="cal-ccy"></div>
         </div>
-        <div class="chips" id="cal-ccy"></div>
       </div>
-      <div class="news-layout">
-        <div class="panel">
+      <div class="split-2">
+        <div class="panel col-panel">
           <div class="panel-head"><span class="diamond">◆</span> KALENDER EKONOMI MINGGU INI <span class="sub">waktu lokal</span><span class="right time" id="cal-updated"></span></div>
-          <div class="list" style="max-height: 760px" id="cal-list"></div>
+          <div class="scroll" id="cal-list"></div>
         </div>
-        <div class="panel"><div class="panel-head"><span class="diamond">◆</span> TRADINGVIEW CALENDAR</div><div style="height:720px" id="tv-events"></div></div>
+        <div class="panel col-panel"><div class="panel-head"><span class="diamond">◆</span> TRADINGVIEW CALENDAR</div><div class="fill" id="tv-events"></div></div>
       </div>
     </section>
 
     <!-- ============================================================ METODOLOGI -->
-    <section class="tab-panel" id="tab-metode">
-      <div class="section-title" style="margin-top:0"><h2>Metodologi SMC</h2><span class="sub">aturan yang dipakai engine — transparan &amp; dapat diaudit</span></div>
-      <div class="method" id="method"></div>
-    </section>
+    <section class="tab-panel" id="tab-metode"><div class="panel tabbed fill" id="method"></div></section>
   </main>
 
-  <footer>
-    <div class="wrap">
-      <span>SMC Terminal · data analisa: Yahoo Finance (yfinance, bisa tertunda) · chart &amp; widget realtime: TradingView · berita: RSS publik · kalender: ForexFactory</span>
-      <span>Bukan saran investasi. Semua skenario dihasilkan aturan otomatis — lakukan riset sendiri.</span>
-    </div>
+  <footer class="statusbar">
+    <span id="status-left">SMC Terminal</span>
+    <span>Data analisa: Yahoo Finance (bisa tertunda) · realtime: TradingView · berita: RSS · kalender: ForexFactory · <b>bukan saran investasi</b></span>
   </footer>
 
+  <div class="modal hidden" id="modal"><div class="modal-card"><div id="modal-text"></div><div class="modal-actions"><button class="btn" data-modal="cancel">BATAL</button><button class="btn-primary" data-modal="ok">KELUAR</button></div></div></div>
   <datalist id="symbol-list"></datalist>
   <div class="toast-zone" id="toasts"></div>
   <script type="module" src="js/app.js"></script>

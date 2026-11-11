@@ -51,7 +51,14 @@ export class SmcChart {
     const redraw = () => this.requestDraw();
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
     this.chart.subscribeCrosshairMove(redraw);
-    new ResizeObserver(redraw).observe(host);
+    this.visibleArea = 0;
+    new ResizeObserver(() => {
+      const area = host.clientWidth * host.clientHeight;
+      // Coming back from display:none (TradingView-only view, hidden tab): rebuild the pane.
+      if (!this.visibleArea && area && this.data) this.reveal();
+      this.visibleArea = area;
+      this.requestDraw();
+    }).observe(host);
     for (const ev of ['pointermove', 'wheel', 'pointerup', 'dblclick']) host.addEventListener(ev, redraw, { passive: true });
   }
 
@@ -63,7 +70,17 @@ export class SmcChart {
     this.requestDraw();
   }
 
+  /**
+   * Re-applies the current data. Data set while the chart was hidden (zero size) can leave the
+   * pane blank in some WebView2 builds; re-setting it forces a full layout and price-scale fit.
+   */
+  reveal() {
+    if (!this.data || !this.host.clientWidth || !this.host.clientHeight) return;
+    this.setData(this.data, { keepRange: !this.setWhileHidden });
+  }
+
   setData(data, { keepRange = false } = {}) {
+    this.setWhileHidden = !this.host.clientWidth || !this.host.clientHeight;
     const range = keepRange ? this.chart.timeScale().getVisibleLogicalRange() : null;
     this.data = data;
     this.decimals = data.instrument.decimals;
@@ -74,6 +91,7 @@ export class SmcChart {
     this.ema50.setData((data.ema?.ema50 || []).map((p) => ({ time: localTime(p.t), value: p.v })));
     this.ema200.setData((data.ema?.ema200 || []).map((p) => ({ time: localTime(p.t), value: p.v })));
     this.applyPlanLines();
+    this.candles.priceScale().applyOptions({ autoScale: true });
     if (range) this.chart.timeScale().setVisibleLogicalRange(range);
     else this.chart.timeScale().setVisibleLogicalRange({ from: data.candles.length - 160, to: data.candles.length + 12 });
     this.requestDraw();
