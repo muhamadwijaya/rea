@@ -228,12 +228,12 @@ def test_precision_modes_count_quality_stamped_when_the_signal_appeared(store):
 def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch):
     from types import SimpleNamespace
 
-    inst = SimpleNamespace(symbol="EURUSD", market="forex", yahoo="EURUSD=X")
+    inst = SimpleNamespace(symbol="EURUSD", market="forex", yahoo="EURUSD=X", to_json=lambda: {"symbol": "EURUSD", "decimals": 5})
     b = bars([(1.0, 1.1, 0.9, 1.0)] * 100)
     early = training.simulate(b, sig(created=10, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
-    monkeypatch.setattr(training.market_data, "load", lambda i, tf: b)
+    monkeypatch.setattr(training, "history", lambda i, tf: b)
     monkeypatch.setattr(training, "signals", lambda bars_, p, r=None: [early, late])
     db = training._db()
     db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
@@ -241,6 +241,7 @@ def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch
     db.commit()
     d = training.chart("EURUSD", "1h")
     assert d["split"] == int(b.time[0] + (b.time[-1] - b.time[0]) * training.SPLIT)
+    assert len(d["candles"]) == 100 and d["candles"][-1]["t"] == int(b.time[-1])  # the bars the tuner learns from
     assert [(t["created_t"], t["sample"], t["live"]) for t in d["trades"]] == [
         (int(b.time[10]), "is", False),
         (int(b.time[90]), "live", True),  # the journal row replaces its re-simulated twin
@@ -254,3 +255,51 @@ def test_activity_lists_the_latest_stage_of_each_signal_newest_first():
         {"symbol": "C", "tf": "1d", "market": "saham-as", "status": "pending", "closed_t": None, "opened_t": None, "first_seen": 350},
     ]
     assert [(e["symbol"], e["event"]) for e in training._activity(rows)] == [("B", "open"), ("C", "signal"), ("A", "win")]
+
+
+# ------------------------------------------------------------------ long training history
+
+
+def test_long_history_takes_the_fresher_tail_of_the_analysis_bars():
+    long = bars([(1, 2, 0.5, 1)] * 100)
+    t = np.arange(90, 110, dtype=np.int64) * 3600
+    short = Bars(t, *(np.full(20, 5.0) for _ in range(4)), np.zeros(20), 1.0)
+    out = training._with_tail(long, short)
+    assert list(out.time) == list(np.arange(110) * 3600)
+    assert out.close[89] == 1 and out.close[90] == 5  # the overlap comes from the fresher download
+    assert len(training._with_tail(long, short, cap=50)) == 50
+    assert training._with_tail(long, None) is long
+
+
+def test_history_cache_is_bounded_and_separate_from_the_analysis_cache(monkeypatch):
+    from types import SimpleNamespace
+    from app import market_data
+
+    monkeypatch.setattr(market_data, "HISTORY_CACHE", 2)
+    monkeypatch.setattr(market_data, "_history", market_data.OrderedDict())
+    tf = market_data.HISTORY["1d"]
+    b = bars([(1, 1, 1, 1)] * 5)
+    for ticker in ("A", "B", "C"):
+        market_data._store_history((ticker, tf.key), b, tf)
+    inst = lambda y: SimpleNamespace(symbol=y, yahoo=y)  # noqa: E731
+    assert [market_data.history_cached(inst(y), "1d") for y in "ABC"] == [False, True, True]
+    assert ("B", tf.key) not in market_data._cache
+
+
+def test_downloads_keep_at_most_the_timeframe_bar_cap():
+    import pandas as pd
+    from app import market_data
+
+    idx = pd.date_range("2024-01-01", periods=50, freq="D", tz="UTC")
+    df = pd.DataFrame({"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5, "Volume": 0.0}, index=idx)
+    tf = market_data.Timeframe("x", "X", "1d", "1y", None, 60, 10, 3, max_bars=40)
+    assert len(market_data.frame_to_bars(df, tf)) == 40
+    assert all(t.max_bars > market_data.MAX_BARS for t in market_data.HISTORY.values())
+
+
+def test_evaluations_on_older_data_are_redone_first():
+    now = 10_000_000
+    last = {("A", "1d"): now - 60}
+    assert training._due(("A", "1d"), last, {"basis": training.HISTORY_BASIS}, now) is False
+    assert training._due(("A", "1d"), last, {}, now) is True  # evaluated on the short history of earlier versions
+    assert training._due(("A", "1d"), {("A", "1d"): now - training.TUNE_EVERY}, {"basis": training.HISTORY_BASIS}, now) is True

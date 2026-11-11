@@ -19,6 +19,10 @@ Live journal: signals created after an asset/timeframe starts being tracked are 
 data folder) with the moment the system first saw them, and advanced as new bars arrive; closed rows are
 frozen.
 
+Training data: long history (market_data.HISTORY — 10 years of daily bars, 730 days of hourly / 4-hour bars,
+60 days of 15-minute bars, at most 6000) with the fresher analysis bars as its tail, so every asset has several
+times more out-of-sample trades than the chart's own window. Evaluations made on other data are redone first.
+
 Learning happens at two levels, and each asset uses the most specific setting that has been proven:
   * Group (market × timeframe): the histories of up to GROUP_MAX_PAIRS assets of one market are pooled and
     split by time into 60 % train / 20 % validation / 20 % test. The grid is ranked on train, the winner is
@@ -72,6 +76,9 @@ MIN_RR = 1.0  # setups paying less than they risk are never taken (keeps the win
 CORE_TFS = ("15m", "1h", "4h", "1d")
 UNIVERSE_TFS = ("1d",)
 TUNE_EVERY = 6 * 3600
+HISTORY_BASIS = 2  # evaluations are made on market_data.HISTORY bars; older ones (short history) are re-done first
+PREFETCH = 40  # long histories downloaded together for the next pairs due
+RETRY_AFTER = 30 * 60  # a group or pair whose tuning failed waits this long before the next attempt
 TF_SECONDS = {"1m": 60, "5m": 300, "10m": 600, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
 
 
@@ -117,6 +124,27 @@ class Signal:
     exit: float | None = None
     r: float | None = None
     reason: str = ""
+
+
+# ------------------------------------------------------------------ bars
+
+
+def _with_tail(long: Bars, short: Bars | None, cap: int = 6000) -> Bars:
+    """Long history with the fresher bars of the analysis cache in place of its end (same timeframe grid)."""
+    if short is None or not len(short) or not len(long) or short.time[-1] <= long.time[-1]:
+        return long
+    cut = int(np.searchsorted(long.time, short.time[0]))
+    start = max(0, cut + len(short) - cap)
+    join = lambda a, b: np.concatenate([a[:cut], b])[start:]  # noqa: E731
+    return Bars(join(long.time, short.time), join(long.open, short.open), join(long.high, short.high),
+                join(long.low, short.low), join(long.close, short.close), join(long.volume, short.volume), short.fetched_at)
+
+
+def history(inst: instruments.Instrument, tf: str) -> Bars | None:
+    """Bars the tuner learns from: long history (market_data.HISTORY) with a fresh tail, else the analysis bars."""
+    got = market_data.history_many([inst], tf).get(inst.symbol)
+    short = market_data.cached(inst, tf)
+    return _with_tail(got, short) if isinstance(got, Bars) else short
 
 
 # ------------------------------------------------------------------ strategy + simulation
@@ -409,13 +437,15 @@ def tune_group(pairs: list[tuple[str, Bars]], tf_key: str, current: Params) -> t
             train += a
             valid += b
             test += c
-        return {"train": metrics(train), "valid": metrics(valid), "test": metrics(test), "pairs": len(pairs)}
+        return {"train": metrics(train), "valid": metrics(valid), "test": metrics(test), "pairs": len(pairs),
+                "basis": HISTORY_BASIS}
 
     def evaluate(p: Params):
         report = pooled(p)
         return _score(report["train"], GROUP_MIN_TRAIN), p, report
 
     current_report = pooled(current)
+    current_report["basis"] = HISTORY_BASIS
     ranked = _refine(sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True), evaluate)
     best, best_report = current, current_report
     best_valid = _score(current_report["valid"], GROUP_MIN_VALID)
@@ -656,6 +686,7 @@ def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars) -> dict | None:
                     _save_params(inst.symbol, tf, {"inherit": True}, inherited, now)
                     _params.pop((inst.symbol, tf), None)
                     report = inherited
+        report = {**report, "basis": HISTORY_BASIS, "bars": len(bars)}
         _evals[(inst.symbol, tf)] = report
         db.execute("UPDATE tracking SET last_tuned=?, report=? WHERE symbol=? AND tf=?",
                    (now, json.dumps(report), inst.symbol, tf))
@@ -819,30 +850,45 @@ def asset(symbol: str, tf: str) -> dict:
 
 
 def chart(symbol: str, tf: str) -> dict:
-    """Virtual trades of one pair for the live training chart, on the same bars the chart shows: every signal of
-    the active setting (backtest), with the journal's live rows replacing their re-simulated twins."""
+    """Live training chart of one pair: the bars the tuner learns from (long history with a fresh tail), the
+    structure the active setting sees, and its virtual trades — the journal's live rows replacing their
+    re-simulated twins. Times are bar opens (UTC seconds)."""
     inst = instruments.resolve(symbol)
     source, version, p = active(inst.symbol, tf)
-    bars = market_data.load(inst, tf)
+    bars = history(inst, tf)
+    if bars is None or len(bars) < 50:
+        bars = market_data.load(inst, tf)
     tf_sec = TF_SECONDS.get(tf, 3600)
-    t0, t1 = int(bars.time[0]), int(bars.time[-1])
+    t = bars.time
+    t0, t1 = int(t[0]), int(t[-1])
     split_t = int(t0 + (t1 - t0) * SPLIT)
+    r = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
     live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0))
-    replaced = {(r["created_t"], r["direction"]) for r in live}
-    sigs = signals(bars, p)
+    replaced = {(row["created_t"], row["direction"]) for row in live}
+    sigs = signals(bars, p, r)
     trades = []
     for s in sigs:
-        created_t = int(bars.time[s.created])
+        created_t = int(t[s.created])
         if (created_t, s.direction) not in replaced:
             trades.append({**_row(inst, tf, version, s, bars, created_t, None, p, tf_sec), "live": False,
                            "sample": "oos" if created_t >= split_t else "is"})
-    trades += [{**r, "live": True, "sample": "live"} for r in live]
-    trades.sort(key=lambda r: r["created_t"])
-    return {"symbol": inst.symbol, "tf": tf, "version": version, "source": source, "params": asdict(p),
-            "evidence": evidence(inst.symbol, tf),
-            "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
-            "split": split_t, "outOfSample": metrics([s for s in sigs if bars.time[s.created] >= split_t]),
-            "live": _live_metrics(live), "trades": trades[-600:]}
+    trades += [{**row, "live": True, "sample": "live"} for row in live]
+    trades.sort(key=lambda row: row["created_t"])
+    word = {1: "bullish", -1: "bearish"}
+    return {
+        "instrument": inst.to_json(), "tf": tf, "symbol": inst.symbol, "version": version, "source": source,
+        "params": asdict(p), "evidence": evidence(inst.symbol, tf),
+        "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
+        "split": split_t, "outOfSample": metrics([s for s in sigs if t[s.created] >= split_t]),
+        "live": _live_metrics(live), "trades": trades,
+        "candles": [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
+                     "c": float(bars.close[i])} for i in range(len(bars))],
+        "smc": {"breaks": [{"kind": b.kind, "direction": word[b.direction], "level": b.level, "scope": b.scope,
+                            "fromT": int(t[b.pivot_index]), "toT": int(t[b.index])}
+                           for st in (r.swing, r.internal) for b in st.breaks],
+                "pivots": [], "orderBlocks": [], "fvgs": [], "equalLevels": [], "liquidity": {"above": [], "below": []}},
+        "ema": {"ema50": [], "ema200": []}, "plan": None,
+    }
 
 
 def _activity(rows: list[dict], limit: int = 20) -> list[dict]:
@@ -890,6 +936,7 @@ def reliability(symbol: str, tfs: list[str]) -> dict | None:
 
 _progress = {"tracked": 0, "lastPass": None, "tuning": None, "tunedThisRun": 0, "lastTuned": None}
 _seen_bars: dict[tuple[str, str], int] = {}
+_failed: dict[tuple[str, str], float] = {}  # (symbol or @market, tf) -> time of the last failed tuning
 
 
 def _pairs() -> list[tuple[instruments.Instrument, str]]:
@@ -915,41 +962,63 @@ def _pass() -> None:
     _progress["lastPass"] = int(time.time())
 
 
-def _group_pairs(market: str, tf: str) -> list[tuple[str, Bars]]:
-    found = []
-    for inst, t in _pairs():
-        if t != tf or inst.market != market:
-            continue
-        bars = market_data.cached(inst, tf)
-        if bars is not None and len(bars) >= 200:
-            found.append((inst.symbol, bars))
-    found.sort(key=lambda x: hashlib.sha1(x[0].encode()).hexdigest())  # a stable spread of the market
-    return found[:GROUP_MAX_PAIRS]
+def _group_candidates(market: str, tf: str, pairs) -> list[tuple[instruments.Instrument, Bars]]:
+    """Assets of one market & timeframe with enough analysis bars, a stable spread of at most GROUP_MAX_PAIRS."""
+    chosen = []
+    for inst, t in pairs:
+        if t == tf and inst.market == market:
+            bars = market_data.cached(inst, tf)
+            if bars is not None and len(bars) >= 200:
+                chosen.append((inst, bars))
+    chosen.sort(key=lambda x: hashlib.sha1(x[0].symbol.encode()).hexdigest())
+    return chosen[:GROUP_MAX_PAIRS]
+
+
+def _group_pairs(chosen: list[tuple[instruments.Instrument, Bars]], tf: str) -> list[tuple[str, Bars]]:
+    """Long history of the chosen assets (downloaded in batches), each with the fresh tail of its analysis bars."""
+    got = market_data.history_many([inst for inst, _ in chosen], tf)
+    return [(inst.symbol, _with_tail(got[inst.symbol], short) if isinstance(got.get(inst.symbol), Bars) else short)
+            for inst, short in chosen]
+
+
+def _due(key: tuple[str, str], last: dict, report: dict | None, now: float) -> bool:
+    if now - _failed.get(key, 0) < RETRY_AFTER:
+        return False
+    return (report or {}).get("basis") != HISTORY_BASIS or now - last.get(key, 0) >= TUNE_EVERY
 
 
 def _tune_next() -> None:
     with _db_lock:
         last = dict(((s, tf), lt) for s, tf, lt in _db().execute("SELECT symbol, tf, last_tuned FROM tracking"))
     now = time.time()
-    for market, tf in sorted({(i.market, t) for i, t in _pairs()}):  # group learning first: most assets inherit it
-        if now - last.get((_group_key(market), tf), 0) < TUNE_EVERY:
+    pairs = _pairs()
+    for market, tf in sorted({(i.market, t) for i, t in pairs}):  # group learning first: most assets inherit it
+        group = _groups.get((market, tf))
+        if not _due((_group_key(market), tf), last, group[2] if group else None, now):
             continue
-        pairs = _group_pairs(market, tf)
-        if len(pairs) < GROUP_MIN_PAIRS:
-            continue
-        _progress["tuning"] = f"grup {market} {tf} ({len(pairs)} aset)"
+        chosen = _group_candidates(market, tf, pairs)
+        if len(chosen) < GROUP_MIN_PAIRS:
+            continue  # not enough assets with data yet: never blocks the per-asset tuning below
+        _progress["tuning"] = f"grup {market} {tf} ({len(chosen)} aset)"
         try:
-            train_group(market, tf, pairs)
+            train_group(market, tf, _group_pairs(chosen, tf))
         except Exception:
+            _failed[(_group_key(market), tf)] = time.time()
             log.exception("training group %s %s failed", market, tf)
         finally:
             _progress["tuning"] = None
         return
-    for inst, tf in _pairs():  # core first, then the universe; pairs without a stored evaluation are due at once
-        key = (inst.symbol, tf)
-        if key not in last or (key in _evals and now - last[key] < TUNE_EVERY):
+    # core first, then the universe; pairs evaluated on older data (or never) are due at once
+    due = [(i, t) for i, t in pairs if (i.symbol, t) in last and _due((i.symbol, t), last, _evals.get((i.symbol, t)), now)]
+    for k, (inst, tf) in enumerate(due):
+        short = market_data.cached(inst, tf)
+        if short is None or len(short) < 200:
             continue
-        bars = market_data.cached(inst, tf)
+        if not market_data.history_cached(inst, tf):
+            ahead = [i for i, t in due[k:k + 4 * PREFETCH] if t == tf][:PREFETCH]
+            _progress["tuning"] = f"unduh riwayat panjang {tf} ({len(ahead)} aset)"
+            market_data.history_many(ahead, tf)
+        bars = history(inst, tf)
         if bars is None or len(bars) < 200:
             continue
         _progress["tuning"] = f"{inst.symbol} {tf}"
@@ -958,6 +1027,7 @@ def _tune_next() -> None:
             _progress["tunedThisRun"] += 1
             _progress["lastTuned"] = {"symbol": inst.symbol, "tf": tf, "market": inst.market, "at": int(time.time())}
         except Exception:
+            _failed[(inst.symbol, tf)] = time.time()
             log.exception("training tune %s %s failed", inst.symbol, tf)
         finally:
             _progress["tuning"] = None

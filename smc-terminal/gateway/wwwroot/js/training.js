@@ -132,6 +132,18 @@ const SMC_OFF = Object.fromEntries(Object.keys(SMC_ON).map((k) => [k, false]));
 const CHART_KEY = 'sharx.trainingChart';
 const loadChartPrefs = () => { try { return JSON.parse(localStorage.getItem(CHART_KEY)) || {}; } catch { return {}; } };
 const saveChartPrefs = (v) => { try { localStorage.setItem(CHART_KEY, JSON.stringify(v)); } catch { /* per-viewer convenience only */ } };
+const REPLAY_BASE = 3;  // candles per second at ×1
+const SPEEDS = [1, 2, 3, 4, 5, 6, 7];
+const dateText = (t, tf) => new Date(t * 1000).toLocaleString('id-ID', TF_SECONDS[tf] >= 86400
+  ? { day: '2-digit', month: 'short', year: 'numeric' } : { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// A trade as it looked at time T of a replay (null = its signal has not appeared yet).
+function tradeAt(s, T) {
+  if (s.created_t > T) return null;
+  if (s.closed_t != null && s.closed_t <= T) return s;
+  if (s.status === 'cancelled' || !s.opened_t || s.opened_t > T) return { ...s, status: 'pending', opened_t: null, closed_t: null, r: null };
+  return { ...s, status: 'open', closed_t: null, r: null };
+}
 const clock = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\./g, ':');
 
 /** LIVE CHART tab: candles of one training asset with its virtual trades, merged with live 1-minute bars. */
@@ -142,19 +154,103 @@ function mountTrainingChart(el) {
       <button class="tr-follow" title="Pindah otomatis ke aset dengan aktivitas trade virtual terbaru (sinyal, entry, hasil)">IKUTI AKTIVITAS</button>
       <button class="tr-smc" title="Tampilkan struktur SMC (BOS/CHoCH swing & internal)">SMC</button>
       <button class="tr-oos" title="Perbesar ke seluruh periode data uji (out-of-sample)">DATA UJI</button>
+      <span class="tr-replay-ctl">
+        <button class="tr-play" title="Putar ulang data uji (yang tidak dipakai melatih) candle demi candle">▶ REPLAY</button>
+        <span class="tr-speed" title="Kecepatan replay: ×1 = ${REPLAY_BASE} candle per detik">${SPEEDS.map((v) => `<button data-speed="${v}">×${v}</button>`).join('')}</span>
+        <button class="tr-end hidden" title="Langsung ke akhir replay">⏭</button>
+        <button class="tr-stop hidden" title="Hentikan replay, kembali ke chart live">■ LIVE</button>
+      </span>
       <span class="tr-live-info"></span>
     </div>
-    <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div></div>
+    <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div><div class="chart-replay hidden"></div></div>
     <div class="tr-live-foot"></div>`;
   const $ = (q) => el.querySelector(q);
-  const prefs = { follow: false, smc: true, ...loadChartPrefs() };
+  const prefs = { follow: false, smc: true, speed: 4, ...loadChartPrefs() };
   let chart = null, current = null, summary = null, chartData = null, liveState = null, busy = false, seq = 0;
+  let replay = null;  // { full, i, start, playing, acc, last, raf }
   const visible = () => el.offsetParent !== null && !document.hidden;
   const save = () => saveChartPrefs({ ...prefs, symbol: current?.symbol, tf: current?.tf });
   const syncButtons = () => {
     $('.tr-follow').classList.toggle('active', prefs.follow);
     $('.tr-smc').classList.toggle('active', prefs.smc);
+    el.querySelectorAll('.tr-speed button').forEach((b) => b.classList.toggle('active', +b.dataset.speed === prefs.speed));
+    $('.tr-play').textContent = !replay ? '▶ REPLAY' : replay.playing ? '⏸ JEDA' : replay.i >= replay.full.candles.length ? '↺ ULANG' : '▶ LANJUT';
+    $('.tr-play').classList.toggle('active', !!replay?.playing);
+    $('.tr-end').classList.toggle('hidden', !replay);
+    $('.tr-stop').classList.toggle('hidden', !replay);
+    $('.chart-replay').classList.toggle('hidden', !replay);
+    $('.chart-live').classList.toggle('hidden', !!replay);
   };
+
+  // ---------------------------------------------------------------- replay of the out-of-sample period
+  function startReplay() {
+    const full = chartData;
+    if (!full?.candles?.length || !chart) return;
+    const start = Math.max(1, full.candles.findIndex((c) => c.t >= full.split));
+    replay = { full, i: start, start, playing: true, acc: 0, last: performance.now(), raf: 0 };
+    chart.setData({ ...full, candles: full.candles.slice(0, start).map((c) => ({ ...c })) });
+    showReplay();
+    replay.raf = requestAnimationFrame(tick);
+    syncButtons();
+  }
+
+  function tick(now) {
+    if (!replay) return;
+    const dt = Math.min(0.25, (now - replay.last) / 1000);
+    replay.last = now;
+    if (replay.playing) {
+      replay.acc += dt * REPLAY_BASE * prefs.speed;
+      const n = Math.floor(replay.acc);
+      if (n) {
+        replay.acc -= n;
+        try {
+          advance(n);
+        } catch (e) {
+          replay.playing = false;  // keep what is shown; the error is visible instead of a frozen replay
+          syncButtons();
+          $('.chart-replay').insertAdjacentHTML('beforeend', `<div class="down">${esc(e.message)}</div>`);
+        }
+      }
+    }
+    if (replay) replay.raf = requestAnimationFrame(tick);
+  }
+
+  function advance(n) {
+    const { full } = replay;
+    for (let k = 0; k < n && replay.i < full.candles.length; k++) chart.appendCandle({ ...full.candles[replay.i++] });
+    if (replay.i >= full.candles.length) replay.playing = false;
+    showReplay();
+    if (!replay.playing) syncButtons();
+  }
+
+  function showReplay() {
+    const { full, i, start } = replay;
+    const T = full.candles[i - 1].t;
+    chart.until = T;
+    chart.setTrades({ ...full, trades: full.trades.map((s) => tradeAt(s, T)).filter(Boolean) });
+    const from = full.candles[start].t;
+    const done = full.trades.filter((s) => s.created_t >= from && s.closed_t != null && s.closed_t <= T && ['win', 'loss', 'timeout'].includes(s.status));
+    const wins = done.filter((s) => s.r > 0).length;
+    const total = done.reduce((a, s) => a + (s.r || 0), 0);
+    const active = full.trades.filter((s) => { const v = tradeAt(s, T); return v && s.status !== 'cancelled' && (v.status === 'open' || v.status === 'pending'); }).length;
+    const progressPct = ((i - start) / Math.max(1, full.candles.length - start)) * 100;
+    $('.chart-replay').innerHTML = `
+      <div class="rp-head"><b>REPLAY ×${prefs.speed}</b><span>${esc(dateText(T, full.tf))}</span><span class="dim">${i >= full.candles.length ? 'SELESAI' : `${Math.round(progressPct)}%`}</span></div>
+      <div class="rp-bar"><i style="width:${progressPct.toFixed(1)}%"></i></div>
+      <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
+        <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
+        <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span><span class="dim">aktif ${active}</span></div>
+      <div class="dim rp-note">data uji: tidak dipakai saat melatih · hasil = backtest yang diputar ulang, bukan trade live</div>`;
+  }
+
+  function stopReplay(reload = true) {
+    if (!replay) return;
+    cancelAnimationFrame(replay.raf);
+    replay = null;
+    if (chart) chart.until = null;
+    syncButtons();
+    if (reload) load(false);
+  }
 
   function options() {
     const board = summary?.leaderboard || [];
@@ -178,6 +274,7 @@ function mountTrainingChart(el) {
   }
 
   async function open(symbol, tf) {
+    stopReplay(false);
     current = { symbol, tf };
     save();
     options();
@@ -193,13 +290,10 @@ function mountTrainingChart(el) {
       chart.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
     }
     try {
-      const [a, t] = await Promise.all([
-        api(`/api/analyze?symbol=${encodeURIComponent(symbol)}&tf=${tf}`),
-        api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}`),
-      ]);
-      if (my !== seq) return;
+      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      if (my !== seq || replay) return;
       chartData = t;
-      chart.setData(a, { keepRange });
+      chart.setData({ ...t, candles: t.candles.map((c) => ({ ...c })) }, { keepRange });
       chart.setTrades(t);
       if (!keepRange) liveState = null;
       render();
@@ -210,12 +304,12 @@ function mountTrainingChart(el) {
   }
 
   async function pollLive() {
-    if (!chart?.data || !current || busy || !visible()) return;
+    if (!chart?.data || !current || busy || replay || !visible()) return;
     const { symbol, tf } = current;
     busy = true;
     try {
       const res = await api(`/api/live?symbol=${encodeURIComponent(symbol)}`);
-      if (current?.symbol !== symbol || current?.tf !== tf) return;
+      if (current?.symbol !== symbol || current?.tf !== tf || replay) return;  // a replay may have started meanwhile
       chart.live(res.bars, TF_SECONDS[tf]);
       liveState = { asOf: res.asOf, received: Date.now(), error: null };
     } catch (e) {
@@ -284,12 +378,30 @@ function mountTrainingChart(el) {
   syncButtons();
   setInterval(pollLive, 3000);
   setInterval(renderClock, 1000);
-  setInterval(() => { if (visible()) load(true); }, 30_000);
+  setInterval(() => { if (visible() && !replay) load(true); }, 30_000);
+  $('.tr-play').addEventListener('click', () => {
+    if (!replay) { startReplay(); return; }
+    if (replay.i >= replay.full.candles.length) { stopReplay(false); startReplay(); return; }
+    replay.playing = !replay.playing;
+    replay.last = performance.now();
+    syncButtons();
+  });
+  $('.tr-end').addEventListener('click', () => { if (replay) advance(replay.full.candles.length); });
+  $('.tr-stop').addEventListener('click', () => stopReplay());
+  $('.tr-speed').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-speed]');
+    if (!b) return;
+    prefs.speed = +b.dataset.speed;
+    save();
+    syncButtons();
+    if (replay) showReplay();
+  });
 
   return {
     /** Called with every AI TRAINING summary while the tab is shown. */
     show(d) {
       summary = d;
+      if (replay) return;  // a running replay is not interrupted by refreshes or the follow mode
       const target = prefs.follow ? followTarget() : null;
       if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) { open(target.symbol, target.tf); return; }
       if (!current) {

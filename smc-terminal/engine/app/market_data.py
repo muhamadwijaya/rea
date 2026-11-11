@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
@@ -34,6 +35,7 @@ class Timeframe:
     ttl: int  # seconds a cached download stays fresh
     swing: int  # pivot length for swing structure
     internal: int  # pivot length for internal structure
+    max_bars: int = MAX_BARS  # most recent bars kept from a download
 
 
 TIMEFRAMES: dict[str, Timeframe] = {
@@ -48,6 +50,18 @@ TIMEFRAMES: dict[str, Timeframe] = {
     "4hu": Timeframe("4hu", "4H", "60m", "90d", "4h", 1800, 10, 3),
     "1w": Timeframe("1w", "1W", "1wk", "15y", None, 3600, 8, 3),
 }
+
+
+# Long history for the virtual-trading tuner (more out-of-sample trades per asset): Yahoo's longest intraday
+# periods (60 days of 15-minute, 730 days of hourly bars) and 10 years of daily bars, up to 6000 bars. Pivot
+# lengths match the analysis timeframe of the same name. Kept in a bounded cache of their own (`history_many`).
+HISTORY: dict[str, Timeframe] = {
+    "15m": Timeframe("15m@hist", "15M", "15m", "60d", None, 1800, 15, 4, 6000),
+    "1h": Timeframe("1h@hist", "1H", "60m", "730d", None, 3600, 12, 4, 6000),
+    "4h": Timeframe("4h@hist", "4H", "60m", "730d", "4h", 3600, 10, 3, 6000),
+    "1d": Timeframe("1d@hist", "1D", "1d", "10y", None, 6 * 3600, 10, 3, 6000),
+}
+HISTORY_CACHE = 240  # assets × timeframes of long history held at once (least recently used dropped first)
 
 
 # Realtime feed for the open chart: today's 1-minute bars, refreshed every few seconds and merged by the
@@ -78,6 +92,8 @@ class Bars:
 
 
 _cache: dict[tuple[str, str], tuple[float, Bars]] = {}
+_history: OrderedDict[tuple[str, str], tuple[float, Bars]] = OrderedDict()
+_history_lock = threading.Lock()
 # Cash dividends per Yahoo ticker, captured from the daily downloads (no extra requests): [(unix time, amount)].
 _dividends: dict[str, list[tuple[int, float]]] = {}
 _locks: dict[tuple[str, str], threading.Lock] = {}
@@ -118,7 +134,7 @@ def frame_to_bars(df: pd.DataFrame, tf: Timeframe, min_bars: int = 30) -> Bars:
             .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
             .dropna(subset=cols)
         )
-    df = df.tail(MAX_BARS)
+    df = df.tail(tf.max_bars)
     if len(df) < min_bars:
         raise NoData(f"Data terlalu sedikit ({len(df)} bar) untuk dianalisis.")
     epoch = pd.Timestamp("1970-01-01", tz="UTC")
@@ -228,7 +244,7 @@ def load_many(instruments: list[Instrument], tf_key: str, chunk: int = 150) -> d
     return out
 
 
-def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | Exception]) -> None:
+def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | Exception], store=None) -> None:
     tickers = sorted({i.yahoo for i in part})
     started = time.perf_counter()
     try:
@@ -244,11 +260,53 @@ def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | 
                 raise NoData(f"Tidak ada data untuk {inst.yahoo}.")
             _capture_dividends(inst.yahoo, frame)
             bars = frame_to_bars(frame, tf)
-            _store((inst.yahoo, tf.key), bars, tf)
+            (store or _store)((inst.yahoo, tf.key), bars, tf)
             out[inst.symbol] = bars
         except NoData as exc:
             out[inst.symbol] = exc
     log.info("batch %s: %d tickers in %.2fs", tf.key, len(tickers), time.perf_counter() - started)
+
+
+def _store_history(key: tuple[str, str], bars: Bars, tf: Timeframe) -> None:
+    with _history_lock:
+        _history[key] = (time.time() + tf.ttl, bars)
+        _history.move_to_end(key)
+        while len(_history) > HISTORY_CACHE:
+            _history.popitem(last=False)
+
+
+def history_cached(inst: Instrument, tf_key: str) -> bool:
+    tf = HISTORY.get(tf_key)
+    if tf is None:
+        return _cached((inst.yahoo, timeframe(tf_key).key)) is not None
+    with _history_lock:
+        hit = _history.get((inst.yahoo, tf.key))
+    return bool(hit and hit[0] > time.time())
+
+
+def history_many(instruments: list[Instrument], tf_key: str, chunk: int = 60) -> dict[str, Bars | Exception]:
+    """Long history (see HISTORY) of many instruments; misses are downloaded in batches. Other timeframes fall back
+    to the regular bars."""
+    tf = HISTORY.get(tf_key)
+    if tf is None:
+        return load_many(instruments, tf_key)
+    out: dict[str, Bars | Exception] = {}
+    missing: list[Instrument] = []
+    now = time.time()
+    with _history_lock:
+        for inst in instruments:
+            key = (inst.yahoo, tf.key)
+            hit = _history.get(key)
+            if hit and hit[0] > now:
+                _history.move_to_end(key)
+                out[inst.symbol] = hit[1]
+            else:
+                missing.append(inst)
+    for start in range(0, len(missing), chunk):
+        _download_part(missing[start:start + chunk], tf, out, store=_store_history)
+        if start + chunk < len(missing):
+            time.sleep(0.5)  # be gentle with Yahoo between batches
+    return out
 
 
 def live(inst: Instrument) -> dict:

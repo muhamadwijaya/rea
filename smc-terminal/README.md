@@ -164,6 +164,10 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   harga close menembus stop, atau kedaluwarsa (mis. 30 bar).
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
+- **Riwayat panjang untuk pelatihan**: tuner belajar dari 10 tahun bar harian, 730 hari bar 1 jam / 4 jam (batas Yahoo)
+  dan 60 hari bar 15 menit (maks. 6.000 bar), dengan bar terbaru dari analisa sebagai ujungnya. Bukti out-of-sample per
+  aset jadi beberapa kali lebih banyak (uji 474 pasangan: 922 → 2.545 trade uji). Riwayat ini disimpan di cache terbatas
+  (240 aset × timeframe) dan diunduh bertahap; tuning memakai CPU ±4× lebih banyak daripada versi sebelumnya.
 - **Belajar per grup pasar**: riwayat hingga 150 aset satu pasar & timeframe (mis. SAHAM IDX 1D) digabung dan dibagi
   menurut waktu: 60% awal untuk mengurutkan ±1.150 kombinasi parameter SMC (panjang pivot, scope, CHoCH/BOS, entry,
   stop, target, filter premium/discount & tren, kedaluwarsa), 20% berikutnya (validasi) untuk memilih, dan 20% terakhir
@@ -178,6 +182,12 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis LIMIT/SL/TP. Area sebelum garis
   "DATA UJI" adalah data latih (redup); tombol DATA UJI memperbesar ke seluruh periode out-of-sample. IKUTI AKTIVITAS
   memindahkan chart otomatis ke aset dengan aktivitas trade virtual terbaru.
+- **Replay dipercepat ×1–×7** (tab LIVE CHART): memutar ulang data uji (periode yang tidak dipakai melatih) candle demi
+  candle — ×1 = 3 candle/detik, ×7 = 21 candle/detik — sehingga hasil setup (entry, TP/SL, R) terlihat dalam hitungan
+  detik, untuk aset mana pun di mode NORMAL, KETAT atau SANGAT KETAT. Trade dan struktur baru muncul saat waktunya
+  tercapai (tanpa bocoran masa depan); kotak replay menghitung trade selesai, menang/kalah, win rate dan total R, dan
+  di akhir sama dengan statistik data uji. Ini mempercepat tampilan hasil backtest, bukan trade live: candle live tetap
+  mengikuti pasar sungguhan.
 - **Mode presisi**: NORMAL (batas bawah win rate ≥ 50%), KETAT (≥ 65%), SANGAT KETAT (≥ 80%). Mode lebih ketat hanya
   menghitung setting dengan bukti terkuat: win rate lebih tinggi, sinyal lebih jarang. Batas bawah tiap sinyal live
   dicap saat sinyal muncul, jadi hasil live per mode tidak dipilih setelah hasilnya diketahui.

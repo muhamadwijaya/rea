@@ -178,11 +178,20 @@ export class SmcChart {
     if (this.layers.liquidity) this.drawLiquidity(smc.liquidity, X, Y, right);
     if (this.layers.eq) for (const e of smc.equalLevels) this.drawEqual(e, X, Y);
     for (const b of smc.breaks) {
+      if (this.until != null && b.toT > this.until) continue;  // replay: structure not formed yet
       if ((b.scope === 'swing' && this.layers.swing) || (b.scope === 'internal' && this.layers.internal)) this.drawBreak(b, X, Y);
     }
     if (this.layers.pivots) for (const p of smc.pivots) this.drawPivot(p, X, Y);
     if (this.trades) this.drawTrades(this.trades, Y, right, paneH);
     ctx.restore();
+  }
+
+  /** Replay: add the next candle (the chart scrolls with it while the last bar is in view). */
+  appendCandle(c) {
+    const candles = this.data.candles;
+    candles.push(c);
+    this.index.set(c.t, candles.length - 1);
+    this.candles.update({ time: localTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c });
   }
 
   /** Virtual-trading trades drawn as position boxes (AI TRAINING live chart); null removes them. */
