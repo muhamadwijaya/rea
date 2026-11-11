@@ -104,7 +104,7 @@ export class ScreenerView {
           </div>
           <div class="toolbar scr-bar"><span class="dim" style="font-size:10.5px;letter-spacing:.1em">KONDISI SMC</span>
             <div class="chips scr-conds">${CONDITIONS.map(([k, l]) => `<button class="chip" data-c="${k}">${l}</button>`).join('')}</div>
-            <button class="btn sm scr-reset" type="button">RESET</button><span class="grow"></span><span class="sub scr-sub muted"></span></div>
+            <button class="btn danger sm scr-reset" type="button">RESET</button><span class="grow"></span><span class="sub scr-sub muted"></span></div>
           <div class="table-wrap"><table class="data scr-table"></table></div>
         </div>
         <div class="pane" data-t="tv"><div class="tv-fill tv-screener"></div></div>

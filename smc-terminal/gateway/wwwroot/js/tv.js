@@ -22,7 +22,8 @@ export function mountWidget(container, name, config) {
   container.appendChild(wrap);
 }
 
-export const TV_INTERVAL = { '15m': '15', '1h': '60', '4h': '240', '1d': 'D', '1w': 'W' };
+// The TradingView widget has no 10-minute interval; 10M opens its 5-minute chart.
+export const TV_INTERVAL = { '1m': '1', '5m': '5', '10m': '5', '15m': '15', '1h': '60', '4h': '240', '1d': 'D', '1w': 'W' };
 
 export function tickerTape(el) {
   mountWidget(el, 'ticker-tape', {
@@ -55,7 +56,7 @@ export function advancedChart(el, tvSymbol, tf) {
     theme: 'dark',
     style: '1',
     isTransparent: false,
-    backgroundColor: 'rgba(10, 14, 22, 1)',
+    backgroundColor: 'rgba(6, 18, 46, 1)',
     gridColor: 'rgba(28, 38, 55, 0.6)',
     allow_symbol_change: true,
     hide_side_toolbar: false,
@@ -69,7 +70,7 @@ export function advancedChart(el, tvSymbol, tf) {
 
 export function technicalGauge(el, tvSymbol, tf) {
   mountWidget(el, 'technical-analysis', {
-    interval: tf === '15m' ? '15m' : tf === '4h' ? '4h' : tf === '1d' ? '1D' : tf === '1w' ? '1W' : '1h',
+    interval: { '1m': '1m', '5m': '5m', '10m': '15m', '15m': '15m', '4h': '4h', '1d': '1D', '1w': '1W' }[tf] || '1h',
     width: '100%',
     height: '100%',
     symbol: tvSymbol,

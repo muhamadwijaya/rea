@@ -26,6 +26,7 @@ di belakang aplikasi dan ikut berhenti saat jendela ditutup.
 | `start-browser.bat` | Cadangan: server di satu jendela konsol, UI di browser (http://127.0.0.1:5080) |
 | `stop.bat` | Paksa hentikan semua proses SMC Terminal |
 
+Tampilan memakai warna dasar **biru navy**; tombol aksi **hijau menyala**, tombol tutup/hapus/batal **merah**.
 Setiap kali dibuka, aplikasi tampil **layar penuh** (tanpa title bar/tombol close Windows) dan menampilkan
 **loading screen** berisi tahapan — gateway, koneksi realtime, engine Python, data harga & screener, arah
 market, berita, kalender — sampai semuanya siap. Kontrol jendela ada di pojok kanan atas aplikasi:
@@ -49,12 +50,14 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 
 | Halaman | Isi |
 | --- | --- |
-| **Dashboard** | KPI, pencarian, lima cek SMC, **market orbs 3D** (satu bola per pasar, tiap filamen = 1 aset dari universe penuh tersebar di permukaan bola; panjang = besar gerak hari ini, **emas = naik, biru = turun**; berputar pelan dengan perspektif & kedalaman, bisa diseret untuk memutar; label open → harga sekarang & % untuk aset teratas yang menghadap layar, hover/klik aset, tag berita mengambang 3 menit dengan sentimen naik/netral/turun + tally "condong ke mana" 60 menit), tab ARAH · SINYAL · ALERT · VERDICT · ANALISA |
+| **Dashboard** | KPI, pencarian, lima cek SMC, panel MARKET ORBS bertab ↓, tab ARAH · SINYAL · ALERT · VERDICT · ANALISA |
+| ↳ Orbs 3D | Satu bola per pasar (selalu formasi 2×2, ukuran ikut panel sehingga zoom UI tidak mengubah formasi). Tiap filamen = 1 aset dari universe penuh; panjang = besar gerak hari ini, **emas = naik, biru = turun**; berputar pelan dengan perspektif & kedalaman. Tiap bola bisa **di-zoom sendiri** (scroll, klik ganda = reset) dan diseret untuk memutar; bola berhenti hanya selama kursor di atasnya dan **langsung berputar lagi** saat kursor pergi. Label open → harga sekarang & %, hover/klik aset = analisa, tag berita mengambang 3 menit dengan sentimen naik/netral/turun — **klik tag = buka berita** — + tally "condong ke mana" 60 menit |
+| ↳ Peta Aset | Semua aset satu pasar sebagai kotak, **dikelompokkan per sektor/kategori** (saham: Energy, Financials, Technology, …; forex: Mayor, Cross, Eksotis, Logam, Energi, Pertanian; kripto: Layer 1, DeFi & RWA, Token Exchange, Meme, AI, …). Warna = % hari ini atau bias SMC 1D; penanda berita 60 menit, berita baru 3 menit, CHoCH baru 1D. Panel kanan: hitungan live + daftar TERKUAT / TERLEMAH / RAMAI BERITA / CHoCH BARU (hover = temukan di peta, klik = analisa) |
 | **Forex** · **Saham AS** · **Saham IDX** · **Kripto** | Tiap pasar punya 4 sub-tab sendiri ↓ |
-| ↳ Analisa SMC | Watchlist pasar + chart SMC (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP; layer lewat menu LAYER SMC) atau chart TradingView live / split; panel kanan bertab BIAS · MTF · PLAN · NARASI · LEVEL · TV · BERITA |
+| ↳ Analisa SMC | Watchlist pasar + chart SMC **realtime** (TF 1M · 5M · 10M · 15M · 1H · 4H · 1D · 1W; candle terakhir bergerak dari data 1 menit tiap ±3 detik, jam berjalan + hitung mundur penutupan candle, status LIVE / PASAR TUTUP) dengan (BOS/CHoCH, HH/HL/LH/LL, order block, FVG, EQH/EQL, BSL/SSL, premium/discount, EMA, entry/SL/TP; layer lewat menu LAYER SMC) atau chart TradingView live / split; panel kanan bertab BIAS · MTF · PLAN · NARASI · LEVEL · TV · BERITA |
 | ↳ Screener | Tab SMC SCREENER: **SEMUA ASET 1D / SEMUA ASET 4H** (seluruh universe pasar itu) atau aset inti 1H/4H/1D; filter kondisi SMC (CHoCH/BOS baru ≤ 3 bar, swing bullish/bearish, swing = internal, harga di OB, zona discount/premium, FVG terbuka, RSI ≤ 30 / ≥ 70), bias, sektor, cari, sortir · tab TRADINGVIEW SCREENER realtime pasar itu |
 | ↳ Berita | Berita realtime khusus pasar itu (push SignalR), sentimen per aset, filter, TradingView News pasar itu, status sumber |
-| ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI** (OpenRouter model gratis dengan rotasi otomatis, Claude, atau API lain) |
+| ↳ Fundamental & AI | Rilis data ekonomi (forecast, previous, actual dari headline, prediksi arah mata uang & aset terkait, **reaksi pasar nyata 60 menit**, ✔/✘), **akurasi terukur** model, outlook gabungan per aset (SMC + fundamental + berita), dan **analisa AI** (OpenRouter model gratis dengan rotasi otomatis, Claude, atau API lain): AI menilai arah dari berita, kalender ekonomi, laporan keuangan nyata, kinerja harga dan rencana ke depan, lalu **dicocokkan dengan SMC** → sinyal BELI / JUAL / NETRAL |
 | ↳ Arah Market | Tab RINGKASAN (breadth, regime, sentimen, outlook) · KEKUATAN MATA UANG (forex) · PENGGERAK & STRUKTUR · INSTRUMEN KUNCI · EVENT HIGH-IMPACT · PETA PASAR (heatmap TradingView) |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
@@ -75,9 +78,22 @@ Berita dari 28 sumber RSS dibagi per pasar dan ditautkan ke aset (ticker, nama p
 | **Anthropic Claude** | Key `sk-ant-…` (atau `ANTHROPIC_API_KEY`); model `claude-opus-5-5` dengan fallback server-side. Memakai kuota/biaya akun Anthropic Anda. |
 | **API lain** | Endpoint apa pun yang kompatibel OpenAI `/chat/completions` (Groq, Together, DeepSeek, LM Studio/Ollama lokal, dll.): isi base URL, nama model dan key bila perlu (atau `AI_CUSTOM_API_KEY`). |
 
-Semua provider menerima fakta yang sama dari engine dan jawabannya divalidasi ke format yang sama sebelum ditampilkan
-(arah, keyakinan, pendorong, risiko, level kunci, invalidasi); hasil menampilkan model yang menjawab dan model yang
-dilewati. Keyakinan adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di
+Fakta yang dikirim ke AI (sama untuk semua provider) bersifat **fundamental**, tanpa analisa chart:
+
+- berita terkait aset + sentimennya;
+- kalender ekonomi: rilis (actual vs forecast + reaksi pasar nyata) dan jadwal 7 hari ke depan beserta skenarionya;
+- laporan nyata emiten (saham AS & IDX, Yahoo Finance): pendapatan & laba 4 kuartal, kejutan EPS, valuasi,
+  profitabilitas, utang; kripto: kapitalisasi, suplai, volume;
+- kinerja harga: return 1W/1M/3M/6M/YTD/1Y, jarak ke high/low 52 minggu, volatilitas, relatif ke benchmark
+  (S&P 500 / IHSG / BTC);
+- rencana & ekspektasi ke depan: jadwal laporan berikutnya + konsensus EPS/pendapatan, target harga & rekomendasi
+  analis, berita rencana perusahaan.
+
+AI menjawab arah naik/turun/netral + keyakinan. Engine lalu **mencocokkan dengan bias SMC multi-timeframe**
+(1D/4H/1H): bila searah, keyakinan **naik** (5 + 0,2 × |skor SMC|, maks. +20); bila berlawanan, keyakinan turun
+dengan besaran yang sama; bila SMC belum jelas (|skor| < 15) tidak berubah. Keyakinan akhir dibatasi 95. Sinyal
+akhir **BELI / JUAL** bila keyakinan akhir ≥ 55, selain itu **NETRAL**. Hasil menampilkan konfluensi ini, katalis
+mendatang, plan SMC 4H, model yang menjawab dan model yang dilewati. Keyakinan adalah kekuatan bukti, **bukan jaminan** — tidak ada model yang dapat menjamin akurasi 99% di
 pasar; karena itu aplikasi menampilkan akurasi nyata model aturan yang diverifikasi dengan reaksi harga setelah rilis data.
 
 ## Arsitektur
@@ -100,7 +116,8 @@ Engine Python — FastAPI (engine/)
    • screener per pasar (screener.py), arah market & kekuatan mata uang (direction.py)
    • sentimen headline EN/ID + tag aset (sentiment.py, tagger.py), fundamental & outlook
    • pemindaian universe 1D/4H & harga seluruh aset di background (background.py)
-   • analisa AI multi-provider (app/ai/: OpenRouter rotasi model gratis, Claude, OpenAI-compatible)
+   • analisa AI multi-provider (app/ai/: OpenRouter rotasi model gratis, Claude, OpenAI-compatible) +
+     konfluensi dengan SMC; laporan & kinerja aset (profile.py); blok sektor/kategori (blocks.py)
 ```
 
 ## Konfigurasi
@@ -119,12 +136,13 @@ Engine Python — FastAPI (engine/)
 
 | Endpoint | Keterangan |
 | --- | --- |
-| `GET /api/analyze?symbol=EURUSD&tf=1h` | Analisa SMC lengkap + candle + MTF (`tf`: 15m, 1h, 4h, 1d, 1w) |
+| `GET /api/analyze?symbol=EURUSD&tf=1h` | Analisa SMC lengkap + candle + MTF (`tf`: 1m, 5m, 10m, 15m, 1h, 4h, 1d, 1w) |
+| `GET /api/live?symbol=BTCUSD` | Bar 1 menit hari ini (cache 3 detik) untuk candle realtime |
 | `GET /api/screener?market=all&tf=4h` | Screener (`market`: all, forex, saham-as, saham-idx, kripto) |
 | `GET /api/direction` | Arah market + sentimen berita + event high-impact |
 | `GET /api/news?market=kripto&category=&sentiment=&q=&limit=` | Berita per pasar (terbaru dulu) |
 | `GET /api/news/sentiment?market=forex` | Ringkasan sentimen 12 jam per pasar |
-| `GET /api/quotes?market=all` | Open / last / % seluruh universe |
+| `GET /api/quotes?market=all` | Open / last / % seluruh universe + blok sektor/kategori tiap aset |
 | `GET /api/screener?market=saham-idx&scope=all&tf=1d` | SMC seluruh aset suatu pasar (`tf`: 1d atau 4h) |
 | `GET /api/fundamental` | Rilis data + prediksi + reaksi nyata + akurasi |
 | `GET /api/outlook?symbols=EURUSD,NVDA` | Outlook gabungan SMC + fundamental + berita |
@@ -137,8 +155,9 @@ Engine Python — FastAPI (engine/)
 ## Sumber data & keterbatasan
 
 - **Analisa SMC** memakai Yahoo Finance via `yfinance` (gratis, tanpa API key). Data bisa tertunda
-  tergantung bursa; emas & perak memakai kontrak futures (`GC=F`, `SI=F`) sebagai proksi XAUUSD/XAGUSD.
-  Chart SMC diperbarui tiap 60 detik.
+  tergantung bursa (kripto & forex hampir realtime; saham IDX umumnya tertunda); candle realtime di chart SMC mengikuti
+  bar 1 menit Yahoo yang diperbarui tiap ±3 detik; emas & perak memakai kontrak futures (`GC=F`, `SI=F`) sebagai proksi XAUUSD/XAGUSD.
+  Overlay SMC dihitung ulang tiap 60 detik; candle terakhir bergerak tiap ±3 detik.
 - **Harga tick realtime**: widget resmi TradingView (ticker tape, advanced chart, screener, gauge
   teknikal, heatmap, news, kalender). Widget gratis TradingView tidak bisa memuat indikator custom,
   jadi overlay SMC digambar sendiri di chart Lightweight Charts.

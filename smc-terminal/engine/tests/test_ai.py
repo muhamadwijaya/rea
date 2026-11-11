@@ -119,3 +119,27 @@ def test_all_models_failing_reports_each_attempt(rotation):
     with pytest.raises(common.AiFailed, match="a/first-70b:free \\(error 503\\)"):
         openrouter.run("s", "u", "sk-or-test")
     assert len(calls) == 4
+
+
+def _answer(direction, confidence):
+    return common.normalize({"direction": direction, "confidence": confidence, "summary": "x"})
+
+
+@pytest.mark.parametrize("direction,confidence,smc_score,status,final,signal", [
+    ("naik", 60, 60, "match", 77, "BELI"),          # agreement raises confidence (5 + 60*0.2 = 17)
+    ("turun", 85, -100, "match", 95, "JUAL"),       # capped: agreement never becomes certainty
+    ("naik", 60, -60, "conflict", 43, "NETRAL"),    # disagreement lowers it below the signal threshold
+    ("naik", 62, 8, "neutral", 62, "BELI"),         # SMC without a clear direction changes nothing
+    ("netral", 70, 80, "neutral", 70, "NETRAL"),
+    ("turun", 50, -20, "match", 59, "JUAL"),
+])
+def test_confluence_with_smc(direction, confidence, smc_score, status, final, signal):
+    c = common.confluence(_answer(direction, confidence), {"score": smc_score, "label": "x", "aligned": True})
+    assert (c["status"], c["final"], c["signal"]) == (status, final, signal)
+    assert c["base"] == confidence
+    assert c["final"] == min(common.CONFIDENCE_CAP, max(5, confidence + c["adjustment"]))
+
+
+def test_new_answer_fields_default_when_missing():
+    a = common.parse_answer('{"direction": "naik", "confidence": 55, "summary": "ok"}')
+    assert a["catalysts"] == [] and a["fundamentalView"] == ""

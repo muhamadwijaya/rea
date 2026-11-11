@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from . import instruments, screener
+from . import blocks, instruments, screener
 
 log = logging.getLogger("smc.background")
 
@@ -108,7 +108,8 @@ def _sweep_quotes() -> None:
                 if quote:
                     fresh[inst.symbol] = {
                         "symbol": inst.symbol, "name": inst.name, "market": inst.market, "assetClass": inst.asset_class,
-                        "core": inst.core, "decimals": inst.price_decimals(quote["last"]), "tv": inst.tv, **quote,
+                        "core": inst.core, "decimals": inst.price_decimals(quote["last"]), "tv": inst.tv,
+                        "block": blocks.block_of(inst), **quote,
                         "updated": int(time.time()),
                     }
         with _quotes_lock:
@@ -126,7 +127,8 @@ def quotes(market: str = "all") -> dict:
         rows = [r for r in _quotes.rows.values() if market == "all" or r["market"] == market]
         progress = _quotes.progress.to_json()
         sweeps = _quotes.sweeps
-    return {"market": market, "generatedAt": int(time.time()), "sweeps": sweeps, "progress": progress, "count": len(rows), "rows": rows}
+    return {"market": market, "generatedAt": int(time.time()), "sweeps": sweeps, "progress": progress, "count": len(rows), "rows": rows,
+            "blockOrder": blocks.BLOCK_ORDER}
 
 
 def _scan_universe(tf: str) -> None:

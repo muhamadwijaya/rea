@@ -12,7 +12,7 @@ import time
 
 from .. import instruments
 from . import claude, custom, openrouter
-from .common import SYSTEM, AiFailed, AiNotConfigured, facts, user_message
+from .common import SYSTEM, AiFailed, AiNotConfigured, confluence, facts, user_message
 
 PROVIDERS = {"openrouter": openrouter.NAME, "anthropic": claude.NAME, "custom": custom.NAME}
 ENV_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "custom": "AI_CUSTOM_API_KEY"}
@@ -30,7 +30,7 @@ def analyze(symbol: str, news: list[dict], provider: str | None = None, api_key:
         raise AiNotConfigured("Analisa AI belum aktif: masukkan OpenRouter API key di pengaturan AI (gratis di openrouter.ai/keys).")
     started = time.perf_counter()
     inst = instruments.resolve(symbol)
-    fact = facts(inst, news)
+    fact, smc = facts(inst, news)
     user = user_message(fact)
     if provider == "openrouter":
         answer = openrouter.run(SYSTEM, user, key, model)
@@ -41,8 +41,12 @@ def analyze(symbol: str, news: list[dict], provider: str | None = None, api_key:
     return {
         "symbol": inst.symbol,
         "analysis": answer.analysis,
-        "facts": {"ruleBasedOutlook": fact["ruleBasedOutlook"], "releases": len(fact["economicReleases"]),
-                  "headlines": len(fact["headlines"]), "accuracy": fact["ruleModelMeasuredAccuracy"]},
+        "confluence": confluence(answer.analysis, smc),
+        "smc": smc,
+        "facts": {"releases": len(fact["economicReleases"]), "upcoming": len(fact["upcomingEconomicEvents"]),
+                  "headlines": len(fact["headlines"]), "reports": bool(fact["companyReports"]),
+                  "performance": fact["performance"], "accuracy": fact["ruleModelMeasuredAccuracy"],
+                  "notes": fact["dataNotes"]},
         "provider": provider,
         "providerName": PROVIDERS[provider],
         "model": answer.model,

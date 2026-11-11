@@ -4,7 +4,7 @@
 
 const C = {
   bull: '#2fd28c', bear: '#ff4d5e', neu: '#f2c94c', blue: '#6b9bff', cyan: '#38d3f5', orange: '#ff9f43',
-  text: '#c3cbd8', dim: '#56627a', grid: 'rgba(28, 38, 55, .55)', bg: '#0a0e16',
+  text: '#c6d2ee', dim: '#5b6f9e', grid: 'rgba(33, 63, 128, .35)', bg: '#06122e',
 };
 
 const rgba = (hex, a) => {
@@ -32,8 +32,8 @@ export class SmcChart {
       autoSize: true,
       layout: { background: { type: 'solid', color: C.bg }, textColor: '#8592a8', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
       grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
-      rightPriceScale: { borderColor: '#1c2637', scaleMargins: { top: 0.08, bottom: 0.08 } },
-      timeScale: { borderColor: '#1c2637', timeVisible: true, secondsVisible: false, rightOffset: 18, barSpacing: 7 },
+      rightPriceScale: { borderColor: '#14306a', scaleMargins: { top: 0.08, bottom: 0.08 } },
+      timeScale: { borderColor: '#14306a', timeVisible: true, secondsVisible: false, rightOffset: 18, barSpacing: 7 },
       crosshair: { mode: LW.CrosshairMode.Normal, vertLine: { color: '#3b4a66' }, horzLine: { color: '#3b4a66' } },
     });
     this.candles = this.chart.addCandlestickSeries({
@@ -95,6 +95,30 @@ export class SmcChart {
     if (range) this.chart.timeScale().setVisibleLogicalRange(range);
     else this.chart.timeScale().setVisibleLogicalRange({ from: data.candles.length - 160, to: data.candles.length + 12 });
     this.requestDraw();
+  }
+
+  /**
+   * Merge today's 1-minute bars into the last candle of the shown timeframe (`tfSec` seconds), relative
+   * to that candle's own start so the alignment always matches the engine's bars. New periods append
+   * a candle. Returns the last candle (UTC seconds) or null.
+   */
+  live(bars, tfSec) {
+    const candles = this.data?.candles;
+    if (!candles?.length || !bars?.length) return null;
+    let last = candles[candles.length - 1];
+    for (const b of bars) {
+      if (b.t < last.t) continue;
+      if (b.t < last.t + tfSec) {
+        last.h = Math.max(last.h, b.h); last.l = Math.min(last.l, b.l); last.c = b.c;
+      } else {
+        const k = Math.floor((b.t - last.t) / tfSec);
+        last = { t: last.t + k * tfSec, o: b.o, h: b.h, l: b.l, c: b.c };
+        candles.push(last);
+        this.index.set(last.t, candles.length - 1);
+      }
+      this.candles.update({ time: localTime(last.t), open: last.o, high: last.h, low: last.l, close: last.c });
+    }
+    return last;
   }
 
   applyPlanLines() {

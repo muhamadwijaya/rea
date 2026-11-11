@@ -7,7 +7,7 @@ namespace SmcTerminal.Gateway;
 
 public static class Api
 {
-    private static readonly HashSet<string> Timeframes = new() { "15m", "1h", "4h", "1d", "1w" };
+    private static readonly HashSet<string> Timeframes = new() { "1m", "5m", "10m", "15m", "1h", "4h", "1d", "1w" };
     private static readonly HashSet<string> MarketKeys = new(Markets.All.Append("all"));
 
     public static void MapTerminalApi(this WebApplication app)
@@ -185,6 +185,12 @@ public static class Api
                 model = options.ActiveModel,
                 baseUrl = options.Provider == "custom" ? options.CustomBaseUrl : null,
             }, ct, headers);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapGet("/live", async (string symbol, EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.GetAsync($"live?symbol={Uri.EscapeDataString(symbol)}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 

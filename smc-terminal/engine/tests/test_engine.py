@@ -167,3 +167,14 @@ def test_fundamental_release_prediction_without_network(monkeypatch):
     # A second indicator released at the same time shares the reaction and is not counted twice.
     events.append({**events[0], "id": "2", "title": "Core CPI m/m", "forecast": "0.2%"})
     assert fundamental.analyze(events, news)["accuracy"]["judged"] == 1
+
+
+def test_every_instrument_has_a_map_block():
+    from app import blocks
+
+    uni = instruments.universe()
+    assert all(blocks.block_of(i) != "Lainnya" for i in uni if i.asset_class in ("us", "forex", "commodity", "index"))
+    crypto = [i for i in uni if i.asset_class == "crypto"]
+    assert sum(blocks.block_of(i) != "Lainnya" for i in crypto) >= len(crypto) - 5
+    assert blocks.block_of(instruments.find("AAPL")) == "Information Technology"  # core entry keeps the universe sector
+    assert blocks.block_of(instruments.find("EURUSD")) == "Mayor" and blocks.block_of(instruments.find("XAUUSD")) == "Logam"

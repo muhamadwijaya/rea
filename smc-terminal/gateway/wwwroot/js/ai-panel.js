@@ -1,6 +1,6 @@
 // AI analysis panel + provider settings (OpenRouter free models with automatic rotation, Claude, or any
 // OpenAI-compatible API). Shared by the FUNDAMENTAL & AI tab and the analysis side panel.
-import { api, esc, dirHex, arrow, fmtScore, timeAgo } from './util.js';
+import { api, esc, dirHex, arrow, fmtScore, fmtPct, fmtPrice, timeAgo } from './util.js';
 
 const DIR_KEY = { naik: 'bullish', turun: 'bearish', netral: 'neutral' };
 const KEY_HINT = {
@@ -24,22 +24,49 @@ function attemptsHtml(r) {
   return `<div class="ai-tries">${tries.map((a) => `<span class="${a.ok ? 'ok' : 'fail'}" title="${esc(a.reason || 'berhasil')}">${a.ok ? '✔' : '✘'} ${esc(shortModel(a.model))}${a.ok ? '' : ` · ${esc(a.reason)}`}</span>`).join('<i>→</i>')}</div>`;
 }
 
+const SIGNAL_CLASS = { BELI: 'sig-buy', JUAL: 'sig-sell', NETRAL: 'sig-neutral' };
+const STATUS_TEXT = { match: ['COCOK ✔', 'bull'], conflict: ['BERTENTANGAN ✘', 'bear'], neutral: ['NETRAL', 'neu'] };
+const list = (items) => (items?.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="dim">–</p>');
+
+function planHtml(plan, decimals) {
+  if (!plan || plan.entry == null) return '';
+  const side = plan.direction === 'bullish' ? 'BUY' : 'SELL';
+  return `<h5>PLAN SMC 4H</h5><div class="chips"><span class="chip">${side} ${esc(plan.status || '')}</span>
+    <span class="chip">entry ${fmtPrice(plan.entry, decimals)}</span><span class="chip">SL ${fmtPrice(plan.stop, decimals)}</span>
+    ${(plan.targets || []).map((t, i) => `<span class="chip">TP${i + 1} ${fmtPrice(t, decimals)}${plan.rr?.[i] ? ` · RR ${plan.rr[i]}` : ''}</span>`).join('')}</div>`;
+}
+
 export function aiResultHtml(r) {
   const a = r.analysis;
+  const c = r.confluence || { signal: 'NETRAL', final: a.confidence, base: a.confidence, adjustment: 0, status: 'neutral', note: '' };
   const dir = DIR_KEY[a.direction] || 'neutral';
+  const [statusText, statusClass] = STATUS_TEXT[c.status] || STATUS_TEXT.neutral;
+  const perf = r.facts?.performance?.returnsPct;
   return `<div class="ai-result">
-    <div class="ai-top"><span class="ai-dir" style="color:${dirHex(dir)}">${arrow(dir)} ${esc(a.direction.toUpperCase())}</span>
-      <span class="ai-conf"><b>${a.confidence}</b>/100 keyakinan</span><span class="tag ghost">${esc(a.horizon)}</span></div>
-    <div class="conf-bar"><i style="width:${a.confidence}%;background:${dirHex(dir)}"></i></div>
-    <p>${esc(a.summary)}</p>
-    <div class="ai-cols">
-      <div><h5>PENDORONG</h5><ul>${a.drivers.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
-      <div><h5>RISIKO</h5><ul>${a.risks.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+    <div class="ai-top">
+      <span class="ai-signal ${SIGNAL_CLASS[c.signal] || 'sig-neutral'}">${esc(c.signal)}</span>
+      <span class="ai-conf"><b>${c.final}</b>/100 keyakinan akhir</span><span class="tag ghost">${esc(a.horizon)}</span>
     </div>
+    <div class="conf-bar"><i style="width:${c.final}%;background:${c.signal === 'BELI' ? 'var(--go)' : c.signal === 'JUAL' ? 'var(--stop)' : 'var(--neu)'}"></i></div>
+    <div class="ai-conflu">
+      <div><span>AI · FUNDAMENTAL</span><b style="color:${dirHex(dir)}">${arrow(dir)} ${esc(a.direction.toUpperCase())} ${a.confidence}</b></div>
+      <div><span>SMC · MTF 1D/4H/1H</span><b class="${c.smcScore > 0 ? 'up' : c.smcScore < 0 ? 'down' : ''}">${esc(c.smcLabel || '–')} ${fmtScore(c.smcScore)}</b></div>
+      <div><span>KONFLUENSI</span><b><span class="tag ${statusClass}">${statusText}</span> ${c.adjustment > 0 ? '+' : ''}${c.adjustment || 0}</b></div>
+    </div>
+    <div class="note" style="margin-top:4px">${esc(c.note)} Keyakinan AI ${c.base} → akhir ${c.final} (maks. 95).</div>
+    <p>${esc(a.summary)}</p>
+    ${a.fundamentalView ? `<h5>LAPORAN · KINERJA · RENCANA</h5><p>${esc(a.fundamentalView)}</p>` : ''}
+    ${perf ? `<div class="chips">${Object.entries(perf).filter(([, v]) => v != null).map(([k, v]) => `<span class="chip">${k} <b class="${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${fmtPct(v)}</b></span>`).join('')}</div>` : ''}
+    <div class="ai-cols">
+      <div><h5>PENDORONG</h5>${list(a.drivers)}</div>
+      <div><h5>RISIKO</h5>${list(a.risks)}</div>
+    </div>
+    ${a.catalysts?.length ? `<h5>KATALIS MENDATANG</h5>${list(a.catalysts)}` : ''}
     ${a.keyLevels.length ? `<h5>LEVEL KUNCI</h5><div class="chips">${a.keyLevels.map((x) => `<span class="chip">${esc(x)}</span>`).join('')}</div>` : ''}
+    ${planHtml(r.smc?.plan4h)}
     <h5>INVALIDASI</h5><p>${esc(a.invalidation)}</p>
     ${attemptsHtml(r)}
-    <div class="note">Kualitas data: ${esc(a.dataQuality)} · fakta: ${r.facts.headlines} berita, ${r.facts.releases} rilis data, skor aturan ${fmtScore(r.facts.ruleBasedOutlook.score)} ·
+    <div class="note">Kualitas data: ${esc(a.dataQuality)} · fakta: ${r.facts.headlines} berita, ${r.facts.releases} rilis + ${r.facts.upcoming ?? 0} jadwal data ekonomi${r.facts.reports ? ', laporan emiten' : ''}${r.facts.notes?.length ? ` (${esc(r.facts.notes.join('; '))})` : ''} ·
       ${esc(r.providerName || '')} · <b>${esc(shortModel(r.model))}</b> · ${(r.usage?.input || 0) + (r.usage?.output || 0)} token · ${Math.round(r.elapsedMs / 1000)} dtk · ${timeAgo(r.generatedAt)}.
       Keyakinan menggambarkan kekuatan bukti, bukan jaminan — bukan saran investasi.</div>
   </div>`;
@@ -54,9 +81,10 @@ export function mountAiPanel(el, { initial = '' } = {}) {
         <input class="input ai-symbol" list="symbol-list" placeholder="simbol" value="${esc(initial)}" style="width:150px;min-width:0">
         <button class="btn-primary ai-run" type="button">✦ ANALISA DENGAN AI</button>
       </div>
-      <div class="ai-out"><div class="note">AI membaca fakta dari engine (harga, bias SMC multi-timeframe, rilis data ekonomi
-        beserta actual/forecast & reaksi pasar nyata, berita terkait + sentimennya, akurasi terukur model aturan) lalu menulis
-        penilaian terstruktur. Hanya fakta itu yang boleh dipakai.</div></div>
+      <div class="ai-out"><div class="note">AI menilai arah secara fundamental dari fakta nyata: berita terkait + sentimennya,
+        kalender ekonomi (rilis actual vs forecast + reaksi pasar, dan jadwal mendatang), laporan keuangan emiten, kinerja harga,
+        serta rencana & ekspektasi ke depan (jadwal laporan, konsensus, target analis). Hasilnya lalu dicocokkan dengan analisa
+        SMC multi-timeframe: <b>searah → keyakinan naik</b>, berlawanan → turun. Sinyal akhir: BELI / JUAL / NETRAL.</div></div>
       <details class="ai-settings"><summary>PENGATURAN AI (PROVIDER &amp; API KEY)</summary>
         <div class="seg ai-provider" style="margin-top:8px"></div>
         <div class="ai-opt ai-opt-openrouter toolbar"><span class="muted">MODEL</span><select class="input ai-or-model" style="flex:1;min-width:0"></select></div>
@@ -67,7 +95,7 @@ export function mountAiPanel(el, { initial = '' } = {}) {
         </div>
         <div class="toolbar">
           <input class="input ai-key" type="password" autocomplete="off" style="flex:1;min-width:0">
-          <button class="btn ai-save" type="button">SIMPAN KEY</button><button class="btn ai-del" type="button">HAPUS</button>
+          <button class="btn ai-save" type="button">SIMPAN KEY</button><button class="btn danger ai-del" type="button">HAPUS</button>
         </div>
         <div class="note ai-note"></div>
       </details>

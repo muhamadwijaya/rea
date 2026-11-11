@@ -240,6 +240,7 @@ async function loadQuotes() {
   try {
     const res = await api('/api/quotes?market=all');
     for (const r of res.rows) store.quotes.set(r.symbol, { ...store.quotes.get(r.symbol), ...r });
+    if (res.blockOrder) store.blockOrder = res.blockOrder;
     emit('quotesFull', res.rows);
   } catch { /* engine still sweeping */ } finally {
     quotesLoading = false;

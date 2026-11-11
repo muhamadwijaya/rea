@@ -10,6 +10,15 @@ const LAYERS = [
   ['swing', 'Struktur swing'], ['internal', 'Internal'], ['pivots', 'HH/HL/LH/LL'], ['ob', 'Order block'],
   ['fvg', 'FVG'], ['eq', 'EQH/EQL'], ['liquidity', 'Likuiditas'], ['zones', 'Premium/Discount'], ['ema', 'EMA 50/200'], ['plan', 'Trade plan'],
 ];
+const LIVE_POLL_MS = 3000;
+const TF_SECONDS = { '1m': 60, '5m': 300, '10m': 600, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800 };
+const clockText = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\./g, ':');
+const span = (sec) => {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
+  return `${h ? `${h}:` : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(s2).padStart(2, '0')}`;
+};
+
 const SIDE_TABS = [['bias', 'BIAS'], ['mtf', 'MTF'], ['plan', 'PLAN'], ['narasi', 'NARASI'], ['level', 'LEVEL'], ['tv', 'TV'], ['berita', 'BERITA'], ['ai', 'AI']];
 const LEGEND = [
   ['#2fd28c', 'bull'], ['#ff4d5e', 'bear'], ['#38d3f5', 'FVG bull'], ['#ff9f43', 'FVG bear'], ['#6b9bff', 'EMA50'], ['#f2c94c', 'EMA200 · likuiditas'],
@@ -46,6 +55,9 @@ export class AnalysisView {
     setInterval(() => {
       if (this.visible() && this.data && !document.hidden) this.load(this.current.symbol, this.current.tf, { silent: true });
     }, 60_000);
+    this.liveState = null;
+    setInterval(() => this.pollLive(), LIVE_POLL_MS);
+    setInterval(() => this.renderClock(), 1000);
   }
 
   $(sel) { return this.el.querySelector(sel); }
@@ -62,7 +74,7 @@ export class AnalysisView {
         </aside>
         <div class="an-center">
           <div class="toolbar">
-            <div class="seg an-tf"><button data-v="15m">15M</button><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button><button data-v="1w">1W</button></div>
+            <div class="seg an-tf"><button data-v="1m">1M</button><button data-v="5m">5M</button><button data-v="10m">10M</button><button data-v="15m">15M</button><button data-v="1h">1H</button><button data-v="4h">4H</button><button data-v="1d">1D</button><button data-v="1w">1W</button></div>
             <div class="seg an-view"><button data-v="smc" class="active">CHART SMC</button><button data-v="tv">TRADINGVIEW LIVE</button><button data-v="split">SPLIT</button></div>
             <div class="layers">
               <button class="btn layers-btn" type="button">LAYER SMC ▾</button>
@@ -74,7 +86,7 @@ export class AnalysisView {
             <span class="grow"></span><span class="time an-updated"></span>
           </div>
           <div class="an-main">
-            <div class="panel chart-shell"><div class="chart-host"></div><div class="chart-legend"></div></div>
+            <div class="panel chart-shell"><div class="chart-host"></div><div class="chart-legend"></div><div class="chart-live"></div></div>
             <div class="panel tv-live hidden"></div>
           </div>
         </div>
@@ -181,7 +193,9 @@ export class AnalysisView {
       this.data = d;
       this.current.symbol = d.instrument.symbol;
       this.ensureChart()?.setData(d, { keepRange: sameView });
+      if (!sameView) this.liveState = null;
       this.renderLegend(d);
+      if (!silent) setTimeout(() => this.pollLive(), 50);
       if (!silent || this.$('.an-card .badge')?.textContent !== d.bias.label) this.renderSide(d);
       else {
         const p = this.$('.an-head .p');
@@ -199,6 +213,47 @@ export class AnalysisView {
           <div class="note">Contoh simbol: EURUSD, XAUUSD, AAPL, NVDA, BBCA, TLKM, IHSG, BTCUSD, SOLUSD, IDX:ANTM, NYSE:KO.</div>`;
       }
     }
+  }
+
+  /** Realtime candles: today's 1-minute bars merged into the open chart every few seconds. */
+  async pollLive() {
+    if (!this.visible() || !this.data || document.hidden || this.view === 'tv' || this.liveBusy) return;
+    const { symbol, tf } = this.current;
+    this.liveBusy = true;
+    try {
+      const res = await api(`/api/live?symbol=${encodeURIComponent(symbol)}`);
+      if (symbol !== this.current.symbol || tf !== this.current.tf || !this.data) return;
+      const last = this.chart?.live(res.bars, TF_SECONDS[tf]);
+      this.liveState = { asOf: res.asOf, price: res.price, received: Date.now(), last, error: null };
+      if (last) this.renderLegend(this.data);
+    } catch (e) {
+      this.liveState = { ...(this.liveState || {}), error: e.message };
+    } finally {
+      this.liveBusy = false;
+    }
+    this.renderClock();
+  }
+
+  renderClock() {
+    const box = this.$('.chart-live');
+    if (!box || !this.visible()) return;
+    const now = new Date();
+    const tf = this.current.tf;
+    const last = this.data?.candles?.[this.data.candles.length - 1];
+    const live = this.liveState;
+    const age = live?.asOf ? now.getTime() / 1000 - live.asOf : null;
+    const fresh = age != null && age < 5 * 60;
+    const status = live?.error ? '<span class="down">● LIVE TERPUTUS</span>'
+      : !live ? '<span class="dim">● menghubungkan…</span>'
+      : fresh ? '<span class="live-on">● LIVE</span>'
+      : `<span class="flat">● PASAR TUTUP</span> <span class="dim">data terakhir ${clockText(new Date(live.asOf * 1000)).slice(0, 5)}</span>`;
+    const D = TF_SECONDS[tf];
+    const nowSec = now.getTime() / 1000;
+    // next close on the candle grid of the shown chart (stays positive while waiting for the next bar)
+    const remain = last && D <= 14400 ? last.t + Math.max(1, Math.ceil((nowSec - last.t) / D)) * D - nowSec : null;
+    const synced = live?.received ? Math.round((now.getTime() - live.received) / 1000) : null;
+    box.innerHTML = `${status}<b class="num">${clockText(now)}</b>${remain != null && fresh
+      ? `<span>candle ${esc(tf.toUpperCase())} tutup <b class="num">${span(remain)}</b></span>` : ''}${fresh && synced != null ? `<span class="dim">sinkron ${synced} dtk lalu</span>` : ''}`;
   }
 
   renderLegend(d) {

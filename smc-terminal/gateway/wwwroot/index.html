@@ -87,8 +87,13 @@
         </div>
 
         <div class="panel orbs-panel">
-          <div class="panel-head"><span class="diamond">◆</span> MARKET ORBS <span class="sub">3D · 1 filamen = 1 aset · panjang = besar gerak hari ini · <span class="up">emas naik</span> · <span class="down">biru turun</span> · seret = putar · tag berita 3 mnt</span><span class="right"><span class="time" id="orbs-status"></span></span></div>
+          <div class="panel-head"><span class="diamond">◆</span> MARKET ORBS
+            <div class="head-tabs" id="orbs-modes"><button data-mode="orbs" class="active">ORBS 3D</button><button data-mode="map">PETA ASET</button></div>
+            <span class="sub" data-for="orbs">1 filamen = 1 aset · <span class="up">emas naik</span> · <span class="down">biru turun</span> · seret = putar · scroll = zoom · klik tag = buka berita</span>
+            <span class="sub hidden" data-for="map">1 kotak = 1 aset · dikelompokkan per sektor / kategori · hover & klik</span>
+            <span class="right"><span class="time" id="orbs-status"></span></span></div>
           <div class="orbs-stage" id="orbs-stage"><canvas></canvas><div class="orb-heads"></div><div class="orb-tip hover-tip"></div></div>
+          <div class="asset-map hidden" id="asset-map"></div>
         </div>
 
         <div class="panel tabbed dash-tabs">
@@ -140,7 +145,7 @@
     <span>Data analisa: Yahoo Finance (bisa tertunda) · realtime: TradingView · berita: RSS · kalender: ForexFactory · <b>bukan saran investasi</b></span>
   </footer>
 
-  <div class="modal hidden" id="modal"><div class="modal-card"><div id="modal-text"></div><div class="modal-actions"><button class="btn" data-modal="cancel">BATAL</button><button class="btn-primary" data-modal="ok">KELUAR</button></div></div></div>
+  <div class="modal hidden" id="modal"><div class="modal-card"><div id="modal-text"></div><div class="modal-actions"><button class="btn" data-modal="cancel">BATAL</button><button class="btn-primary danger" data-modal="ok">KELUAR</button></div></div></div>
   <datalist id="symbol-list"></datalist>
   <div class="toast-zone" id="toasts"></div>
   <script type="module" src="js/app.js"></script>

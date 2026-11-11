@@ -37,6 +37,9 @@ class Timeframe:
 
 
 TIMEFRAMES: dict[str, Timeframe] = {
+    "1m": Timeframe("1m", "1M", "1m", "5d", None, 20, 10, 3),
+    "5m": Timeframe("5m", "5M", "5m", "30d", None, 30, 12, 4),
+    "10m": Timeframe("10m", "10M", "5m", "30d", "10min", 45, 12, 4),
     "15m": Timeframe("15m", "15M", "15m", "30d", None, 60, 15, 4),
     "1h": Timeframe("1h", "1H", "60m", "120d", None, 120, 12, 4),
     "4h": Timeframe("4h", "4H", "60m", "300d", "4h", 300, 10, 3),
@@ -45,6 +48,12 @@ TIMEFRAMES: dict[str, Timeframe] = {
     "4hu": Timeframe("4hu", "4H", "60m", "90d", "4h", 1800, 10, 3),
     "1w": Timeframe("1w", "1W", "1wk", "15y", None, 3600, 8, 3),
 }
+
+
+# Realtime feed for the open chart: today's 1-minute bars, refreshed every few seconds and merged by the
+# browser into the last candle of whatever timeframe is shown. Not an analysis timeframe.
+LIVE = Timeframe("live", "LIVE", "1m", "1d", None, 3, 10, 3)
+LIVE_BARS = 240
 
 
 def timeframe(key: str) -> Timeframe:
@@ -89,7 +98,7 @@ def _store(key: tuple[str, str], bars: Bars, tf: Timeframe) -> None:
     _cache[key] = (time.time() + tf.ttl, bars)
 
 
-def frame_to_bars(df: pd.DataFrame, tf: Timeframe) -> Bars:
+def frame_to_bars(df: pd.DataFrame, tf: Timeframe, min_bars: int = 30) -> Bars:
     cols = ["Open", "High", "Low", "Close"]
     if df is None or df.empty or any(c not in df.columns for c in cols):
         raise NoData("Tidak ada data harga dari sumber.")
@@ -108,7 +117,7 @@ def frame_to_bars(df: pd.DataFrame, tf: Timeframe) -> Bars:
             .dropna(subset=cols)
         )
     df = df.tail(MAX_BARS)
-    if len(df) < 30:
+    if len(df) < min_bars:
         raise NoData(f"Data terlalu sedikit ({len(df)} bar) untuk dianalisis.")
     epoch = pd.Timestamp("1970-01-01", tz="UTC")
     times = ((df.index - epoch) // pd.Timedelta(seconds=1)).to_numpy(dtype=np.int64)
@@ -215,3 +224,23 @@ def _download_part(part: list[Instrument], tf: Timeframe, out: dict[str, Bars | 
         except NoData as exc:
             out[inst.symbol] = exc
     log.info("batch %s: %d tickers in %.2fs", tf.key, len(tickers), time.perf_counter() - started)
+
+
+def live(inst: Instrument) -> dict:
+    """Latest 1-minute bars of today's session (cached for a few seconds, shared by all viewers)."""
+    key = (inst.yahoo, LIVE.key)
+    bars = _cached(key)
+    if bars is None:
+        with _lock_for(key):
+            bars = _cached(key)
+            if bars is None:
+                frame = _slice(_download([inst.yahoo], LIVE), inst.yahoo)
+                if frame is None:
+                    raise NoData(f"Yahoo Finance tidak mengembalikan data 1 menit untuk {inst.yahoo}.")
+                bars = frame_to_bars(frame, LIVE, min_bars=1)
+                _store(key, bars, LIVE)
+    n = min(len(bars), LIVE_BARS)
+    rows = [{"t": int(bars.time[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
+             "c": float(bars.close[i])} for i in range(len(bars) - n, len(bars))]
+    return {"symbol": inst.symbol, "bars": rows, "price": rows[-1]["c"], "asOf": rows[-1]["t"],
+            "fetchedAt": int(bars.fetched_at), "serverTime": int(time.time())}

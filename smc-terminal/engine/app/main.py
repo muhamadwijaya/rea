@@ -154,6 +154,11 @@ def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> 
     return ai.analyze(body.symbol, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
 
 
+@app.get("/live")
+def live(symbol: str) -> dict:
+    return market_data.live(instruments.resolve(symbol))
+
+
 @app.get("/ai/models")
 def ai_models(provider: str = "openrouter") -> dict:
     return ai.models(provider)

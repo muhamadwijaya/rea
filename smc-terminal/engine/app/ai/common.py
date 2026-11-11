@@ -12,26 +12,35 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from .. import analysis, instruments, outlook
+from .. import analysis, instruments, outlook, profile
 from ..errors import EngineError
 
-SYSTEM = """Kamu adalah analis pasar keuangan. Tugasmu menilai kemungkinan arah harga satu aset
-berdasarkan HANYA fakta JSON yang diberikan pengguna: harga, bias Smart Money Concept multi-timeframe,
-rilis data ekonomi (actual vs forecast dan reaksi pasar nyata), headline berita beserta sentimennya,
-serta akurasi terukur model aturan.
+SYSTEM = """Kamu adalah analis fundamental pasar keuangan. Tentukan arah harga satu aset (naik / turun / netral)
+berdasarkan HANYA fakta JSON yang diberikan pengguna:
+- berita terkait aset beserta sentimennya,
+- kalender ekonomi: rilis data (actual vs forecast dan reaksi pasar nyata) serta jadwal rilis mendatang,
+- laporan nyata emiten: pendapatan & laba kuartalan, kejutan EPS, valuasi, profitabilitas, utang,
+- kinerja harga nyata: return 1 minggu s/d 1 tahun, posisi terhadap high/low 52 minggu, relatif ke benchmark,
+- rencana & ekspektasi ke depan: jadwal laporan berikutnya dan konsensusnya, target harga & rekomendasi analis,
+  serta berita rencana perusahaan / kebijakan.
+Jangan memakai analisa teknikal atau Smart Money Concept: engine akan mencocokkan arahmu dengan analisa SMC
+secara terpisah, jadi penilaianmu harus independen dari chart.
 
 Aturan:
 - Jangan mengarang angka, peristiwa, atau berita yang tidak ada di fakta. Jika data kurang, katakan.
 - Pasar tidak pasti. Nilai keyakinan (0-100) harus mencerminkan kekuatan dan keselarasan bukti,
   bukan janji. Bukti saling bertentangan atau sedikit = keyakinan rendah (di bawah 55).
 - Jelaskan pendorong utama dan risiko yang bisa membatalkan skenario, rujuk fakta spesifik
-  (misal "CPI AS 0.4% vs forecast 0.3%", "CHoCH bearish 4H di 1.0850").
+  (misal "CPI AS 0.4% vs forecast 0.3%", "laba Q3 naik 9% YoY, EPS di atas konsensus 4%").
 - Tulis dalam Bahasa Indonesia yang ringkas dan profesional. Ini bukan saran investasi.
 
 Format jawaban: HANYA satu objek JSON (tanpa markdown, tanpa teks lain) dengan kunci:
 direction ("naik" | "turun" | "netral"), confidence (bilangan bulat 0-100), horizon ("intraday" |
-"1-3 hari" | "1-2 minggu"), summary (string), drivers (array string), risks (array string),
-keyLevels (array string), invalidation (string), dataQuality (string: kecukupan & kesegaran data)."""
+"1-3 hari" | "1-2 minggu"), summary (string), fundamentalView (string: ringkasan laporan, kinerja dan
+rencana ke depan), drivers (array string), risks (array string), catalysts (array string: peristiwa
+mendatang yang bisa menggerakkan harga, sertakan tanggal), keyLevels (array string: level penting dari
+fakta, mis. target analis atau high/low 52 minggu), invalidation (string), dataQuality (string:
+kecukupan & kesegaran data)."""
 
 SCHEMA = {
     "type": "object",
@@ -40,15 +49,24 @@ SCHEMA = {
         "confidence": {"type": "integer", "description": "0-100, kekuatan bukti, bukan kepastian"},
         "horizon": {"type": "string", "enum": ["intraday", "1-3 hari", "1-2 minggu"]},
         "summary": {"type": "string"},
+        "fundamentalView": {"type": "string"},
         "drivers": {"type": "array", "items": {"type": "string"}},
         "risks": {"type": "array", "items": {"type": "string"}},
+        "catalysts": {"type": "array", "items": {"type": "string"}},
         "keyLevels": {"type": "array", "items": {"type": "string"}},
         "invalidation": {"type": "string"},
         "dataQuality": {"type": "string", "description": "kecukupan dan kesegaran data yang tersedia"},
     },
-    "required": ["direction", "confidence", "horizon", "summary", "drivers", "risks", "keyLevels", "invalidation", "dataQuality"],
+    "required": ["direction", "confidence", "horizon", "summary", "fundamentalView", "drivers", "risks", "catalysts",
+                 "keyLevels", "invalidation", "dataQuality"],
     "additionalProperties": False,
 }
+
+# Confluence with SMC: the AI's fundamental call is compared with the SMC multi-timeframe bias.
+SMC_MIN_SCORE = 15  # |MTF score| below this is "no clear SMC direction"
+MAX_ADJUSTMENT = 20
+CONFIDENCE_CAP = 95  # agreement raises confidence, it never turns it into certainty
+SIGNAL_MIN_CONFIDENCE = 55
 
 
 class AiNotConfigured(EngineError):
@@ -75,37 +93,73 @@ class InvalidAnswer(ValueError):
     """The model answered, but not with a usable assessment (reason is safe to show)."""
 
 
-def facts(inst: instruments.Instrument, news: list[dict]) -> dict:
+def _event(e: dict, upcoming: bool) -> dict:
+    keys = ("title", "currency", "date", "impact", "forecast", "previous")
+    keys += ("scenario",) if upcoming else ("actual", "surprise", "prediction", "reaction", "verdict")
+    return {k: e.get(k) for k in keys if e.get(k) is not None}
+
+
+def facts(inst: instruments.Instrument, news: list[dict]) -> tuple[dict, dict]:
+    """(facts for the AI, SMC view for the confluence step). SMC is deliberately not in the AI facts."""
     view = outlook.outlook(inst, news)
     detail = analysis.to_json(analysis.run(inst, "4h"), include_series=False)
     funds = outlook.fundamentals() or {}
     currencies = {inst.symbol[:3], inst.symbol[3:]} if inst.asset_class == "forex" else {"USD"}
     if inst.market == "saham-idx":
         currencies |= {"IDR"}
-    releases = [
-        {k: e.get(k) for k in ("title", "currency", "date", "impact", "forecast", "previous", "actual", "surprise",
-                               "prediction", "reaction", "verdict", "status")}
-        for e in funds.get("events", []) if e.get("currency") in currencies and e.get("impact") in ("High", "Medium")
-    ][-20:]
+    now = time.time()
+    events = [e for e in funds.get("events", []) if e.get("currency") in currencies and e.get("impact") in ("High", "Medium")]
+    released = [_event(e, False) for e in events if e.get("status") == "released"][-12:]
+    upcoming = [_event(e, True) for e in events if e.get("status") != "released" and (e.get("ts") or 0) <= now + 7 * 86400][:12]
+    prof = profile.profile(inst)
     headlines = [
         {"time": n.get("published"), "source": n.get("source"), "title": n.get("title"),
          "sentiment": n.get("sentimentLabel"), "score": n.get("sentiment"),
          "sign": next((t.get("sign") for t in n.get("symbols", []) if t.get("symbol") == inst.symbol), 1)}
         for n in news[:25]
     ]
-    return {
-        "asset": {"symbol": inst.symbol, "name": inst.name, "market": inst.market, "price": detail["price"],
-                  "asOf": detail["asOf"]},
-        "smc4h": {"bias": detail["bias"], "zones": detail["smc"].get("zones"), "plan": detail["plan"],
-                  "narrative": detail["narrative"], "liquidity": detail["smc"]["liquidity"]},
-        "multiTimeframe": view["mtf"],
-        "ruleBasedOutlook": {k: view[k] for k in ("score", "label", "confidence", "components", "notes")},
-        "economicReleases": releases,
+    fact = {
+        "asset": {"symbol": inst.symbol, "name": inst.name, "market": inst.market, "assetClass": inst.asset_class,
+                  "price": detail["price"], "asOf": detail["asOf"]},
+        "performance": prof.get("performance"),
+        "companyReports": prof.get("reports"),
+        "economicReleases": released,
+        "upcomingEconomicEvents": upcoming,
         "currencyFundamentalScores": funds.get("currencies"),
         "ruleModelMeasuredAccuracy": funds.get("accuracy"),
+        "ruleScores": {k: v for k, v in view["components"].items() if k != "smc"},
         "headlines": headlines,
-        "now": int(time.time()),
+        "dataNotes": prof.get("notes", []),
+        "now": int(now),
     }
+    mtf = view["mtf"]
+    smc = {"score": mtf["score"], "label": mtf["label"], "aligned": mtf["aligned"],
+           "timeframes": [{"tf": t.get("tf"), "score": t.get("score"), "label": t.get("label")} for t in mtf["timeframes"]],
+           "plan4h": detail.get("plan")}
+    return fact, smc
+
+
+def confluence(answer: dict, smc: dict) -> dict:
+    """Raise the AI's confidence when its fundamental call agrees with the SMC bias, lower it on conflict."""
+    ai_dir = {"naik": 1, "turun": -1}.get(answer["direction"], 0)
+    score = float(smc.get("score") or 0)
+    smc_dir = 0 if abs(score) < SMC_MIN_SCORE else (1 if score > 0 else -1)
+    weight = round(min(MAX_ADJUSTMENT, 5 + abs(score) * 0.2))
+    base = answer["confidence"]
+    if ai_dir and smc_dir and ai_dir == smc_dir:
+        status, adj = "match", weight
+        note = f"Fundamental dan SMC searah: keyakinan naik {weight} poin."
+    elif ai_dir and smc_dir:
+        status, adj = "conflict", -weight
+        note = f"Fundamental dan SMC berlawanan: keyakinan turun {weight} poin; tunggu konfirmasi."
+    else:
+        status, adj = "neutral", 0
+        note = "SMC belum memberi arah jelas." if not smc_dir else "AI menilai netral; SMC tidak mengubah keyakinan."
+    final = max(5, min(CONFIDENCE_CAP, base + adj))
+    signal = ("BELI" if ai_dir > 0 else "JUAL") if ai_dir and final >= SIGNAL_MIN_CONFIDENCE else "NETRAL"
+    return {"status": status, "aiDirection": answer["direction"], "smcScore": round(score, 1), "smcLabel": smc.get("label"),
+            "smcAligned": bool(smc.get("aligned")), "base": base, "adjustment": adj, "final": final, "signal": signal,
+            "note": note}
 
 
 def user_message(fact_json: dict) -> str:
@@ -171,8 +225,10 @@ def normalize(raw: dict) -> dict:
         "confidence": max(0, min(100, confidence)),
         "horizon": horizon if horizon in _HORIZONS else "1-3 hari",
         "summary": summary,
+        "fundamentalView": _text(raw.get("fundamentalView")),
         "drivers": _texts(raw.get("drivers")),
         "risks": _texts(raw.get("risks")),
+        "catalysts": _texts(raw.get("catalysts")),
         "keyLevels": _texts(raw.get("keyLevels")),
         "invalidation": _text(raw.get("invalidation")) or "-",
         "dataQuality": _text(raw.get("dataQuality")) or "-",

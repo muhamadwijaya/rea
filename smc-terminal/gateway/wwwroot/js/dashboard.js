@@ -1,6 +1,7 @@
 // Dashboard: KPIs, search, five SMC checks, market orbs (all assets + floating news tags), and tabbed direction / signals / alerts / verdicts / recent analyses.
 import { $, esc, on, badge, dirClass, dirHex, fmtPrice, fmtScore, fmtTime, sparkline, timeAgo, arrow } from './util.js';
 import { Orbs } from './orbs.js';
+import { AssetMap } from './asset-map.js';
 
 
 let store;
@@ -137,6 +138,20 @@ export default {
     orbs.setQuotes(store.quotes ? [...store.quotes.values()] : []);
     orbs.addNews(store.recentNews || [], true);
     on('quotesFull', (rows) => orbs.setQuotes(rows));
+    const assetMap = new AssetMap($('#asset-map'), orbs, store);
+    window.SMC.assetMap = assetMap;
+    const setMode = (mode) => {
+      $('#orbs-modes').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+      document.querySelectorAll('.orbs-panel .panel-head .sub[data-for]').forEach((el) => el.classList.toggle('hidden', el.dataset.for !== mode));
+      $('#orbs-stage').classList.toggle('hidden', mode !== 'orbs');
+      $('#asset-map').classList.toggle('hidden', mode !== 'map');
+      if (mode === 'map') assetMap.show(); else { assetMap.hide(); orbs.start(); }
+      try { localStorage.setItem('smc.orbs.mode', mode); } catch { /* per-session only */ }
+    };
+    $('#orbs-modes').addEventListener('click', (e) => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+    let savedMode = 'orbs';
+    try { savedMode = localStorage.getItem('smc.orbs.mode') === 'map' ? 'map' : 'orbs'; } catch { /* default */ }
+    setMode(savedMode);
     on('quotes', (msg) => {
       orbs.applyCompact(msg.rows);
       const p = msg.progress || {};

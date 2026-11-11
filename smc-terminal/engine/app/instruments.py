@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -107,11 +107,17 @@ def _load(path: Path, core: bool) -> list[Instrument]:
                 decimals=entry.get("decimals"),
                 market_override=_market(entry.get("market"), entry),
                 core=core,
-                sector=entry.get("sector", "") or "",
-                group=entry.get("group", "") or "",
+                sector=_label(entry.get("sector")),
+                group=_label(entry.get("group")),
             )
         )
     return items
+
+
+def _label(value) -> str:
+    """Sector/group labels from generated data; values without any letter (e.g. a stray "`") are unknown."""
+    text = str(value or "").strip()
+    return text if any(c.isalpha() for c in text) else ""
 
 
 @lru_cache(maxsize=1)
@@ -123,9 +129,17 @@ def watchlist() -> tuple[Instrument, ...]:
 @lru_cache(maxsize=1)
 def universe() -> tuple[Instrument, ...]:
     """Every known instrument: the core watchlist first, then config/universe.json (deduplicated)."""
-    items = list(watchlist())
+    extra = _load(_config_path("SMC_UNIVERSE", "universe.json"), core=False)
+    by_key = {k: i for i in extra for k in (i.symbol, i.yahoo)}
+    items = []
+    for core in watchlist():
+        # the curated entry wins, but keeps the sector/group the generated universe knows for it
+        twin = by_key.get(core.symbol) or by_key.get(core.yahoo)
+        if twin and (not core.sector or not core.group):
+            core = replace(core, sector=core.sector or twin.sector, group=core.group or twin.group)
+        items.append(core)
     seen = {i.symbol for i in items} | {i.yahoo for i in items}
-    for inst in _load(_config_path("SMC_UNIVERSE", "universe.json"), core=False):
+    for inst in extra:
         if inst.symbol in seen or inst.yahoo in seen:
             continue
         seen.update((inst.symbol, inst.yahoo))
