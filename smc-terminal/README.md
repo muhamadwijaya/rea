@@ -213,6 +213,12 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   LOSS.
 - **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan di skala yang sama — break baru itu
   langsung punya area sendiri), harga close menembus stop, atau kedaluwarsa (mis. 30 bar). Area tetap tergambar.
+- **Satu posisi sekaligus** (per aset & timeframe): selama sebuah trade masih berjalan (sudah entry, belum TP/SL/batas
+  waktu), setup lain tidak membuka posisi — bila harga menyentuh areanya saat itu, setup batal dengan keterangan
+  *posisi lain masih berjalan* (termasuk entry di candle yang sama dengan penutupan trade sebelumnya, karena urutan di
+  dalam satu candle tidak diketahui). Berlaku di backtest, tuning, training live (lintas setting) dan jurnal live.
+  Terukur (57 aset × 15M–1D): 16.850 entry tumpang tindih diblok; 32.070 trade, win 41,8%, +0,078R/trade (sebelumnya
+  48.901 trade tumpang tindih, win 41,4%, +0,060R).
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
 - **Timeframe 5M sampai mingguan**: setiap aset dilatih terpisah di 5M, 15M, 1H, 4H, 1D dan 1W — tiap timeframe punya

@@ -361,11 +361,28 @@ def ict_grade(checks: dict) -> str:
     return "B" if core == len(ICT_CORE) - 1 else "C"
 
 
-def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None) -> list[Signal]:
+def one_at_a_time(sigs: list[Signal], held: list[tuple[float, float]] = ()) -> list[Signal]:
+    """One position at a time: a setup whose entry fills while another trade is still running (entered, not closed)
+    is not opened — cancelled with "posisi lain masih berjalan"; its area stays on the chart. A fill on the bar where
+    the running trade closes is blocked too (the order inside one bar is unknown). `held` = (opened, closed) bars of
+    positions already taken that cannot change (journal rows). Modifies and returns `sigs`."""
+    busy = -1.0  # the bar the running trade closes on (inf while it is still open)
+    for s in sorted((x for x in sigs if x.opened is not None), key=lambda x: (x.opened, x.created)):
+        if s.opened <= busy or any(a <= s.opened <= z for a, z in held):
+            s.status, s.closed, s.reason = "cancelled", s.opened, "posisi lain masih berjalan"
+            s.opened = s.exit = s.r = None
+            continue
+        busy = s.closed if s.closed is not None else math.inf
+    return sigs
+
+
+def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None,
+            one_position: bool = True) -> list[Signal]:
     """Every BOS / CHoCH of the setting's structure becomes a buy (bullish break) or sell (bearish) setup with its
     area, stop and targets — with the rule (Params.follows_rule) none is skipped. The filters of earlier versions
     (one scale, CHoCH only, trend, premium/discount, minimum reward, confluence, higher timeframes) remain for
-    research only. `align` (htf_alignment) is recorded on each signal."""
+    research only. `align` (htf_alignment) is recorded on each signal. With `one_position` (default) a setup never
+    opens while another trade is running (see one_at_a_time)."""
     o, h, l, c = bars.open, bars.high, bars.low, bars.close
     if r is None:
         r = smc.analyze(o, h, l, c, p.swing, p.internal)
@@ -455,7 +472,7 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
         if tp1 is not None:
             s.tp1, s.origin, s.ext = float(tp1), float(origin), float(p.ext)
         out.append(simulate(bars, s, against[(b.scope, d)], p.expiry, p.hold))
-    return out
+    return one_at_a_time(out) if one_position else out
 
 
 def _outside_zone(top: float, bottom: float, entry: float, d: int) -> bool:
@@ -809,7 +826,7 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
     ev = evidence(inst.symbol, tf)
     qualified_now = 1 if ev["qualified"] else 0
     quality_now = ev["winRateLow"] if ev["qualified"] else 0.0  # precision modes compare this, stamped before the outcome
-    sigs = signals(bars, p, None, htf_alignment(inst, tf, bars))
+    sigs = signals(bars, p, None, htf_alignment(inst, tf, bars), one_position=False)
     news = newsctx.score(inst.symbol)
     tf_sec = TF_SECONDS.get(tf, 3600)
     index_of = {int(t): i for i, t in enumerate(bars.time)}
@@ -821,9 +838,25 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
         since = _since(inst.symbol, tf, now)
         existing = {row[0]: row for row in db.execute(
             "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified, quality, manage, align, news, "
-            "tp1, origin, ext "
+            "tp1, origin, ext, opened_t, closed_t "
             "FROM signals "
             "WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, since - tf_sec * (p.expiry + p.hold)))}
+        # signals of an older parameter version keep their stored levels and are advanced on their own; with the
+        # positions they already took (closed rows are facts) they share the one-position rule with the new setting
+        olds, held = [], []
+        bar = lambda t: int(np.searchsorted(bars.time, t))  # noqa: E731
+        for (sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage, _a, _n,
+             tp1, origin, ext, opened_t, closed_t) in existing.values():
+            if ver == version:
+                continue
+            if status in ("pending", "open") and created_t in index_of:
+                olds.append((sid, status, first_seen, ver, created_t, simulate(bars, Signal(
+                    direction, "", "", index_of[created_t], entry, stop, target, manage=manage or "none", tp1=tp1,
+                    origin=origin if tp1 is not None else None, ext=ext if tp1 is not None and origin is not None else None),
+                    set(), p.expiry, p.hold)))
+            elif opened_t is not None and status in ("win", "loss", "timeout"):
+                held.append((bar(opened_t), bar(closed_t) if closed_t is not None else math.inf))
+        one_at_a_time(sigs + [o[-1] for o in olds], held)
         for s in sigs:
             created_t = int(bars.time[s.created])
             if created_t + tf_sec < since:
@@ -842,18 +875,12 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
             row["news"] = old[13] if old and old[13] is not None else (round(news["score"] * s.direction, 3) if news else None)
             db.execute(insert, {**row, "id": sid, "ict": json.dumps(row["ict"])})
             written += 1
-        # signals of an older parameter version keep their stored levels and are advanced on their own
-        for (sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage, _a, _n,
-             tp1, origin, ext) in existing.values():
-            if status in ("pending", "open") and ver != version and created_t in index_of:
-                s = simulate(bars, Signal(direction, "", "", index_of[created_t], entry, stop, target, manage=manage or "none",
-                                          tp1=tp1, origin=origin if tp1 is not None else None,
-                                          ext=ext if tp1 is not None and origin is not None else None), set(), p.expiry, p.hold)
-                if s.status != status:
-                    row = _row(inst, tf, ver, s, bars, created_t, first_seen, p, tf_sec)
-                    db.execute("UPDATE signals SET status=?, opened_t=?, closed_t=?, exit=?, r=?, reason=?, updated=? WHERE id=?",
-                               (row["status"], row["opened_t"], row["closed_t"], row["exit"], row["r"], row["reason"], now, sid))
-                    written += 1
+        for sid, status, first_seen, ver, created_t, s in olds:
+            if s.status != status:
+                row = _row(inst, tf, ver, s, bars, created_t, first_seen, p, tf_sec)
+                db.execute("UPDATE signals SET status=?, opened_t=?, closed_t=?, exit=?, r=?, reason=?, updated=? WHERE id=?",
+                           (row["status"], row["opened_t"], row["closed_t"], row["exit"], row["r"], row["reason"], now, sid))
+                written += 1
         db.commit()
     return written
 
@@ -1305,6 +1332,7 @@ def cancel_rules(p: Params, tf: str) -> list[str]:
         "TP1 ikut puncak baru leg BOS/CHoCH selama belum entry (setup tidak dibatalkan)" if p.target == "tp12" else
         "harga mencapai target sebelum entry (peluang terlewat)",
         "harga close menembus stop loss sebelum entry (zona tidak valid)",
+        "harga menyentuh area saat posisi lain di aset & timeframe ini masih berjalan (satu posisi sekaligus)",
         f"kedaluwarsa setelah {p.expiry} bar ({hours:.0f} jam) tanpa entry" if hours < 72 else
         f"kedaluwarsa setelah {p.expiry} bar ({hours / 24:.0f} hari) tanpa entry",
     ]

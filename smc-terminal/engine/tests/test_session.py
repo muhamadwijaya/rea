@@ -36,7 +36,7 @@ def fake_env(monkeypatch):
         rep = {"outOfSample": {"trades": 5, "wins": 3}}
         return better, rep, rep
 
-    def fake_signals(bars, p, r=None, align=None, areas=False):  # one trade every 50 candles; wins when the rr-2 setting is active
+    def fake_signals(bars, p, r=None, align=None, one_position=True):  # one trade every 50 candles; wins when the rr-2 setting is active
         return [training.Signal(1, "CHoCH", "internal", i, 1, 0.9, 1.2, status="win" if p.rr == 2.0 else "loss",
                                 r=2.0 if p.rr == 2.0 else -1.0, opened=i + 1, closed=i + 5) for i in range(10, len(bars), 50)]
 

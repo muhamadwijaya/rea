@@ -244,7 +244,7 @@ def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
     monkeypatch.setattr(training, "history", lambda i, tf, bars=None: b)
-    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None, areas=False: [early, late])
+    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None, one_position=True: [early, late])
     monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)  # no network in tests
     db = training._db()
     db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
@@ -442,3 +442,47 @@ def test_every_setup_carries_its_ict_checklist():
     assert ict["retrace"] == round((106 - 100) / 11, 3) and ict["zone"] and not ict["ote"]  # 54.5 %: discount, not OTE
     assert ict["sweep"] is False and ict["htf"] is None and ict["grade"] == "B"  # no liquidity taken before the break
     assert training.grade_metrics([s])["B"]["trades"] == 0 and training.grade_metrics([])["ICT"]["winRate"] is None
+
+
+def test_no_new_position_while_a_trade_is_running():
+    def trade(created, opened, closed, status="win", r=1.0):
+        return sig(created=created, opened=opened, closed=closed, status=status, r=r, exit=110.0)
+
+    first, inside, same_bar, after = trade(0, 5, 10), trade(3, 7, 9), trade(4, 10, 12), trade(8, 11, 15, "loss", -1.0)
+    waiting = sig(created=6)  # still pending: never blocks, never blocked
+    out = training.one_at_a_time([after, waiting, same_bar, inside, first])
+    assert [x.status for x in (first, inside, same_bar, after, waiting)] == ["win", "cancelled", "cancelled", "loss", "pending"]
+    assert inside.reason == "posisi lain masih berjalan" and (inside.opened, inside.r, inside.closed) == (None, None, 7)
+    assert training.metrics(out)["trades"] == 2
+    running, later = sig(created=0, opened=2, status="open"), trade(1, 50, 60)
+    training.one_at_a_time([running, later])
+    assert later.status == "cancelled"  # an open trade blocks everything after it
+
+
+def test_live_session_keeps_one_position_across_stretches():
+    from app import session
+    b = bars([(1, 1, 1, 1)] * 40)
+    p = training.default_params("1h")
+    early = sig(created=2, opened=3, closed=20, status="win", r=1.0)  # setting v1, still running into the next stretch
+    late = sig(created=12, opened=14, closed=18, status="loss", r=-1.0)  # setting v2
+    trades = session._trades(b, [(early, 1, 0, p), (late, 2, 1, p)], 3600)
+    assert [t["status"] for t in trades] == ["win", "cancelled"]
+    assert early.status == "win" and late.status == "loss"  # the stored stretch results stay untouched
+
+
+def test_live_journal_does_not_open_beside_a_position_of_an_older_setting(store, monkeypatch):
+    from types import SimpleNamespace
+    inst = SimpleNamespace(symbol="EURUSD", market="forex")
+    b = bars([(100, 101, 99, 100)] * 30)
+    new = sig(created=17, opened=18, closed=25, status="win", r=1.0, exit=110.0)  # the new setting's setup
+    monkeypatch.setattr(training, "active", lambda s, tf: ("asset", 2, training.default_params(tf)))
+    monkeypatch.setattr(training, "signals", lambda *a, **k: [new])
+    monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)
+    db = training._db()
+    training._since("EURUSD", "1h", 0)
+    db.execute("INSERT INTO signals(id, symbol, market, tf, version, direction, created_t, opened_t, closed_t, entry, stop, "
+               "target, status, r) VALUES ('old', 'EURUSD', 'forex', '1h', 1, 1, ?, ?, ?, 100, 95, 110, 'win', 1.0)",
+               (10 * 3600, 12 * 3600, 20 * 3600))  # version 1 held a position over bars 12–20
+    training.track(inst, "1h", b)
+    status, reason = db.execute("SELECT status, reason FROM signals WHERE version=2").fetchone()
+    assert (status, reason) == ("cancelled", "posisi lain masih berjalan")

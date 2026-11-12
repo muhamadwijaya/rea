@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from . import instruments, market_data, smc, training
 from .errors import EngineError
@@ -71,6 +71,13 @@ def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int,
             "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
             "align": s.align, "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "version": version,
             "segment": segment, "live": False, "sample": "oos", "exam": exam}
+
+
+def _trades(b: Bars, raw: list, tf_sec: int) -> list[dict]:
+    """Trades of all stretches so far, one position at a time across them (a stretch's setting may change, the rule
+    does not): `raw` holds (signal simulated on its own, version, stretch, params)."""
+    sigs = training.one_at_a_time([replace(s) for s, *_ in raw])
+    return [_trade(b, s, version, k, tf_sec, p) for s, (_, version, k, p) in zip(sigs, raw)]
 
 
 def _stats(trades: list[dict]) -> dict:
@@ -148,6 +155,7 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
     """Anchored walk-forward over `b`; `publish(trades, segments, upto)` after each stretch (None: stopped)."""
     tf_sec = training.TF_SECONDS.get(tf, 3600)
     p, version = training.default_params(tf), 1
+    raw: list = []
     trades: list[dict] = []
     segments: list[dict] = []
     for k, (a, z) in enumerate(bounds(len(b))):
@@ -160,10 +168,12 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
                      "after": report["outOfSample"], "params": asdict(best)}
             if best != p:
                 p, version = best, version + 1
-        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align) if a <= s.created < z]
-        trades += seg
+        raw += [(s, version, k, p) for s in training.signals(b, p, None, align, one_position=False) if a <= s.created < z]
+        trades = _trades(b, raw, tf_sec)
         segments.append({"index": k, "from": a, "to": z, "fromT": int(b.time[a]), "toT": int(b.time[z - 1]),
-                         "version": version, "learn": event, "stats": _stats(seg)})
+                         "version": version, "learn": event})
+        for sg in segments:  # a new stretch's trade can keep an earlier stretch's late fill from opening
+            sg["stats"] = _stats([t for t in trades if t["segment"] == sg["index"]])
         if publish:
             publish(trades, segments, z)
     return trades, segments, p, version
