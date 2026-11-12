@@ -290,6 +290,31 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
+        // Live training session: one asset trained forward through its last N candles, played on the chart.
+        api.MapGet("/training/session", async (EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.GetAsync("training/session", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapGet("/training/session/candles", async (EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.GetAsync("training/session/candles", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapPost("/training/session/start", async (SessionRequest body, EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars }, ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapPost("/training/session/stop", async (EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.PostJsonAsync("training/session/stop", new { }, ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
         api.MapGet("/benefits", async (string? market, EngineClient engine, CancellationToken ct) =>
         {
             var m = string.IsNullOrWhiteSpace(market) ? "all" : market.ToLowerInvariant();
@@ -377,6 +402,8 @@ public static class Api
     public sealed record NewsAiRequest(string Id, string? Symbol);
 
     public sealed record LabRequest(string[] Markets, string[] Tfs, int Bars);
+
+    public sealed record SessionRequest(string Symbol, string Tf, int Bars);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

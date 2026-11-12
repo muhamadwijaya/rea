@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, newsctx, outlook, screener, sentiment, training, voice
+from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, newsctx, outlook, screener, sentiment, session, training, voice
 from .errors import EngineError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -267,6 +267,32 @@ def training_lab_start(body: LabRequest) -> dict:
 @app.post("/training/lab/stop")
 def training_lab_stop() -> dict:
     return training.lab_stop()
+
+
+class SessionRequest(BaseModel):
+    symbol: str
+    tf: str = "5m"
+    bars: int = 5000
+
+
+@app.get("/training/session")
+def training_session() -> dict:
+    return session.status()
+
+
+@app.get("/training/session/candles")
+def training_session_candles() -> dict:
+    return session.candles()
+
+
+@app.post("/training/session/start")
+def training_session_start(body: SessionRequest) -> dict:
+    return session.start(body.symbol, body.tf, body.bars)
+
+
+@app.post("/training/session/stop")
+def training_session_stop() -> dict:
+    return session.stop()
 
 
 @app.get("/benefits")

@@ -471,54 +471,85 @@ const LAB_KEY = 'sharx.lab';
 const STATE_TEXT = { idle: ['SIAP', 'ghost'], running: ['BERJALAN', 'bull'], done: ['SELESAI', 'bull'], stopped: ['DIHENTIKAN', 'neu'], error: ['GAGAL', 'bear'] };
 const duration = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
 
-/** TRAINING LAB tab: train chosen markets × timeframes on N candles in the engine, at full CPU speed. */
+/** TRAINING LAB tab: a batch over chosen markets × timeframes, or one asset trained forward live on its chart. */
+// What one learning step did: data too thin, setting kept, or a new setting (with its internal test before → after)
+const learnText = (l) => (!l ? '<span class="dim">default (belum belajar)</span>'
+  : !l.after?.trades ? '<span class="dim">data belum cukup untuk belajar</span>'
+    : `${l.changed ? '<span class="up">setting baru</span>' : 'setting tetap'} <span class="dim">(uji internal ${pct(l.before?.winRate)} → ${pct(l.after?.winRate)})</span>`);
+const savedText = (sv) => (!sv ? '' : `trade disimpan ke kamus AI · setting aset ${sv.upgrade ? `<span class="up">di-upgrade ke v${sv.version}</span>` : sv.version ? `tetap v${sv.version}` : 'tetap default'}`);
+
 function mountTrainingLab(el) {
-  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000 };
+  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4 };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LAB_KEY) || '{}') }; } catch { /* per-viewer convenience only */ }
   const save = () => { try { localStorage.setItem(LAB_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
   el.innerHTML = `
     <div class="lab-ctl">
       <div class="lab-row"><span>PASAR</span><div class="lab-set" data-set="markets">${LAB_MARKETS.map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}<button data-all="markets">SEMUA</button></div></div>
+      <div class="lab-row"><span>ASET</span><select class="input lab-asset"></select><span class="dim lab-asset-note"></span></div>
       <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
-      <div class="lab-row"><span>CANDLE</span><input class="input lab-bars" type="number" min="200" max="20000" step="100" value="${prefs.bars}">
+      <div class="lab-row"><span>CANDLE</span><input class="input lab-bars" type="number" min="300" max="20000" step="100" value="${prefs.bars}">
         <span class="dim lab-hint"></span></div>
       <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
       <div class="tr-progress lab-progress"><i></i><span></span></div>
       <div class="lab-current"></div>
     </div>
-    <div class="lab-results"></div>
-    <div class="lab-mtf"></div>
-    <div class="note">Training berjalan di engine secepat CPU (ribuan candle per detik) — tidak menunggu waktu pasar. Per aset: parameter SMC diuji di
-      ${'±'}70% candle pertama dan diverifikasi di sisanya (data uji), setiap trade disimpan di kamus trade aset & timeframe itu bersama kondisi TF
-      lebih tinggi saat itu. Timeframe dilatih terpisah dengan sinyalnya sendiri; tabel multi-timeframe menunjukkan seberapa sering trade menang
-      saat TF lebih tinggi searah. Training otomatis di latar berhenti sementara selama lab berjalan. Untuk melihat chart-nya, buka LIVE CHART
-      dengan IKUTI TRAINING dan putar REPLAY ×1–×7. Tujuan 99% tetap arah perbaikan, bukan jaminan.</div>`;
+    <div class="lab-content">
+      <div class="lab-batch">
+        <div class="lab-results"></div>
+        <div class="lab-mtf"></div>
+        <div class="note">Training batch berjalan di engine secepat CPU (ribuan candle per detik) untuk semua aset pasar & timeframe terpilih; setiap trade
+          disimpan di kamus trade bersama kondisi TF lebih tinggi saat itu. Pilih satu aset di daftar ASET untuk melihat training-nya live di chart.
+          Tujuan 99% tetap arah perbaikan, bukan jaminan.</div>
+      </div>
+      <div class="lab-live hidden">
+        <div class="lab-live-bar">
+          <button class="lab-play">⏸ JEDA</button>
+          <span class="tr-speed">${SPEEDS.map((v) => `<button data-speed="${v}">×${v}</button>`).join('')}</span>
+          <button class="lab-end" title="Lompat ke candle terakhir yang sudah dilatih">⏭</button>
+          <span class="lab-live-info"></span>
+        </div>
+        <div class="chart-shell lab-chart"><div class="chart-host"></div><div class="chart-replay"></div></div>
+        <div class="lab-learn"></div>
+      </div>
+    </div>`;
   const $ = (q) => el.querySelector(q);
-  let status = null, summary = null, timer = null;
+  let status = null, summary = null, timer = null, assets = new Map();
+  // live session player
+  let sess = null, chart = null, play = null;
 
+  const single = () => Boolean(prefs.asset);
   const renderSets = () => {
+    if (single() && prefs.tfs.length > 1) prefs.tfs = [prefs.tfs[0]];
     for (const set of el.querySelectorAll('.lab-set')) {
       const chosen = prefs[set.dataset.set];
       set.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('active', chosen.includes(b.dataset.v)));
+      set.querySelector('[data-all="tfs"]')?.classList.toggle('hidden', single());
     }
     $('.lab-hint').textContent = `riwayat tersedia: ${prefs.tfs.map((t) => `${t.toUpperCase()} ${LAB_HISTORY[t]}`).join(' · ') || '–'} (bila riwayat lebih pendek, dipakai seluruhnya)`;
+    $('.lab-asset-note').textContent = single() ? 'training live 1 aset × 1 timeframe, tampil di chart' : 'semua aset pasar terpilih (batch, tanpa chart)';
   };
 
-  function render() {
+  async function loadAssets() {
+    for (const m of prefs.markets) {
+      if (assets.has(m)) continue;
+      try {
+        const r = await api(`/api/instruments?market=${m}&scope=all`);
+        assets.set(m, [...r.instruments].sort((a, b) => (b.core ? 1 : 0) - (a.core ? 1 : 0) || a.symbol.localeCompare(b.symbol)));
+      } catch { assets.set(m, []); }
+    }
+    const pick = $('.lab-asset');
+    const groups = prefs.markets.map((m) => `<optgroup label="${esc(MARKET_NAME[m] || m)}">${(assets.get(m) || []).map((i) =>
+      `<option value="${esc(i.symbol)}">${esc(i.symbol)} — ${esc(i.name || '')}</option>`).join('')}</optgroup>`).join('');
+    pick.innerHTML = `<option value="">SEMUA ASET PASAR TERPILIH (training batch)</option>${groups}`;
+    const known = prefs.markets.some((m) => (assets.get(m) || []).some((i) => i.symbol === prefs.asset));
+    if (!known) prefs.asset = '';
+    pick.value = prefs.asset;
+    renderSets();
+  }
+
+  // ------------------------------------------------------------------ batch
+  function renderBatch() {
     const st = status || { state: 'idle' };
-    const [text, cls] = STATE_TEXT[st.state] || STATE_TEXT.idle;
-    const running = st.state === 'running';
-    $('.lab-state').innerHTML = `<span class="tag ${cls}">${text}</span>${st.error ? ` <span class="down">${esc(st.error)}</span>` : ''}`;
-    $('.lab-start').disabled = running;
-    $('.lab-stop').disabled = !running;
-    const pctDone = st.progressPct ?? 0;
-    $('.lab-progress i').style.width = `${pctDone}%`;
-    const elapsed = st.startedAt ? (st.finishedAt || Date.now() / 1000) - st.startedAt : 0;
-    $('.lab-progress span').textContent = st.total ? `${st.done} / ${st.total} aset × TF · ${pctDone}% · ${duration(elapsed)}${st.skipped ? ` · ${st.skipped} tanpa cukup data` : ''}` : 'belum ada training';
-    const cur = st.current;
-    $('.lab-current').innerHTML = cur ? `Sedang: <b>${esc(cur.symbol || MARKET_NAME[cur.market] || cur.market)}</b> · ${esc(cur.tf.toUpperCase())} · ${esc(cur.stage)}${cur.bars ? ` · ${cur.bars} candle` : ''}`
-      : st.total ? `Trade data uji: <b>${st.trades}</b> · menang <b class="${st.trades && st.wins / st.trades >= 0.5 ? 'up' : 'down'}">${st.trades ? pct(st.wins / st.trades) : '–'}</b>
-        · total ${rr(st.totalR)} · upgrade SMC ${st.upgrades}` : '';
     $('.lab-results').innerHTML = st.groups?.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>TF</th><th>Aset</th><th>Candle</th><th>Trade uji</th><th>Win</th><th>Total R</th><th>Upgrade</th></tr></thead><tbody>
       ${st.groups.map((g) => `<tr><td>${esc(MARKET_NAME[g.market] || g.market)}</td><td>${esc(g.tf.toUpperCase())}</td><td>${g.assets}</td><td>${g.bars}</td><td>${g.trades}</td>
         <td class="${(g.winRate ?? (g.trades ? g.wins / g.trades : null)) >= 0.5 ? 'up' : ''}">${pct(g.winRate ?? (g.trades ? g.wins / g.trades : null))}</td><td>${rr(g.totalR)}</td><td>${g.upgrades}</td></tr>`).join('')}</tbody></table>` : '';
@@ -527,47 +558,197 @@ function mountTrainingLab(el) {
       <table class="co-table"><thead><tr><th>Kondisi saat sinyal</th><th>Trade</th><th>Win</th><th>Ekspektasi</th></tr></thead><tbody>
       ${BUCKETS.filter(([k]) => mtf.buckets[k]?.trades).map(([k, l]) => `<tr><td>${l}</td><td>${mtf.buckets[k].trades}</td><td class="${mtf.buckets[k].winRate >= 0.5 ? 'up' : 'down'}">${pct(mtf.buckets[k].winRate)}</td><td>${rr(mtf.buckets[k].expectancyR)}</td></tr>`).join('')}</tbody></table>
       <table class="co-table"><thead><tr><th>TF</th><th>Semua</th><th>TF tinggi searah</th><th>Berlawanan</th></tr></thead><tbody>
-      ${Object.entries(mtf.tfs).map(([tf, b]) => `<tr><td>${esc(tf.toUpperCase())}</td>${['all', 'aligned', 'against'].map((k) => {
-        const m = k === 'all' ? Object.values(b).reduce((a, x) => ({ trades: a.trades + x.trades, wins: a.wins + x.wins }), { trades: 0, wins: 0 }) : b[k];
+      ${Object.entries(mtf.tfs).map(([tf, bk]) => `<tr><td>${esc(tf.toUpperCase())}</td>${['all', 'aligned', 'against'].map((k) => {
+        const m = k === 'all' ? Object.values(bk).reduce((a, x) => ({ trades: a.trades + x.trades, wins: a.wins + x.wins }), { trades: 0, wins: 0 }) : bk[k];
         return `<td>${m?.trades ? `${pct(m.wins / m.trades)} <span class="dim">(${m.trades})</span>` : '–'}</td>`;
       }).join('')}</tr>`).join('')}</tbody></table>` : '';
   }
 
-  async function poll() {
-    try { status = await api('/api/training/lab'); } catch (e) { status = { ...(status || {}), error: e.message }; }
-    render();
-    clearTimeout(timer);
-    if (status?.state === 'running' && el.offsetParent !== null) timer = setTimeout(poll, 2000);
+  // ------------------------------------------------------------------ status line (batch or live)
+  function render() {
+    const live = Boolean(sess && sess.state !== 'idle' && !$('.lab-live').classList.contains('hidden'));
+    const st = live ? sess : (status || { state: 'idle' });
+    const [text, cls] = STATE_TEXT[st.state === 'loading' ? 'running' : st.state] || STATE_TEXT.idle;
+    const running = (status?.state === 'running') || sess?.state === 'loading' || sess?.state === 'running';
+    $('.lab-state').innerHTML = `<span class="tag ${cls}">${live ? 'LIVE · ' : ''}${text}</span>${st.error ? ` <span class="down">${esc(st.error)}</span>` : ''}`;
+    $('.lab-start').disabled = running;
+    $('.lab-stop').disabled = !running;
+    const elapsed = st.startedAt ? (st.finishedAt || Date.now() / 1000) - st.startedAt : 0;
+    if (live) {
+      const pctDone = st.total ? Math.round((100 * (st.computedTo || 0)) / st.total) : 0;
+      $('.lab-progress i').style.width = `${pctDone}%`;
+      $('.lab-progress span').textContent = `AI sudah belajar & trading ${st.computedTo || 0} / ${st.total || st.bars} candle · ${pctDone}% · ${duration(elapsed)}`;
+      $('.lab-current').innerHTML = `${esc(st.symbol || '')} · ${esc((st.tf || '').toUpperCase())}${st.stage ? ` · ${esc(st.stage)}` : ''}
+        · trade selesai ${st.stats?.trades ?? 0} · menang <b>${pct(st.stats?.winRate)}</b> · ${rr(st.stats?.totalR)}${st.saved ? ` · ${savedText(st.saved)}` : ''}`;
+    } else {
+      const pctDone = st.progressPct ?? 0;
+      $('.lab-progress i').style.width = `${pctDone}%`;
+      $('.lab-progress span').textContent = st.total ? `${st.done} / ${st.total} aset × TF · ${pctDone}% · ${duration(elapsed)}${st.skipped ? ` · ${st.skipped} tanpa cukup data` : ''}` : 'belum ada training';
+      const cur = st.current;
+      $('.lab-current').innerHTML = cur ? `Sedang: <b>${esc(cur.symbol || MARKET_NAME[cur.market] || cur.market)}</b> · ${esc(cur.tf.toUpperCase())} · ${esc(cur.stage)}${cur.bars ? ` · ${cur.bars} candle` : ''}`
+        : st.total ? `Trade data uji: <b>${st.trades}</b> · menang <b class="${st.trades && st.wins / st.trades >= 0.5 ? 'up' : 'down'}">${st.trades ? pct(st.wins / st.trades) : '–'}</b>
+          · total ${rr(st.totalR)} · upgrade SMC ${st.upgrades}` : '';
+      renderBatch();
+    }
   }
 
+  async function poll() {
+    try { status = await api('/api/training/lab'); } catch (e) { status = { ...(status || {}), error: e.message }; }
+    try { sess = await api('/api/training/session'); } catch { /* engine warming */ }
+    if (single() && sess?.state && sess.state !== 'idle' && sess.symbol === prefs.asset) showLive(true);  // e.g. after a reload
+    render();
+    if (sess && sess.state !== 'idle' && !$('.lab-live').classList.contains('hidden')) await feedPlayer();
+    clearTimeout(timer);
+    const busy = status?.state === 'running' || sess?.state === 'loading' || sess?.state === 'running';
+    if (busy && el.offsetParent !== null) timer = setTimeout(poll, 1000);
+  }
+
+  // ------------------------------------------------------------------ live training chart
+  function showLive(on) {
+    $('.lab-live').classList.toggle('hidden', !on);
+    $('.lab-batch').classList.toggle('hidden', on);
+  }
+
+  async function feedPlayer() {
+    if (!chart) {
+      chart = new SmcChart($('.lab-chart .chart-host'), $('.lab-chart'));
+      chart.setLayers({ ...SMC_ON, swing: true, internal: false });
+    }
+    if (!play && (sess.state === 'running' || sess.state === 'done' || sess.state === 'stopped') && sess.total) {
+      const data = await api('/api/training/session/candles');
+      if (!data.candles?.length) return;
+      const startAt = Math.min(60, data.candles.length);
+      play = { data, i: startAt, playing: true, acc: 0, last: performance.now(), raf: 0, key: `${sess.symbol}|${sess.tf}|${sess.startedAt}` };
+      chart.setData({ ...data, candles: data.candles.slice(0, startAt).map((c) => ({ ...c })) });
+      play.raf = requestAnimationFrame(tick);
+      syncPlay();
+    }
+    if (play) drawPlay();
+  }
+
+  function tick(now) {
+    if (!play) return;
+    const dt = Math.min(0.25, (now - play.last) / 1000);
+    play.last = now;
+    const limit = Math.min(play.data.candles.length, sess?.computedTo || 0);
+    if (play.playing && play.i < limit) {
+      play.acc += dt * REPLAY_BASE * prefs.speed;
+      const n = Math.floor(play.acc);
+      if (n) {
+        play.acc -= n;
+        for (let k = 0; k < n && play.i < limit; k++) chart.appendCandle({ ...play.data.candles[play.i++] });
+        drawPlay();
+      }
+    } else play.acc = 0;
+    if (play) play.raf = requestAnimationFrame(tick);
+  }
+
+  function drawPlay() {
+    const { data, i } = play;
+    const T = data.candles[i - 1].t;
+    const trades = (sess?.trades || []);
+    chart.until = T;
+    chart.setTrades({ split: null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean) });
+    const done = trades.filter((t) => t.closed_t != null && t.closed_t <= T && ['win', 'loss', 'timeout'].includes(t.status));
+    const wins = done.filter((t) => t.r > 0).length;
+    const total = done.reduce((a, t) => a + (t.r || 0), 0);
+    const segs = (sess?.segments || []).filter((sg) => sg.fromT <= T);
+    const seg = segs[segs.length - 1];
+    const learned = segs.filter((sg) => sg.learn).pop()?.learn;
+    const waiting = sess && (sess.state === 'running' || sess.state === 'loading') && i >= (sess.computedTo || 0);
+    const finished = i >= data.candles.length;
+    $('.lab-chart .chart-replay').innerHTML = `
+      <div class="rp-head"><b>TRAINING LIVE ×${prefs.speed}</b><span>${esc(sess?.symbol || '')} ${esc((sess?.tf || '').toUpperCase())}</span>
+        <span>${esc(dateText(T, sess?.tf))}</span><span class="dim">candle ${i} / ${data.candles.length}${seg ? ` · AI v${seg.version}` : ''}</span></div>
+      <div class="rp-bar"><i style="width:${((100 * i) / data.candles.length).toFixed(1)}%"></i></div>
+      <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
+        <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
+        <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span></div>
+      <div class="rp-note ${waiting ? 'flat' : 'dim'}">${waiting ? 'AI sedang belajar stretch berikutnya…'
+        : finished && sess?.state === 'done' ? `SELESAI · ${savedText(sess.saved)}`
+          : learned ? `Belajar terakhir di candle ${learned.bar}: ${learnText(learned)}`
+            : 'Fase awal: AI belum belajar (setting default)'}</div>`;
+    $('.lab-learn').innerHTML = (sess?.segments || []).length ? `<table class="co-table"><thead><tr><th>Candle</th><th>Setting</th><th>Belajar dari candle sebelumnya</th><th>Trade</th><th>Win</th><th>R</th></tr></thead><tbody>
+      ${sess.segments.map((sg) => `<tr class="${seg && sg.index === seg.index ? 'sel' : ''}"><td>${sg.from}–${sg.to}</td><td>v${sg.version}</td>
+        <td>${learnText(sg.learn)}</td>
+        <td>${sg.stats.trades}</td><td>${pct(sg.stats.winRate)}</td><td>${rr(sg.stats.totalR)}</td></tr>`).join('')}</tbody></table>` : '';
+    $('.lab-live-info').textContent = sess ? `${sess.symbol} · ${sess.tf?.toUpperCase()} · ${sess.total || sess.bars} candle` : '';
+  }
+
+  function syncPlay() {
+    el.querySelectorAll('.lab-live .tr-speed button').forEach((b) => b.classList.toggle('active', +b.dataset.speed === prefs.speed));
+    $('.lab-play').textContent = play?.playing ? '⏸ JEDA' : '▶ LANJUT';
+  }
+
+  function resetPlayer() {
+    if (play) cancelAnimationFrame(play.raf);
+    play = null;
+    if (chart) chart.until = null;
+  }
+
+  // ------------------------------------------------------------------ events
   el.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.speed) { prefs.speed = +b.dataset.speed; save(); syncPlay(); if (play) drawPlay(); return; }
+    if (b.classList.contains('lab-play')) { if (play) { play.playing = !play.playing; play.last = performance.now(); } syncPlay(); return; }
+    if (b.classList.contains('lab-end')) {
+      if (play) { const limit = Math.min(play.data.candles.length, sess?.computedTo || 0); while (play.i < limit) chart.appendCandle({ ...play.data.candles[play.i++] }); drawPlay(); }
+      return;
+    }
     const set = b.closest('.lab-set')?.dataset.set;
     if (set && b.dataset.v) {
       const list = prefs[set];
-      prefs[set] = list.includes(b.dataset.v) ? list.filter((x) => x !== b.dataset.v) : [...list, b.dataset.v];
+      if (set === 'tfs' && single()) prefs.tfs = [b.dataset.v];
+      else prefs[set] = list.includes(b.dataset.v) ? list.filter((x) => x !== b.dataset.v) : [...list, b.dataset.v];
+      if (set === 'markets') { save(); loadAssets(); return; }
     } else if (b.dataset.all) {
       const all = b.dataset.all === 'markets' ? LAB_MARKETS.map(([k]) => k) : LAB_TFS;
       prefs[b.dataset.all] = prefs[b.dataset.all].length === all.length ? [] : [...all];
+      if (b.dataset.all === 'markets') { save(); loadAssets(); return; }
     } else if (b.classList.contains('lab-start')) {
       prefs.bars = Number($('.lab-bars').value) || 5000;
       save();
-      try { status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } }); } catch (err) { status = { ...(status || {}), state: status?.state || 'idle', error: err.message }; }
+      try {
+        if (single()) {
+          resetPlayer();
+          showLive(true);
+          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars } });
+        } else {
+          showLive(false);
+          status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } });
+        }
+      } catch (err) {
+        $('.lab-state').innerHTML = `<span class="down">${esc(err.message)}</span>`;
+        return;
+      }
       render();
       poll();
       return;
     } else if (b.classList.contains('lab-stop')) {
-      try { status = await api('/api/training/lab/stop', { method: 'POST' }); } catch { /* the next poll shows it */ }
+      try {
+        if (sess?.state === 'loading' || sess?.state === 'running') sess = await api('/api/training/session/stop', { method: 'POST' });
+        else status = await api('/api/training/lab/stop', { method: 'POST' });
+      } catch { /* the next poll shows it */ }
       poll();
       return;
     }
     save();
     renderSets();
   });
+  $('.lab-asset').addEventListener('change', (e) => { prefs.asset = e.target.value; save(); renderSets(); showLive(single() && sess && sess.state !== 'idle'); });
   $('.lab-bars').addEventListener('change', (e) => { prefs.bars = Number(e.target.value) || 5000; save(); });
-  renderSets();
-  return { show(d) { summary = d; status = d.lab || status; render(); poll(); } };
+  loadAssets();
+  syncPlay();
+  return {
+    show(d) {
+      summary = d;
+      status = d.lab || status;
+      if (single() && sess?.state && sess.state !== 'idle') showLive(true);
+      render();
+      poll();
+    },
+  };
 }
 
 /** The AI TRAINING page. */

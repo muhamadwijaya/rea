@@ -195,6 +195,16 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   waktu pasar (contoh: FOREX × 5M, 17 aset × 3.000 candle selesai 57 detik) — dengan progres, aset yang sedang dilatih,
   hasil per pasar × timeframe, dan tombol STOP. Training otomatis di latar berhenti sementara selama lab berjalan. Di LIVE
   CHART, IKUTI TRAINING menampilkan aset yang sedang dilatih (dengan jumlah candle lab) dan REPLAY ×1–×7 memutarnya.
+- **Training live 1 aset**: di TRAINING LAB, setelah pasar dipilih muncul daftar ASET pasar itu. Pilih satu aset (timeframe
+  jadi satu pilihan), isi jumlah candle (mis. 5000), lalu MULAI: chart mulai dari 5000 candle ke belakang dan training
+  berjalan **maju** sampai candle terakhir, diputar ×1–×7 seperti replay. AI mulai tanpa pengetahuan (setting default),
+  lalu setiap ±10% candle belajar ulang **hanya dari candle sebelumnya** dan men-trading candle berikutnya dengan hasil
+  belajarnya (walk-forward). Setiap trade di chart diambil tanpa melihat masa depan, jadi win rate yang terbentuk adalah
+  uji yang jujur. Engine menghitung lebih cepat dari putaran chart (contoh EURUSD 15M × 3.000 candle: ±8 detik); chart
+  tidak pernah mendahului bagian yang sudah dilatih. Kotak di chart menunjukkan candle ke berapa, versi setting AI, trade
+  selesai, menang/kalah, win rate dan R; tabel di bawah menunjukkan setiap langkah belajar (data belum cukup / setting
+  tetap / setting baru, dengan uji internalnya). Selesai: aset dilatih seperti biasa pada semua candle itu dan tradenya
+  disimpan di kamus trade. "SEMUA ASET" tetap menjalankan training batch tanpa chart.
 - **Kamus trade**: setiap trade dari setting aktif tiap aset & timeframe disimpan permanen (tabel `patterns`) bersama
   kondisi saat sinyal muncul. Baris di luar jendela riwayat terbaru tetap disimpan, jadi kamus terus bertambah (mis. trade
   5M lebih lama dari 60 hari Yahoo).
@@ -302,7 +312,8 @@ Engine Python — FastAPI (engine/)
 | `GET /api/company?symbol=BBRI` | Laporan perusahaan: valuasi, analis, laba rugi/neraca/arus kas, pemegang saham |
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
 | `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h&bars=5000` | Virtual trading: akurasi, multi-timeframe, jurnal, upgrade, trade untuk live chart |
-| `GET /api/training/lab` · `POST /api/training/lab/start` `{"markets":["forex"],"tfs":["5m"],"bars":5000}` · `POST /api/training/lab/stop` | Training lab |
+| `GET /api/training/lab` · `POST /api/training/lab/start` `{"markets":["forex"],"tfs":["5m"],"bars":5000}` · `POST /api/training/lab/stop` | Training lab (batch) |
+| `GET /api/training/session` · `GET /api/training/session/candles` · `POST /api/training/session/start` `{"symbol":"EURUSD","tf":"15m","bars":5000}` · `POST /api/training/session/stop` | Training live 1 aset (walk-forward) |
 | `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["st3","stt"]}`; Piper: `id`, `en`, `engb`) |
 | `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"engine":"supertonic","voice":"M1","persona":"natural","mixed":true}` | Suara (audio/wav): Supertonic 3 atau Piper; `mixed` = frasa Inggris dibaca dalam bahasa Inggris |
 | `POST /api/ai/news` `{"id":"…","symbol":"NVDA"}` | Analisa AI satu berita (isi dari link-nya) + sinyal per timeframe yang punya momentum |

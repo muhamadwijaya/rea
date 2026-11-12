@@ -1207,6 +1207,10 @@ def _due(key: tuple[str, str], last: dict, report: dict | None, now: float) -> b
 def _tune_next() -> None:
     if _lab.get("state") == "running":
         return  # the training lab has the CPU
+    from . import session  # imported here: session imports this module
+
+    if session.running():
+        return  # so has a live training session
     with _db_lock:
         last = dict(((s, tf), lt) for s, tf, lt in _db().execute("SELECT symbol, tf, last_tuned FROM tracking"))
     now = time.time()
@@ -1321,6 +1325,10 @@ def lab_start(markets: list[str], tfs: list[str], bars: int) -> dict:
     with _lab_lock:
         if _lab.get("state") == "running":
             raise LabBusy("Training lab masih berjalan; hentikan dulu.")
+        from . import session
+
+        if session.running():
+            raise LabBusy("Training live masih berjalan; hentikan dulu.")
         plan = lab_plan(markets, tfs)
         _lab.clear()
         _lab.update({"state": "running", "markets": markets, "tfs": tfs, "bars": bars, "total": sum(len(p[2]) for p in plan),
