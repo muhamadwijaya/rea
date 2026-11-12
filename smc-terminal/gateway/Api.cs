@@ -188,6 +188,38 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
+        // One stored headline analysed before it is read aloud: the engine fetches the article from its link, the AI
+        // judges its impact (key only in a header), and every timeframe with momentum gets its own signal.
+        api.MapPost("/ai/news", async (NewsAiRequest body, NewsStore news, AiSettingsStore settings, EngineClient engine, CancellationToken ct) =>
+        {
+            if (news.Find(body.Id) is not { } item)
+            {
+                return Results.NotFound(new { error = "not_found", message = "Berita tidak ditemukan." });
+            }
+            var symbol = string.IsNullOrWhiteSpace(body.Symbol) ? item.Symbols.FirstOrDefault()?.Symbol : body.Symbol;
+            if (symbol is null)
+            {
+                return Results.BadRequest(new { error = "invalid_argument", message = "Berita ini tidak terkait aset mana pun." });
+            }
+            var context = news.Query(null, null, null, null, null, 25, 0, DateTimeOffset.UtcNow.AddHours(-48), symbol);
+            var options = settings.Options;
+            var headers = settings.GetKey(options.Provider) is { } key ? new Dictionary<string, string> { ["X-AI-Key"] = key } : null;
+            var response = await engine.PostJsonAsync("ai/news", new
+            {
+                symbol,
+                item = new
+                {
+                    title = item.Title, summary = item.Summary, link = item.Link, source = item.Source, published = item.Published,
+                    sentiment = item.Sentiment, symbols = item.Symbols.Select(t => new { symbol = t.Symbol, sign = t.Sign }),
+                },
+                news = context,
+                provider = options.Provider,
+                model = options.ActiveModel,
+                baseUrl = options.Provider == "custom" ? options.CustomBaseUrl : null,
+            }, ct, headers);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
         // Voice assistant: speech synthesis (WAV), recorded answers and model downloads go to the engine as-is.
         api.MapMethods("/voice/{**rest}", new[] { "GET", "POST" }, async (string rest, HttpContext context, EngineClient engine, CancellationToken ct) =>
         {
@@ -321,6 +353,8 @@ public static class Api
     }
 
     public sealed record AiRequest(string Symbol);
+
+    public sealed record NewsAiRequest(string Id, string? Symbol);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

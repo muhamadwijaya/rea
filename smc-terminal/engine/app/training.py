@@ -904,6 +904,40 @@ def _activity(rows: list[dict], limit: int = 20) -> list[dict]:
     return events[:limit]
 
 
+def precision_level(ev: dict) -> str | None:
+    """Highest precision mode a pair's evidence reaches (None = shadow / not proven)."""
+    if not ev.get("qualified"):
+        return None
+    return next((label for _, label, low in reversed(PRECISION_MODES) if (ev.get("winRateLow") or 0) >= low), None)
+
+
+def current_setup(inst: instruments.Instrument, tf: str, direction: int) -> dict | None:
+    """The pending or open virtual-trading setup of a pair in `direction`: the live journal's newest, else the newest
+    signal of the active setting on the analysis bars; with the evidence and precision level behind it."""
+    if tf not in TF_SECONDS or not direction:
+        return None
+    source, version, p = active(inst.symbol, tf)
+    rows = _live_rows("WHERE symbol=? AND tf=? AND direction=? AND status IN ('pending', 'open') ORDER BY created_t DESC LIMIT 1",
+                      (inst.symbol, tf, direction))
+    if rows:
+        r = rows[0]
+        setup = {"entry": r["entry"], "stop": r["stop"], "target": r["target"], "status": r["status"],
+                 "createdT": r["created_t"], "manage": r["manage"] or "none", "live": True}
+    else:
+        bars = market_data.cached(inst, tf)
+        if bars is None or len(bars) < 50:
+            return None
+        sig = next((s for s in reversed(signals(bars, p)) if s.direction == direction and s.status in ("pending", "open")), None)
+        if sig is None:
+            return None
+        setup = {"entry": sig.entry, "stop": sig.stop, "target": sig.target, "status": sig.status,
+                 "createdT": int(bars.time[sig.created]), "manage": sig.manage, "live": False}
+    risk = abs(setup["entry"] - setup["stop"])
+    ev = evidence(inst.symbol, tf)
+    return {**setup, "rr": round(abs(setup["target"] - setup["entry"]) / risk, 2) if risk else None,
+            "source": f"virtual trading v{version}", "paramSource": source, "evidence": ev, "level": precision_level(ev)}
+
+
 def cancel_rules(p: Params, tf: str) -> list[str]:
     span = TF_SECONDS.get(tf, 3600) * p.expiry
     hours = span / 3600

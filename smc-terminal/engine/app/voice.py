@@ -1,9 +1,13 @@
 """Voice for the news assistant: offline neural text-to-speech, short yes/no answers by voice, and the full
 text of a news article to read aloud.
 
-- Text-to-speech: Piper (offline, free, no usage limit). Voices: Indonesian `id_ID-news_tts-medium` and
-  English `en_US-lessac-medium`, downloaded once from the Piper voice repository and checked against their
-  published MD5 digests. Voice model licences follow their datasets (personal / non-commercial use).
+- Text-to-speech, natural (default): Supertonic 3 (Supertone; code MIT, weights BigScience OpenRAIL-M) — one
+  multilingual on-device model, so Indonesian and English are read by the same human-like voice (10 preset
+  voices). Offline, free, no usage limit. Downloaded once from a pinned Hugging Face revision, each file checked
+  against its SHA-256.
+- Text-to-speech, fallback: Piper. Voices: Indonesian `id_ID-news_tts-medium` and English
+  `en_US-lessac-medium` / `en_GB-vctk-medium`, checked against their published MD5 digests. Voice model
+  licences follow their datasets (personal / non-commercial use).
 - Speech-to-text: faster-whisper `tiny` (multilingual, offline) for the short answer after a question.
   Audio arrives as 16 kHz mono WAV from the browser and is passed to the model as samples.
 - Article text: the article page as served to a normal reader, extracted with trafilatura. Sites that
@@ -57,12 +61,40 @@ NO = {"tidak", "tdk", "nggak", "ngga", "gak", "ga", "enggak", "engga", "ndak", "
       "lewati", "lewat", "batal", "stop", "cukup", "tak", "bukan", "later", "cancel"}
 
 _lock = threading.Lock()
+# Supertonic 3 at the revision the supertonic 1.3 SDK pins; (bytes, SHA-256) per file.
+NATURAL = "st3"
+NATURAL_BASE = "https://huggingface.co/Supertone/supertonic-3/resolve/724fb5abbf5502583fb520898d45929e62f02c0b/"
+NATURAL_FILES = {
+    "config.json": (174, "4099082b107a9d4029849ac76b89eca65e03732660969c2babe5bf308c7357f2"),
+    "onnx/tts.json": (8253, "42078d3aef1cd43ab43021f3c54f47d2d75ceb4e75f627f118890128b06a0d09"),
+    "onnx/unicode_indexer.json": (277676, "9bf7346e43883a81f8645c81224f786d43c5b57f3641f6e7671a7d6c493cb24f"),
+    "onnx/duration_predictor.onnx": (3700147, "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db"),
+    "onnx/text_encoder.onnx": (36416150, "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff"),
+    "onnx/vector_estimator.onnx": (256534781, "883ac868ea0275ef0e991524dc64f16b3c0376efd7c320af6b53f5b780d7c61c"),
+    "onnx/vocoder.onnx": (101424195, "085de76dd8e8d5836d6ca66826601f615939218f90e519f70ee8a36ed2a4c4ba"),
+    "voice_styles/F1.json": (292046, "bbdec6ee00231c2c742ad05483df5334cab3b52fda3ba38e6a07059c4563dbc2"),
+    "voice_styles/F2.json": (292423, "7c722c6a72707b1a77f035d67f0d1351ba187738e06f7683e8c72b1df3477fc6"),
+    "voice_styles/F3.json": (290794, "12f6ef2573baa2defa1128069cb59f203e3ab67c92af77b42df8a0e3a2f7c6ab"),
+    "voice_styles/F4.json": (291808, "c2fa764c1225a76dfc3e2c73e8aa4f70d9ee48793860eb34c295fff01c2e032b"),
+    "voice_styles/F5.json": (291479, "45966e73316415626cf41a7d1c6f3b4c70dbc1ba2bee5c1978ef0ce33244fc8d"),
+    "voice_styles/M1.json": (291748, "e35604687f5d23694b8e91593a93eec0e4eca6c0b02bb8ed69139ab2ea6b0a5b"),
+    "voice_styles/M2.json": (292055, "b76cbf62bac707c710cf0ae5aba5e31eea1a6339a9734bfae33ab98499534a50"),
+    "voice_styles/M3.json": (290198, "ea1ac35ccb91b0d7ecad533a2fbd0eec10c91513d8951e3b25fbba99954e159b"),
+    "voice_styles/M4.json": (291522, "ca8eefad4fcd989c9379032ff3e50738adc547eeb5e221b82593a6d7b3bac303"),
+    "voice_styles/M5.json": (291469, "dd22b92740314321f8ae11c5e87f8dd60d060f15dd3a632b5adf77f471f77af2"),
+}
+NATURAL_VOICES = ("M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5")
+NATURAL_SIZE = sum(size for size, _ in NATURAL_FILES.values())
+
 _downloads: dict[str, dict] = {}
 _voices: dict[str, object] = {}
 _voice_locks: dict[str, threading.Lock] = {k: threading.Lock() for k in VOICES}
 _stt = None
 _stt_lock = threading.Lock()
 _tts_cache: OrderedDict[str, bytes] = OrderedDict()
+_natural = None
+_natural_styles: dict[str, object] = {}
+_natural_lock = threading.Lock()
 
 
 class VoiceUnavailable(EngineError):
@@ -95,6 +127,15 @@ def _voice_ready(key: str) -> bool:
     return all((_voice_dir() / (v["stem"] + ext)).exists() for ext in v["files"])
 
 
+def _natural_dir():
+    return _voice_dir() / "supertonic-3"
+
+
+def _natural_ready() -> bool:
+    root = _natural_dir()
+    return all((root / path).is_file() and (root / path).stat().st_size == size for path, (size, _) in NATURAL_FILES.items())
+
+
 def _stt_ready() -> bool:
     return any(_stt_dir().glob("**/model.bin"))
 
@@ -104,7 +145,9 @@ def status() -> dict:
         downloads = {k: dict(v) for k, v in _downloads.items()}
     return {
         "packages": {"piper": _has("piper"), "whisper": _has("faster_whisper"), "trafilatura": _has("trafilatura"),
-                     "pyworld": _has("pyworld"), "wordfreq": _has("wordfreq")},
+                     "pyworld": _has("pyworld"), "wordfreq": _has("wordfreq"), "supertonic": _has("supertonic")},
+        "natural": {"label": "Supertonic 3 — suara natural Indonesia + English", "ready": _natural_ready(),
+                    "sizeBytes": NATURAL_SIZE, "voices": list(NATURAL_VOICES), "download": downloads.get(NATURAL)},
         "tts": {k: {"label": v["label"], "ready": _voice_ready(k), "sizeBytes": sum(s for s, _ in v["files"].values()),
                     "download": downloads.get(k)} for k, v in VOICES.items()},
         "stt": {"model": f"whisper-{STT_MODEL}", "ready": _stt_ready(), "sizeBytes": STT_SIZE, "download": downloads.get("stt")},
@@ -117,13 +160,13 @@ def status() -> dict:
 def setup(items: list[str]) -> dict:
     """Start downloading the requested models (voice keys and/or "stt") in the background."""
     for item in items:
-        if item not in VOICES and item != "stt":
+        if item not in VOICES and item not in ("stt", NATURAL):
             raise VoiceUnavailable(f"Model tidak dikenal: {item}")
+        total = STT_SIZE if item == "stt" else NATURAL_SIZE if item == NATURAL else sum(s for s, _ in VOICES[item]["files"].values())
         with _lock:
             if _downloads.get(item, {}).get("status") == "downloading":
                 continue
-            _downloads[item] = {"status": "downloading", "done": 0, "total": STT_SIZE if item == "stt" else
-                                sum(s for s, _ in VOICES[item]["files"].values()), "error": None, "started": int(time.time())}
+            _downloads[item] = {"status": "downloading", "done": 0, "total": total, "error": None, "started": int(time.time())}
         threading.Thread(target=_download, args=(item,), daemon=True, name=f"voice-{item}").start()
     return status()
 
@@ -139,6 +182,8 @@ def _download(item: str) -> None:
             if not _has("faster_whisper"):
                 raise VoiceUnavailable("Paket faster-whisper belum terpasang (jalankan setup.bat).")
             _load_stt()
+        elif item == NATURAL:
+            _download_natural()
         else:
             _download_voice(item)
         _progress(item, status="ready", finished=int(time.time()))
@@ -169,6 +214,34 @@ def _download_voice(key: str) -> None:
         if digest.hexdigest() != md5:
             part.unlink(missing_ok=True)
             raise VoiceUnavailable(f"Unduhan {target.name} rusak (checksum tidak cocok); coba lagi.")
+        part.replace(target)
+
+
+def _download_natural() -> None:
+    if not _has("supertonic"):
+        raise VoiceUnavailable("Paket supertonic belum terpasang (jalankan setup.bat).")
+    root = _natural_dir()
+    done = 0
+    for path, (size, sha256) in NATURAL_FILES.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_file() and target.stat().st_size == size:
+            done += size
+            _progress(NATURAL, done=done)
+            continue
+        part = target.with_name(target.name + ".part")
+        digest = hashlib.sha256()
+        with httpx.stream("GET", NATURAL_BASE + path, follow_redirects=True, timeout=60.0) as r:
+            r.raise_for_status()
+            with open(part, "wb") as f:
+                for chunk in r.iter_bytes(1 << 16):
+                    f.write(chunk)
+                    digest.update(chunk)
+                    done += len(chunk)
+                    _progress(NATURAL, done=done)
+        if digest.hexdigest() != sha256:
+            part.unlink(missing_ok=True)
+            raise VoiceUnavailable(f"Unduhan {path} rusak (checksum tidak cocok); coba lagi.")
         part.replace(target)
 
 
@@ -345,19 +418,77 @@ def _resample(x: np.ndarray, sr: int, target: int) -> np.ndarray:
     return np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
 
 
-def speak(text: str, lang: str = "id", rate: float = 1.0, persona: str = "jarvis", mixed: bool = True) -> bytes:
+def _load_natural():
+    global _natural
+    if _natural is None:
+        try:
+            from supertonic import TTS
+        except Exception as exc:
+            raise VoiceUnavailable("Paket supertonic belum terpasang (jalankan setup.bat).") from exc
+        _natural = TTS(model_dir=_natural_dir(), auto_download=False)
+    return _natural
+
+
+def phrases(parts: list[tuple[str, str]], base: str, min_words: int = 2) -> list[tuple[str, str]]:
+    """Language runs for a multilingual voice: a lone foreign word stays inside the surrounding sentence (the model
+    reads loanwords such as "rebound" or "outlook" well in context, while one-word utterances lose the sentence's
+    intonation); phrases of `min_words` or more keep their own language ("wait and see", "the Fed")."""
+    relabelled = [(base if lang != base and len(text.split()) < min_words else lang, text) for lang, text in parts]
+    out: list[list[str]] = []
+    for lang, text in relabelled:
+        if out and out[-1][0] == lang:
+            out[-1][1] += " " + text
+        else:
+            out.append([lang, text])
+    return [(lang, text) for lang, text in out]
+
+
+def _speak_natural(parts: list[tuple[str, str]], rate: float, voice: str) -> tuple[np.ndarray, int]:
+    """Supertonic 3: every run of the text in its own language, all with the same voice."""
+    with _natural_lock:
+        tts = _load_natural()
+        name = voice if voice in NATURAL_VOICES else NATURAL_VOICES[0]
+        if name not in _natural_styles:
+            _natural_styles[name] = tts.get_voice_style(voice_name=name)
+        style, sr = _natural_styles[name], int(tts.sample_rate)
+        speed = max(0.7, min(2.0, 1.05 * rate))
+        pieces: list[np.ndarray] = []
+        previous = ""
+        for seg_lang, seg_text in parts:
+            clean = normalize(seg_text, seg_lang)
+            if not clean:
+                continue
+            wav, _ = tts.synthesize(clean, voice_style=style, lang=seg_lang, speed=speed)
+            x = _trim(np.asarray(wav, dtype=np.float64).reshape(-1), sr)
+            if pieces:  # a sentence end gets a breath, a language switch inside a sentence only a short gap
+                pieces.append(np.zeros(int(sr * (0.28 if re.search(r"[.!?]$", previous) else 0.05))))
+            pieces.append(x)
+            previous = seg_text
+    if not pieces:
+        raise VoiceUnavailable("Teks kosong.")
+    return np.concatenate(pieces), sr
+
+
+def speak(text: str, lang: str = "id", rate: float = 1.0, persona: str = "jarvis", mixed: bool = True,
+          engine: str = "piper", voice: str = "M1") -> bytes:
     """WAV of `text`. `lang` is the text's main language; with `mixed`, English words / phrases inside it are
-    read by the English voice. `persona`: "jarvis" (deep, calm AI-assistant voice) or "natural"."""
+    read in English. `engine`: "supertonic" (natural, same voice for both languages; Piper when it is not
+    installed yet) or "piper". `persona`: "jarvis" (calm AI-assistant colour) or "natural" (no effect)."""
     rate = max(0.6, min(1.8, float(rate or 1.0)))
     persona = persona if persona in PERSONAS else "jarvis"
     base = "en" if lang == "en" else "id"
     parts = segments(text, base) if mixed else [(base, text)]
-    cache_key = hashlib.sha1(f"{persona}|{rate:.2f}|{mixed}|{base}|{text}".encode()).hexdigest()
+    natural = engine == "supertonic" and _natural_ready() and _has("supertonic")
+    used = f"st3:{voice}" if natural else "piper"
+    cache_key = hashlib.sha1(f"{used}|{persona}|{rate:.2f}|{mixed}|{base}|{text}".encode()).hexdigest()
     with _lock:
         hit = _tts_cache.get(cache_key)
         if hit:
             _tts_cache.move_to_end(cache_key)
             return hit
+    if natural:
+        audio, out_sr = _speak_natural(phrases(parts, base) if mixed else parts, rate, voice)
+        return _finish(audio, out_sr, persona, cache_key)
     out_sr = 22050
     pieces: list[np.ndarray] = []
     previous = ""
@@ -377,7 +508,10 @@ def speak(text: str, lang: str = "id", rate: float = 1.0, persona: str = "jarvis
         previous = seg_text
     if not pieces:
         raise VoiceUnavailable("Teks kosong.")
-    audio = np.concatenate(pieces)
+    return _finish(np.concatenate(pieces), out_sr, persona, cache_key)
+
+
+def _finish(audio: np.ndarray, out_sr: int, persona: str, cache_key: str) -> bytes:
     if persona == "jarvis":
         audio = _ai_colour(audio, out_sr)
     buf = io.BytesIO()

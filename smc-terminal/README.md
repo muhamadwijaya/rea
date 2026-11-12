@@ -112,36 +112,48 @@ pasar; karena itu aplikasi menampilkan akurasi nyata model aturan yang diverifik
 
 Tombol **🔊** di kanan atas mengaktifkan asisten suara (pengaturan disimpan di komputer ini):
 
-1. Saat berita baru yang **terkait aset** masuk, asisten membacakan tag-nya: aset, sentimen (naik / netral / turun)
-   dan judul berita.
-2. Lalu bertanya *"Mau saya bacakan berita lengkapnya, lalu jalankan analisa AI?"*. Jawab dengan **suara** ("ya" /
-   "tidak", dikenali offline lewat mikrofon), klik **YA / TIDAK**, atau tekan **Y / N**. Tanpa jawaban = dilewati.
-3. Bila **ya**: isi berita lengkap dibacakan, sementara **analisa AI** aset itu berjalan bersamaan; setelah berita selesai,
-   **hasil AI dibacakan** (sinyal BELI / JUAL / NETRAL, keyakinan, ringkasan, pendorong, risiko, konfluensi SMC).
-4. Tombol **🔊** di setiap berita (tab BERITA) langsung membacakan berita lengkap + hasil AI tanpa bertanya.
+1. Saat berita baru yang **terkait aset** masuk, **AI menganalisanya lebih dulu** — sebelum apa pun dibacakan: engine
+   mengambil isi artikel dari **link** beritanya, dan AI menilai dampak berita itu terhadap aset (artikel = fakta utama;
+   kalender ekonomi, laporan, kinerja dan berita lain sebagai konteks). Link berita dilampirkan di hasil analisa.
+2. Arah AI dicocokkan dengan SMC **di setiap timeframe (5M, 15M, 1H, 4H, 1D)**. Timeframe hanya mendapat **sinyal sendiri**
+   (BUY/SELL, entry, stop loss, target, RR) bila punya **momentum searah**: bias SMC-nya searah (|skor| ≥ 15) dan break
+   struktur terakhirnya searah dan baru (≤ 20 bar). Setup diambil dari virtual trading timeframe itu (parameter hasil
+   tuning, dengan level presisi NORMAL/KETAT/SANGAT KETAT) atau, bila belum ada, dari plan SMC-nya. Timeframe lain
+   ditandai "belum ada momentum" atau "berlawanan" — tidak dipaksa jadi sinyal.
+3. Setelah analisa selesai baru dibacakan: sumber & judul, inti isi berita, hasil AI (sinyal, keyakinan, ringkasan) dan
+   sinyal per timeframe. Lalu asisten bertanya apakah isi lengkapnya mau dibacakan — jawab dengan **suara** ("ya" /
+   "tidak", dikenali offline), klik **YA / TIDAK**, atau tekan **Y / N**.
+4. Tombol **🔊** di setiap berita (tab BERITA) melakukan hal yang sama dan langsung membacakan isi lengkapnya.
 
-Pilihan: semua berita bertag / hanya aset inti / hanya sentimen kuat; kecepatan & volume; mikrofon on/off; suara
-Piper atau suara Windows. Bila berita datang beruntun, hanya 3 terbaru yang dibacakan (yang lebih dari 5 menit dilewati).
+Kartu asisten menampilkan link artikel, hasil AI, tabel sinyal per timeframe dan tombol DETAIL ANALISA (analisa AI
+lengkap). Tanpa AI aktif (belum ada API key) arah diambil dari sentimen berita yang ditandai, dan itu disebutkan.
+Hasil analisa satu berita disimpan 30 menit, jadi tombol 🔊 berikutnya tidak memakai kuota AI lagi.
 
-**Persona suara JARVIS** (default): gaya asisten AI orisinal — suara pria yang berat dan tenang dengan sedikit
-resonansi "AI" — bukan tiruan suara aktor mana pun. Suara Indonesia diubah ke nada pria yang dalam dengan vocoder
-WORLD (pyworld: nada ≈250 → ≈115 Hz, formant diturunkan), bahasa Inggris dibaca suara pria British (VCTK p226,
-CC BY 4.0). Persona **natural** memakai suara asli tanpa efek.
+Pilihan: semua berita bertag / hanya aset inti / hanya sentimen kuat; kecepatan & volume; mikrofon on/off; mesin suara.
+Bila berita datang beruntun, hanya 3 terbaru yang diproses (yang lebih dari 5 menit dilewati).
 
-**Bahasa Inggris tetap dibaca bahasa Inggris**: teks dipecah per kata dengan frekuensi kata EN/ID (wordfreq).
-Kata/kalimat Inggris di dalam teks Indonesia ("Saham Nvidia *rebound* di *premarket* setelah *CoreWeave* menaikkan
-*outlook*") dibacakan suara Inggris, sisanya suara Indonesia; kata yang sama umum di kedua bahasa (data, bank,
-Nvidia) dan singkatan/ticker mengikuti kalimatnya. Bisa dimatikan di pengaturan suara.
+**Suara natural — gratis, tanpa batas, offline (default)**: [Supertonic 3](https://huggingface.co/Supertone/supertonic-3)
+(Supertone; kode MIT, bobot model BigScience OpenRAIL-M) — satu model multibahasa di komputer ini, jadi bahasa Indonesia
+dan bahasa Inggris dibacakan oleh **suara yang sama** yang mirip manusia, dengan 10 pilihan suara (5 pria, 5 wanita).
+Uji pengenalan ucapan (Whisper small, kalimat berita yang sama): Supertonic 3 **0 kata salah** dalam bahasa Indonesia
+(Piper 14–19%), bahasa Inggris 0%; ±5× lebih cepat dari waktu nyata di CPU; ±400 MB, diunduh sekali dari revisi
+Hugging Face yang dipatok dan diverifikasi SHA-256 per file. Lisensi OpenRAIL-M melarang pemakaian untuk meniru suara
+orang sungguhan tanpa izin.
 
-**Suara — gratis, tanpa batas, offline**: [Piper](https://github.com/OHF-Voice/piper1-gpl) (suara neural) dengan
-suara **Indonesia** `id_ID-news_tts-medium`, **English British pria** `en_GB-vctk-medium` (persona JARVIS) dan
-**English natural** `en_US-lessac-medium` (masing-masing ±63–77 MB), serta pengenal jawaban **Whisper tiny** (±75 MB,
-via faster-whisper). Model diunduh sekali dari pengaturan suara (UNDUH YANG DIPERLUKAN),
-diverifikasi checksum, disimpan di `%LOCALAPPDATA%\SharxInvest\voices` dan `\stt`; setelah itu tidak perlu internet
-untuk suara. Paket Python-nya (`engine/requirements-voice.txt`) dipasang `setup.bat`; bila gagal, aplikasi tetap
-berjalan dan memakai suara Windows. Lisensi: Piper GPL-3.0 (dipasang terpisah, tidak dibundel); model suara Piper
-mengikuti lisensi dataset masing-masing — untuk **pemakaian pribadi / non-komersial**. Kualitas Piper "medium":
-jelas dan natural, tetapi belum sehalus suara neural berbayar.
+**Bahasa Inggris tetap dibaca bahasa Inggris**: frasa Inggris dua kata atau lebih ("wait and see", "the Fed",
+"risk-off sentiment") dibacakan dengan pelafalan Inggris oleh suara yang sama; satu kata Inggris di tengah kalimat
+Indonesia ("rebound", "outlook") dibaca di dalam kalimatnya supaya intonasi tetap alami. Pada uji 4 kalimat campuran ×
+5 kali, cara ini salah dengar 9,7% kata, dibanding 17% bila dipecah per kata atau dibaca seluruhnya sebagai Indonesia.
+
+**Persona JARVIS** (opsional): suara pilihan ditambah warna suara asisten AI (resonansi halus, pantulan pendek) — gaya
+orisinal, bukan tiruan suara aktor mana pun.
+
+**Cadangan: [Piper](https://github.com/OHF-Voice/piper1-gpl)** (GPL-3.0, dipasang terpisah) dengan suara Indonesia
+`id_ID-news_tts-medium`, English `en_GB-vctk-medium` / `en_US-lessac-medium` (model untuk pemakaian pribadi), dan
+suara Windows bila paket suara belum terpasang. Pengenal jawaban: **Whisper tiny** (±75 MB, faster-whisper). Semua
+model diunduh sekali dari pengaturan suara (UNDUH YANG DIPERLUKAN), disimpan di `%LOCALAPPDATA%\SharxInvest\voices`
+dan `\stt`; setelah itu tidak perlu internet untuk suara. Paket Python-nya (`engine/requirements-voice.txt`) dipasang
+`setup.bat`.
 
 **Isi berita lengkap** diambil dari halaman artikel seperti pembaca biasa (trafilatura). Situs yang menolak pembaca
 otomatis (HTTP 403/429, verifikasi bot, paywall) dan tautan Google News tidak diakali: asisten mengatakannya lalu
@@ -250,8 +262,9 @@ Engine Python — FastAPI (engine/)
 | `GET /api/company?symbol=BBRI` | Laporan perusahaan: valuasi, analis, laba rugi/neraca/arus kas, pemegang saham |
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
 | `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade, trade untuk live chart |
-| `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["id","en","stt"]}`) |
-| `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"persona":"jarvis","mixed":true}` | Suara Piper (audio/wav); `mixed` = kata Inggris dibaca suara Inggris |
+| `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["st3","stt"]}`; Piper: `id`, `en`, `engb`) |
+| `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"engine":"supertonic","voice":"M1","persona":"natural","mixed":true}` | Suara (audio/wav): Supertonic 3 atau Piper; `mixed` = frasa Inggris dibaca dalam bahasa Inggris |
+| `POST /api/ai/news` `{"id":"…","symbol":"NVDA"}` | Analisa AI satu berita (isi dari link-nya) + sinyal per timeframe yang punya momentum |
 | `POST /api/voice/stt` (audio/wav 16 kHz) | Kenali jawaban singkat → `{"text","intent":"yes|no|null"}` |
 | `GET /api/news/article?id=…` | Isi lengkap berita (atau ringkasan + alasan) |
 | `GET /api/screener?market=all&tf=4h` | Screener (`market`: all, forex, saham-as, saham-idx, kripto) |

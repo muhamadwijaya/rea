@@ -805,7 +805,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .va-pop .input { width: 100%; }
 .va-range { display: grid; grid-template-columns: 70px 1fr 48px; align-items: center; gap: 8px; }
 .va-model { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
-.va-card { position: fixed; right: 18px; bottom: 34px; z-index: 70; width: 420px; background: rgba(3, 45, 80, .97); border: 1px solid var(--go); border-radius: 6px; box-shadow: 0 0 24px rgba(153, 255, 0, .25), var(--shadow); padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.va-card { position: fixed; right: 18px; bottom: 34px; z-index: 70; width: 500px; max-height: calc(100vh - 140px); overflow: auto; background: rgba(3, 45, 80, .97); border: 1px solid var(--go); border-radius: 6px; box-shadow: 0 0 24px rgba(153, 255, 0, .25), var(--shadow); padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
 .va-head { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: .12em; }
 .va-head b { color: var(--go); }
 .va-state { color: var(--muted); letter-spacing: .04em; margin-left: auto; text-transform: lowercase; }
@@ -820,6 +820,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .va-mic { color: var(--go); font-weight: 700; }
 .va-level { display: block; height: 4px; background: rgba(255, 255, 255, .08); border-radius: 2px; overflow: hidden; margin-top: 5px; }
 .va-level b { display: block; height: 100%; width: 0; background: var(--go); transition: width .08s; }
+.va-news { display: flex; flex-direction: column; gap: 6px; }
+.va-src { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.va-src a { color: var(--accent-2); text-decoration: none; }
+.va-src a:hover { text-decoration: underline; }
+.va-tf { width: 100%; border-collapse: collapse; font-size: 11px; }
+.va-tf th { text-align: left; color: var(--muted); font-weight: 600; font-size: 9.5px; letter-spacing: .08em; padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.va-tf td { padding: 3px 4px; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+.va-detail { border-top: 1px solid var(--line); padding-top: 6px; }
+.va-busy { color: var(--text-2); }
 .va-result { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .ai-signal.sm { font-size: 13px; padding: 1px 8px; }
 .va-speak { background: none; border: 1px solid var(--line-2); border-radius: 3px; color: var(--go); cursor: pointer; font-size: 11px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; }

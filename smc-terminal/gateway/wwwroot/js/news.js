@@ -95,7 +95,7 @@ export class NewsView {
     return `<article class="news-item ${fresh ? 'fresh' : ''}">
       <div class="when"><b>${fmtTime(i.published)}</b>${timeAgo(i.published)}</div>
       <div>
-        <h4><button class="va-speak" data-speak="${esc(i.id)}" title="Bacakan berita lengkap + analisa AI">🔊</button><a href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a></h4>
+        <h4><button class="va-speak" data-speak="${esc(i.id)}" title="Analisa AI dulu (isi dari link berita, sinyal per timeframe), lalu bacakan berita lengkap">🔊</button><a href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a></h4>
         ${i.summary ? `<p>${esc(i.summary)}</p>` : ''}
         <div class="meta">
           <span class="tag ${c}" title="${esc((i.terms || []).join(', '))}">${esc((i.sentimentLabel || 'neutral').toUpperCase())}${score}</span>

@@ -1,22 +1,49 @@
-// News voice assistant. When a headline tagged to an asset arrives it is read aloud (asset, sentiment,
-// title), then the assistant asks whether to read the full article. The answer can be spoken ("ya" /
-// "tidak", recognised offline), clicked, or typed (Y / N). On "ya" the article is read in full and an AI
-// analysis of the asset runs at the same time; its result is read aloud afterwards.
+// News voice assistant. When a headline tagged to an asset arrives, the AI analyses it first: the engine fetches
+// the article from its link, the AI judges its impact on the asset (the link is attached to the analysis), and
+// every timeframe with momentum in that direction gets its own signal (entry / SL / TP). Only then is it read
+// aloud: headline, the article's lead, the AI result and the signals per timeframe; then the assistant asks
+// whether to read the whole article. The answer can be spoken ("ya" / "tidak", recognised offline), clicked,
+// or typed (Y / N). The 🔊 button of a headline does the same and reads the whole article without asking.
 //
-// Voices: Piper neural voices served by the engine (offline, free, no limit) — Indonesian and English —
-// with the Windows / browser voices as fallback or by choice. Settings are per device (localStorage).
+// Voices: Supertonic 3 (natural, Indonesian + English in one voice) or Piper, both offline, free and without
+// limit, served by the engine; the Windows / browser voices as fallback or by choice. Settings per device.
 import { api, esc, on } from './util.js';
+import { aiResultHtml } from './ai-panel.js';
 
 const KEY = 'sharx.voice';
-const DEFAULTS = { enabled: false, scope: 'all', listen: true, engine: 'piper', persona: 'jarvis', mixed: true, browserVoice: '', rate: 1.0, volume: 1.0 };
-const PERSONA_MODELS = { jarvis: ['id', 'engb', 'stt'], natural: ['id', 'en', 'stt'] };
+const SETTINGS_VERSION = 2;  // v2: the natural Supertonic voice became the default
+const DEFAULTS = { enabled: false, scope: 'all', listen: true, engine: 'supertonic', voice: 'M1', persona: 'natural', mixed: true, browserVoice: '', rate: 1.0, volume: 1.0, version: SETTINGS_VERSION };
+const ENGINE_MODELS = { supertonic: () => ['st3', 'stt'], piper: (persona) => (persona === 'jarvis' ? ['id', 'engb', 'stt'] : ['id', 'en', 'stt']) };
+const NATURAL_VOICES = [['M1', 'Pria 1'], ['M2', 'Pria 2'], ['M3', 'Pria 3'], ['M4', 'Pria 4'], ['M5', 'Pria 5'], ['F1', 'Wanita 1'], ['F2', 'Wanita 2'], ['F3', 'Wanita 3'], ['F4', 'Wanita 4'], ['F5', 'Wanita 5']];
+const TF_NAME = { '5m': '5 menit', '15m': '15 menit', '1h': '1 jam', '4h': '4 jam', '1d': 'harian' };
+const TF_STATUS = { signal: null, against: ['berlawanan', 'down'], no_momentum: ['belum ada momentum', 'dim'], neutral: ['netral', 'dim'], error: ['data tidak tersedia', 'dim'] };
+const LEAD_CHARS = 420;
 const MAX_QUEUE = 3;
 const STALE_MS = 5 * 60 * 1000;
 const ANSWER_MS = 8000;
 const SCOPES = [['all', 'Semua berita yang terkait aset'], ['core', 'Hanya aset inti (watchlist)'], ['strong', 'Hanya sentimen kuat']];
 
 function loadSettings() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { ...DEFAULTS }; }
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { /* per-session only */ }
+  if (saved.version !== SETTINGS_VERSION) {  // earlier versions defaulted to Piper / JARVIS: move to the natural voice once
+    saved = { ...saved, engine: saved.engine === 'browser' ? 'browser' : 'supertonic', persona: 'natural', version: SETTINGS_VERSION };
+  }
+  return { ...DEFAULTS, ...saved };
+}
+
+// Prices for the Indonesian voice: no thousands separator, decimal comma ("1,0845" is read "satu koma ...").
+const spokenPrice = (v, decimals) => (v == null ? '' : Number(v).toFixed(Math.min(6, Math.max(0, decimals ?? 2))).replace('.', ','));
+
+/** First sentences of a text, up to about `max` characters. */
+function lead(text, max) {
+  const parts = String(text || '').match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g) || [];
+  let out = '';
+  for (const p of parts) {
+    if (out && (out + p).length > max) break;
+    out += p;
+  }
+  return out.trim();
 }
 function saveSettings(s) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* per-session only */ }
@@ -65,16 +92,21 @@ class Speaker {
     if ('speechSynthesis' in window) speechSynthesis.cancel();
   }
 
-  piperReady(lang) {
-    const tts = this.a.status?.tts;
-    if (this.a.settings.engine !== 'piper' || !this.a.status?.packages?.piper) return false;
-    return lang === 'en' ? Boolean(tts?.engb?.ready || tts?.en?.ready) : Boolean(tts?.id?.ready);
+  /** The engine can speak this language: the natural voice, or Piper (also the engine's fallback for it). */
+  serverReady(lang) {
+    const st = this.a.status;
+    const engine = this.a.settings.engine;
+    if (engine === 'browser' || !st) return false;
+    if (engine === 'supertonic' && st.natural?.ready && st.packages?.supertonic) return true;
+    if (!st.packages?.piper) return false;
+    return lang === 'en' ? Boolean(st.tts?.engb?.ready || st.tts?.en?.ready) : Boolean(st.tts?.id?.ready);
   }
 
   async fetchWav(text, lang) {
     const res = await fetch('/api/voice/tts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, lang, rate: this.a.settings.rate, persona: this.a.settings.persona, mixed: this.a.settings.mixed }),
+      body: JSON.stringify({ text, lang, rate: this.a.settings.rate, persona: this.a.settings.persona, mixed: this.a.settings.mixed,
+        engine: this.a.settings.engine, voice: this.a.settings.voice }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `HTTP ${res.status}`);
     return res.blob();
@@ -96,7 +128,7 @@ class Speaker {
     const token = this.token;
     const parts = chunks(text);
     if (!parts.length) return true;
-    if (!this.piperReady(lang)) return this.browserSay(parts, lang, token, onPart);
+    if (!this.serverReady(lang)) return this.browserSay(parts, lang, token, onPart);
     try {
       let next = this.fetchWav(parts[0], lang);
       for (let i = 0; i < parts.length; i++) {
@@ -107,7 +139,7 @@ class Speaker {
       }
       return token === this.token;
     } catch (e) {
-      this.a.note(`Suara Piper tidak tersedia (${e.message}); memakai suara Windows.`);
+      this.a.note(`Suara offline tidak tersedia (${e.message}); memakai suara Windows.`);
       return this.browserSay(parts, lang, token, onPart);
     }
   }
@@ -224,6 +256,7 @@ export class VoiceAssistant {
       if (b.dataset.va === 'stop') this.stop();
       if (b.dataset.va === 'open' && this.current?.link) window.open(this.current.link, '_blank', 'noopener');
       if (b.dataset.va === 'analysis' && this.current?.symbol) window.SMC.openAnalysis(this.current.symbol);
+      if (b.dataset.va === 'detail') this.card.querySelector('.va-detail')?.classList.toggle('hidden');
     });
     this.renderToggle();
   }
@@ -253,24 +286,29 @@ export class VoiceAssistant {
       <label class="check"><input type="checkbox" data-k="listen" ${s.listen ? 'checked' : ''}> Jawab dengan suara ("ya" / "tidak") lewat mikrofon</label>
       <h5>SUARA</h5>
       <select class="input" data-k="engine">
-        <option value="piper" ${s.engine === 'piper' ? 'selected' : ''}>Piper — suara neural offline (gratis, tanpa batas)</option>
+        <option value="supertonic" ${s.engine === 'supertonic' ? 'selected' : ''}>Supertonic 3 — suara natural mirip manusia, Indonesia + English satu suara</option>
+        <option value="piper" ${s.engine === 'piper' ? 'selected' : ''}>Piper — suara neural ringan</option>
         <option value="browser" ${s.engine === 'browser' ? 'selected' : ''}>Suara Windows / browser</option>
       </select>
-      ${s.engine === 'piper' ? `<select class="input" data-k="persona">
-        <option value="jarvis" ${s.persona === 'jarvis' ? 'selected' : ''}>Persona JARVIS — asisten AI, suara berat & tenang, English aksen British</option>
-        <option value="natural" ${s.persona === 'natural' ? 'selected' : ''}>Persona natural — suara asli tanpa efek</option>
+      ${s.engine === 'supertonic' ? `<select class="input" data-k="voice">${NATURAL_VOICES.map(([k, l]) => `<option value="${k}" ${s.voice === k ? 'selected' : ''}>Suara ${l} (${k})</option>`).join('')}</select>` : ''}
+      ${s.engine !== 'browser' ? `<select class="input" data-k="persona">
+        <option value="natural" ${s.persona === 'natural' ? 'selected' : ''}>Natural — suara asli tanpa efek</option>
+        <option value="jarvis" ${s.persona === 'jarvis' ? 'selected' : ''}>JARVIS — warna suara asisten AI${s.engine === 'piper' ? ', English aksen British' : ''}</option>
       </select>
-      <label class="check"><input type="checkbox" data-k="mixed" ${s.mixed ? 'checked' : ''}> Kata / kalimat bahasa Inggris dibacakan dengan suara Inggris</label>
-      ${s.persona === 'jarvis' && pkg.pyworld === false ? '<div class="note down">Paket pyworld belum terpasang — persona JARVIS memakai suara asli. Jalankan setup.bat lagi.</div>' : ''}` : ''}
+      <label class="check"><input type="checkbox" data-k="mixed" ${s.mixed ? 'checked' : ''}> Frasa bahasa Inggris dibacakan dengan pelafalan Inggris</label>
+      ${s.engine === 'piper' && s.persona === 'jarvis' && pkg.pyworld === false ? '<div class="note down">Paket pyworld belum terpasang — persona JARVIS memakai suara asli. Jalankan setup.bat lagi.</div>' : ''}` : ''}
       ${s.engine === 'browser' ? `<select class="input" data-k="browserVoice"><option value="">Otomatis</option>${voices.map((v) => `<option ${v.name === s.browserVoice ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>` : ''}
       <label class="va-range">Kecepatan <input type="range" min="0.7" max="1.5" step="0.05" data-k="rate" value="${s.rate}"><b>${Number(s.rate).toFixed(2)}×</b></label>
       <label class="va-range">Volume <input type="range" min="0.1" max="1" step="0.05" data-k="volume" value="${s.volume}"><b>${Math.round(s.volume * 100)}%</b></label>
       <h5>MODEL (SEKALI UNDUH, DISIMPAN DI KOMPUTER INI)</h5>
-      ${pkg.piper === false || pkg.whisper === false ? '<div class="note down">Paket suara belum terpasang — jalankan setup.bat lagi. Sementara memakai suara Windows.</div>' : ''}
-      ${model('id', 'Suara Indonesia', st?.tts?.id)}${model('engb', 'Suara English British pria (JARVIS)', st?.tts?.engb)}${model('en', 'Suara English natural', st?.tts?.en)}${model('stt', 'Pengenal jawaban (Whisper)', st?.stt)}
+      ${(s.engine === 'supertonic' && pkg.supertonic === false) || (s.engine === 'piper' && pkg.piper === false) || pkg.whisper === false
+        ? '<div class="note down">Paket suara belum terpasang — jalankan setup.bat lagi. Sementara memakai suara Windows.</div>' : ''}
+      ${s.engine === 'supertonic' ? model('st3', 'Suara natural Supertonic 3 (ID + EN)', st?.natural) : ''}
+      ${s.engine === 'piper' ? `${model('id', 'Suara Indonesia', st?.tts?.id)}${model('engb', 'Suara English British pria (JARVIS)', st?.tts?.engb)}${model('en', 'Suara English natural', st?.tts?.en)}` : ''}
+      ${model('stt', 'Pengenal jawaban (Whisper)', st?.stt)}
       <div class="toolbar"><button class="btn" data-act="dl-all">UNDUH YANG DIPERLUKAN</button><button class="btn" data-act="test">TES SUARA</button></div>
-      <div class="note">Semua suara diproses offline di komputer ini. Model suara Piper untuk pemakaian pribadi (lisensi dataset suara).
-        Tombol Y / N di keyboard juga bisa menjawab.</div>
+      <div class="note">Semua suara diproses offline di komputer ini, gratis dan tanpa batas. Supertonic 3: kode MIT, bobot model
+        OpenRAIL-M (dilarang dipakai untuk meniru suara orang sungguhan). Model Piper untuk pemakaian pribadi. Tombol Y / N di keyboard juga bisa menjawab.</div>
       <div class="note va-note"></div>`;
   }
 
@@ -289,14 +327,14 @@ export class VoiceAssistant {
     const dl = e.target.closest('[data-dl]');
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (dl || act === 'dl-all') {
-      const items = dl ? [dl.dataset.dl] : PERSONA_MODELS[this.settings.persona] || PERSONA_MODELS.jarvis;
+      const items = dl ? [dl.dataset.dl] : (ENGINE_MODELS[this.settings.engine] || ENGINE_MODELS.supertonic)(this.settings.persona);
       try {
         this.status = await api('/api/voice/setup', { json: { items } });
       } catch (err) { this.note(err.message); }
       this.renderSettings();
       this.pollDownloads();
     }
-    if (act === 'test') this.speak('Selamat malam. Saya asisten berita SHARX INVEST. Saham Nvidia rebound di premarket setelah CoreWeave menaikkan outlook pendapatan. Sentimen naik.');
+    if (act === 'test') this.speak('Selamat malam. Saya asisten berita SHARX INVEST. Investor masih wait and see menjelang keputusan the Fed, sementara saham Nvidia rebound di premarket. Sentimen naik.');
   }
 
   async refreshStatus() {
@@ -309,7 +347,7 @@ export class VoiceAssistant {
       await sleep(1500);
       await this.refreshStatus();
       const st = this.status;
-      const busy = [st?.tts?.id, st?.tts?.engb, st?.tts?.en, st?.stt].some((m) => m?.download?.status === 'downloading');
+      const busy = [st?.natural, st?.tts?.id, st?.tts?.engb, st?.tts?.en, st?.stt].some((m) => m?.download?.status === 'downloading');
       if (!busy) return;
     }
   }
@@ -423,67 +461,94 @@ export class VoiceAssistant {
     return s > 0.15 ? 'naik' : s < -0.15 ? 'turun' : 'netral';
   }
 
+  /** The news analysis in the card: article (with its link), AI result and the signal of every timeframe. */
+  renderNews(item, r) {
+    const decimals = this.store.quotes?.get(r?.symbol)?.decimals;
+    const art = r?.article || { title: item.title, link: item.link, fullText: false };
+    const a = r?.analysis;
+    const c = r?.confluence;
+    const price = (v) => (v == null ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: Math.min(6, decimals ?? 4) }));
+    const rows = (r?.timeframes || []).map((t) => {
+      const st = TF_STATUS[t.status];
+      const s = t.setup;
+      const side = t.direction === 'bullish' ? '<span class="tag bull">BUY</span>' : '<span class="tag bear">SELL</span>';
+      const cell = t.status === 'signal'
+        ? (s?.entry != null ? `${side} <span class="num">${price(s.entry)}</span> · SL <span class="num">${price(s.stop)}</span> · TP <span class="num">${price(s.target)}</span>${s.rr ? ` <span class="dim">RR ${s.rr}</span>` : ''}`
+          : `${side} <span class="dim">tunggu zona entry</span>`)
+        : `<span class="${st?.[1] || 'dim'}">${esc(st?.[0] || t.status)}</span>`;
+      return `<tr><td><b>${esc(t.tf.toUpperCase())}</b></td><td class="${t.smcScore > 0 ? 'up' : t.smcScore < 0 ? 'down' : ''}">${t.smcScore ?? '–'}</td><td>${cell}</td>
+        <td>${t.status === 'signal' ? `<span class="tag ${s?.level ? 'bull' : 'ghost'}">${esc(s?.level || (s?.source?.startsWith('plan') ? 'PLAN SMC' : 'BAYANGAN'))}</span>` : ''}</td></tr>`;
+    }).join('');
+    this.cardLine(`<div class="va-news">
+      <div class="va-src"><span><span class="tag info">ARTIKEL</span> <a href="${esc(art.link || '#')}" target="_blank" rel="noopener">${esc(art.title || item.title)} ↗</a></span>
+        <span class="dim">${art.fullText ? 'isi lengkap dianalisa' : `hanya judul & ringkasan${art.reason ? ` (${esc(art.reason)})` : ''}`}</span></div>
+      ${a ? `<div class="va-result"><span class="ai-signal sm ${c.signal === 'BELI' ? 'sig-buy' : c.signal === 'JUAL' ? 'sig-sell' : 'sig-neutral'}">${esc(c.signal)}</span>
+          <b>${c.final}/100</b><span class="dim">${esc(a.horizon)} · ${esc(String(r.model || '').replace(/:free$/, ''))}</span><p>${esc(a.summary)}</p></div>`
+        : `<div class="note ${r?.failed ? 'down' : 'flat'}">${r?.failed ? `Analisa gagal: ${esc(r.failed)}` : `Analisa AI tidak tersedia${r?.aiError ? `: ${esc(r.aiError.message)}` : ''} — arah dari sentimen berita: <b>${esc((r?.direction || 'netral').toUpperCase())}</b>`}</div>`}
+      ${rows ? `<table class="va-tf"><thead><tr><th>TF</th><th>SMC</th><th>Sinyal (bila ada momentum)</th><th>Presisi</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+      ${a ? `<div class="va-detail hidden">${aiResultHtml(r)}</div>` : ''}
+    </div>`);
+  }
+
+  /** What is read after the article: the AI verdict, then each timeframe's signal. */
+  speech(item, r) {
+    const name = this.names(item) || r?.symbol || '';
+    const a = r?.analysis;
+    const c = r?.confluence;
+    const verdict = a
+      ? `Analisa AI untuk ${name}: sinyal ${c.signal.toLowerCase()}, keyakinan ${c.final} persen, untuk ${a.horizon}. ${a.summary}`
+      : r?.failed ? `Analisa tidak berhasil. ${r.failed}.`
+        : `Analisa AI tidak tersedia. Arah dari sentimen berita: ${r?.direction || 'netral'}.`;
+    const decimals = this.store.quotes?.get(r?.symbol)?.decimals;
+    const tfs = (r?.timeframes || []).map((t) => {
+      const when = TF_NAME[t.tf] || t.tf;
+      if (t.status === 'signal') {
+        const s = t.setup;
+        const side = t.direction === 'bullish' ? 'beli' : 'jual';
+        if (s?.entry == null) return `${when}: ${side}, tunggu zona entry.`;
+        return `${when}: ${side}, entry ${spokenPrice(s.entry, decimals)}, stop loss ${spokenPrice(s.stop, decimals)}, target ${spokenPrice(s.target, decimals)}${s.level ? `, presisi ${s.level.toLowerCase()}` : ''}.`;
+      }
+      return t.status === 'against' ? `${when}: berlawanan.` : t.status === 'no_momentum' ? `${when}: belum ada momentum.` : '';
+    }).filter(Boolean);
+    return { verdict, signals: tfs.length ? `Sinyal per timeframe. ${tfs.join(' ')}` : '' };
+  }
+
   async handle(item, direct) {
     const lang = item.lang === 'en' ? 'en' : 'id';
     const symbol = item.symbols?.[0]?.symbol;
-    if (!direct) {
-      this.showCard(item, 'membacakan tag berita');
-      this.cardLine(`Sentimen <b class="${this.tone(item) === 'naik' ? 'up' : this.tone(item) === 'turun' ? 'down' : 'flat'}">${this.tone(item).toUpperCase()}</b>`);
-      if (!(await this.speak(`Berita baru untuk ${this.names(item)}. Sentimen ${this.tone(item)}.`))) return;
-      if (!(await this.speak(item.title, lang))) return;
-      if (!(await this.speak('Mau saya bacakan berita lengkapnya, lalu jalankan analisa AI? Jawab ya atau tidak.'))) return;
-      const choice = await this.ask();
-      if (choice !== 'yes') { this.hideCard(); return; }
-    } else {
-      this.showCard(item, 'menyiapkan');
-    }
-    // full article + AI analysis in parallel
-    const analysis = symbol ? api('/api/ai/analyze', { json: { symbol } })
-      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e })) : Promise.resolve(null);
-    this.cardState('mengambil isi berita');
+    this.showCard(item, 'AI menganalisa berita');
+    this.cardLine('<span class="va-busy">Mengambil isi berita dari link dan menjalankan analisa AI sebelum dibacakan…</span>');
     this.cardActions('<button class="btn" data-va="open">BUKA BERITA ↗</button><button class="btn danger" data-va="stop">STOP</button>');
-    let article;
-    try { article = await api(`/api/news/article?id=${encodeURIComponent(item.id)}`); } catch (e) { article = { text: `${item.title}. ${item.summary || ''}`, source: 'summary', reason: e.message }; }
+    let r = null;
+    if (symbol) {
+      try { r = await api('/api/ai/news', { json: { id: item.id, symbol } }); } catch (e) { r = { failed: e.message, symbol }; }
+    }
     if (this.cancelled) return;
-    if (article.source !== 'article') {
-      this.cardLine(`<span class="flat">Isi lengkap tidak tersedia: ${esc(article.reason || '')}. Membacakan ringkasan.</span>`);
-      if (!(await this.speak(`Isi lengkap tidak bisa diambil, ${article.reason || 'situs tidak mengizinkan'}. Saya bacakan ringkasannya.`))) return;
-    }
-    this.cardState('membacakan berita');
-    const ok = await this.speaker.say(article.text, lang, (i, n) => this.cardLine(`Membacakan bagian ${i} dari ${n}${article.truncated ? ' (dipotong untuk artikel sangat panjang)' : ''}`));
-    if (!ok || this.cancelled) return;
-    if (!symbol) { this.hideCard(); return; }
-    this.cardState('analisa AI');
-    this.cardLine('Menunggu hasil analisa AI…');
-    let waited = false;
-    const timer = setTimeout(() => { waited = true; this.speak('Analisa AI masih berjalan, mohon tunggu.'); }, 1500);
-    const res = await analysis;
-    clearTimeout(timer);
-    if (waited) await sleep(200);
-    if (this.cancelled || !res) return;
-    if (!res.ok) {
-      this.cardLine(`<span class="down">Analisa AI gagal: ${esc(res.e.message)}</span>`);
-      await this.speak(`Analisa AI tidak berhasil. ${res.e.message}`);
-      return;
-    }
-    const r = res.r;
-    const a = r.analysis;
-    const c = r.confluence || { signal: 'NETRAL', final: a.confidence };
-    this.cardLine(`<div class="va-result"><span class="ai-signal sm ${c.signal === 'BELI' ? 'sig-buy' : c.signal === 'JUAL' ? 'sig-sell' : 'sig-neutral'}">${esc(c.signal)}</span>
-      <b>${c.final}/100</b> <span class="dim">${esc(a.horizon)} · ${esc(r.model || '')}</span><p>${esc(a.summary)}</p></div>`);
-    this.cardActions('<button class="btn" data-va="analysis">BUKA ANALISA</button><button class="btn" data-va="open">BUKA BERITA ↗</button><button class="btn danger" data-va="stop">TUTUP</button>');
+    this.renderNews(item, r);
+    this.cardActions(`${r?.analysis ? '<button class="btn" data-va="detail">DETAIL ANALISA</button>' : ''}<button class="btn" data-va="analysis">BUKA CHART</button>
+      <button class="btn" data-va="open">BUKA BERITA ↗</button><button class="btn danger" data-va="stop">STOP</button>`);
+    this.cardState('membacakan');
+    const { verdict, signals } = this.speech(item, r);
+    // headline, then the article's lead (the whole article from a 🔊 button), then the analysis
+    if (!(await this.speak(`Berita${item.source ? ` dari ${item.source}` : ''} untuk ${this.names(item) || symbol || 'pasar'}.`))) return;
+    if (!(await this.speak(item.title, lang))) return;
+    const full = String(r?.article?.text || item.summary || '').replace(item.title, '').replace(/^[.\s]+/, '').trim();
+    const first = direct ? full : lead(full, LEAD_CHARS);
+    const progress = (i, n) => this.cardState(`membacakan isi ${i}/${n}`);
+    if (first && !(await this.speaker.say(first, lang, progress))) return;
     this.cardState('membacakan hasil AI');
-    const name = this.names(item) || symbol;
-    const text = [
-      `Hasil analisa AI untuk ${name}: sinyal ${c.signal.toLowerCase()}, keyakinan ${c.final} persen, untuk ${a.horizon}.`,
-      a.summary,
-      a.drivers?.length ? `Pendorong utama: ${a.drivers.slice(0, 2).join('. ')}.` : '',
-      a.risks?.length ? `Risiko: ${a.risks.slice(0, 2).join('. ')}.` : '',
-      c.note || '',
-      'Ini bukan saran investasi.',
-    ].filter(Boolean).join(' ');
-    await this.speak(text);
-    this.cardState('selesai');
+    if (!(await this.speak(verdict))) return;
+    if (signals && !(await this.speak(signals))) return;
+    if (!(await this.speak('Ini bukan saran investasi.'))) return;
+    const rest = full.slice(first.length).trim();
+    if (!direct && r?.article?.fullText && rest.length > 80) {
+      if (!(await this.speak('Mau saya bacakan isi berita lengkapnya? Jawab ya atau tidak.'))) return;
+      if ((await this.ask()) === 'yes') {
+        this.cardState('membacakan isi lengkap');
+        await this.speaker.say(rest, lang, progress);
+      }
+    }
+    if (!this.cancelled) this.cardState('selesai');
   }
 
   /** Waits for "ya" / "tidak": spoken (offline recognition), clicked or typed; no answer = no. */

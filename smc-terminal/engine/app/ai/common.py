@@ -23,6 +23,10 @@ berdasarkan HANYA fakta JSON yang diberikan pengguna:
 - kinerja harga nyata: return 1 minggu s/d 1 tahun, posisi terhadap high/low 52 minggu, relatif ke benchmark,
 - rencana & ekspektasi ke depan: jadwal laporan berikutnya dan konsensusnya, target harga & rekomendasi analis,
   serta berita rencana perusahaan / kebijakan.
+Jika fakta berisi focusArticle (berita yang sedang dibahas: judul, sumber, waktu, link dan isinya), nilai
+terutama dampak berita itu terhadap aset — arah, seberapa kuat dan berapa lama — dengan fakta lain sebagai
+konteks, dan jelaskan di summary bagaimana berita itu menggerakkan aset. Bila isi lengkap tidak tersedia
+(fullText false), nilai dari judul dan ringkasannya saja dan sebutkan keterbatasan itu di dataQuality.
 Jangan memakai analisa teknikal atau Smart Money Concept: engine akan mencocokkan arahmu dengan analisa SMC
 secara terpisah, jadi penilaianmu harus independen dari chart.
 
@@ -99,8 +103,9 @@ def _event(e: dict, upcoming: bool) -> dict:
     return {k: e.get(k) for k in keys if e.get(k) is not None}
 
 
-def facts(inst: instruments.Instrument, news: list[dict]) -> tuple[dict, dict]:
-    """(facts for the AI, SMC view for the confluence step). SMC is deliberately not in the AI facts."""
+def facts(inst: instruments.Instrument, news: list[dict], focus: dict | None = None) -> tuple[dict, dict]:
+    """(facts for the AI, SMC view for the confluence step). SMC is deliberately not in the AI facts.
+    `focus`: one article the analysis is about (title, source, published, link, text, fullText)."""
     view = outlook.outlook(inst, news)
     detail = analysis.to_json(analysis.run(inst, "4h"), include_series=False)
     funds = outlook.fundamentals() or {}
@@ -132,6 +137,8 @@ def facts(inst: instruments.Instrument, news: list[dict]) -> tuple[dict, dict]:
         "dataNotes": prof.get("notes", []),
         "now": int(now),
     }
+    if focus:
+        fact["focusArticle"] = focus
     horizons = {}
     for horizon, tfs in analysis.HORIZON_TIMEFRAMES.items():
         mtf = view["mtf"] if tfs == ("1d", "4h", "1h") else analysis.mtf(inst, tfs)

@@ -166,12 +166,29 @@ def ai_analyze(body: AiRequest, x_ai_key: str | None = Header(default=None)) -> 
     return ai.analyze(body.symbol, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
 
 
+class NewsAiRequest(BaseModel):
+    symbol: str
+    item: dict
+    news: list[dict] = Field(default_factory=list, max_length=200)
+    provider: str = "openrouter"
+    model: str | None = Field(default=None, max_length=200)
+    baseUrl: str | None = Field(default=None, max_length=500)
+
+
+@app.post("/ai/news")
+def ai_news(body: NewsAiRequest, x_ai_key: str | None = Header(default=None)) -> dict:
+    """One article analysed before it is read aloud (key in the X-AI-Key header, never logged)."""
+    return ai.analyze_news(body.symbol, body.item, body.news, body.provider, x_ai_key, body.model, body.baseUrl)
+
+
 class TtsRequest(BaseModel):
     text: str = Field(max_length=5000)
     lang: str = "id"  # main language of the text
     rate: float = 1.0
     persona: str = "jarvis"  # "jarvis" | "natural"
-    mixed: bool = True  # English words / phrases inside Indonesian text read by the English voice
+    mixed: bool = True  # English words / phrases inside Indonesian text read in English
+    engine: str = "piper"  # "supertonic" (natural, Indonesian + English in one voice) | "piper"
+    voice: str = Field(default="M1", max_length=8)  # Supertonic voice style
 
 
 class VoiceSetupRequest(BaseModel):
@@ -196,7 +213,8 @@ def voice_setup(body: VoiceSetupRequest) -> dict:
 
 @app.post("/voice/tts")
 def voice_tts(body: TtsRequest) -> Response:
-    return Response(content=voice.speak(body.text, body.lang, body.rate, body.persona, body.mixed), media_type="audio/wav")
+    return Response(content=voice.speak(body.text, body.lang, body.rate, body.persona, body.mixed, body.engine, body.voice),
+                    media_type="audio/wav")
 
 
 @app.post("/voice/stt")

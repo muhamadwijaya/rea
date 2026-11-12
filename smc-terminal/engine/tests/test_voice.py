@@ -62,3 +62,31 @@ def test_jarvis_revoicing_lowers_pitch_into_the_male_range():
         return float(np.median(f[f > 0]))
 
     assert 100 <= f0(y) <= 140 and f0(x) > 200
+
+
+def test_natural_voice_keeps_lone_english_words_in_the_sentence_and_phrases_in_english():
+    parts = [("id", "Saham Nvidia"), ("en", "rebound"), ("id", "di"), ("en", "premarket"), ("id", "setelah"),
+             ("en", "wait and see"), ("id", "menjelang data.")]
+    assert voice.phrases(parts, "id") == [("id", "Saham Nvidia rebound di premarket setelah"), ("en", "wait and see"),
+                                          ("id", "menjelang data.")]
+
+
+def test_natural_voice_files_are_pinned_and_checked():
+    assert voice.NATURAL_BASE.startswith("https://huggingface.co/Supertone/supertonic-3/resolve/")
+    assert len(voice.NATURAL_BASE.rsplit("/", 2)[-2]) == 40  # a commit, not a moving branch
+    assert all(len(sha) == 64 and size > 0 for size, sha in voice.NATURAL_FILES.values())
+    assert {f"voice_styles/{v}.json" for v in voice.NATURAL_VOICES} <= set(voice.NATURAL_FILES)
+
+
+def test_natural_engine_is_used_when_installed_and_piper_otherwise(monkeypatch):
+    calls = []
+    monkeypatch.setattr(voice, "_tts_cache", voice.OrderedDict())
+    monkeypatch.setattr(voice, "_has", lambda m: True)
+    monkeypatch.setattr(voice, "_natural_ready", lambda: True)
+    monkeypatch.setattr(voice, "_speak_natural", lambda parts, rate, v: calls.append((parts, v)) or (np.zeros(4410), 44100))
+    data = voice.speak("Halo pasar.", "id", 1.0, "natural", True, "supertonic", "F2")
+    assert calls and calls[0][1] == "F2" and wave.open(io.BytesIO(data)).getframerate() == 44100
+    monkeypatch.setattr(voice, "_natural_ready", lambda: False)
+    monkeypatch.setattr(voice, "_voice_key", lambda lang, persona: None)
+    with pytest.raises(voice.VoiceUnavailable):  # not installed yet: the Piper path, which reports what is missing
+        voice.speak("Halo lagi.", "id", 1.0, "natural", True, "supertonic", "F2")
