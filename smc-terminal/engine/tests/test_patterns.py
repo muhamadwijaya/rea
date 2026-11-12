@@ -25,7 +25,7 @@ SHAPES = [
 
 def found(points):
     o, h, l, c = zigzag(points)
-    return patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2), (o, h, l, c)
+    return patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2.0), (o, h, l, c)
 
 
 @pytest.mark.parametrize("kind,direction,points", SHAPES, ids=[s[0] for s in SHAPES])
@@ -34,7 +34,9 @@ def test_each_pattern_breaks_out_with_its_measure_rule_targets(kind, direction, 
     pat = pats[0]
     assert (pat.kind, pat.direction) == (kind, direction)
     t, d = pat.breakout, pat.direction
-    assert (c[t] - pat.level) * d > 0  # traded on a close beyond the line (the first one: see the look-ahead test)
+    atr = indicators.atr(h, l, c, 14)
+    assert (c[t] - pat.level) * d >= patterns.BREAK_ATR * atr[t]  # a close beyond the line by the margin
+    assert pat.confirmed == t + 1 and (c[t + 1] - (pat.level + pat.slope)) * d > 0  # the next close stayed beyond
     assert pat.tp2 == pytest.approx(pat.level + d * pat.height)  # TP2: the full height from the breakout
     base_key, pct = patterns.MEASURE[kind][d]
     assert pat.pct == pct
@@ -57,13 +59,37 @@ def test_flag_targets_use_the_pole():
     assert flag.stop == pytest.approx(110.95)
 
 
-def test_no_pattern_before_its_breakout_close():
-    pats, (o, h, l, c) = found([100, 110, 104, 110.2, 103, 96])
+def _upto(arrays, k):
+    o, h, l, c = (a[:k] for a in arrays)
+    return patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2.0)
+
+
+def test_a_breakout_is_known_only_when_the_next_close_confirms_it():
+    pats, arrays = found([100, 110, 104, 110.2, 103, 96])
     t = pats[0].breakout
-    early = patterns.detect(h[:t], l[:t], c[:t], indicators.atr(h[:t], l[:t], c[:t], 14), 2)
-    assert early == []  # known only on the close that breaks the neckline
-    again = patterns.detect(h[:t + 1], l[:t + 1], c[:t + 1], indicators.atr(h[:t + 1], l[:t + 1], c[:t + 1], 14), 2)
-    assert [(x.kind, x.breakout) for x in again] == [("double_top", t)]
+    assert _upto(arrays, t + 1) == []  # the breakout close alone is not a pattern yet
+    assert [(x.kind, x.breakout, x.confirmed) for x in _upto(arrays, t + 2)] == [("double_top", t, t + 1)]
+
+
+def test_a_false_breakout_is_not_traded():
+    o, h, l, c = zigzag([100, 110, 104, 110.2, 103, 96])
+    pats = patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2.0)
+    t = pats[0].breakout
+    c2, h2, l2 = c.copy(), h.copy(), l.copy()
+    c2[t + 1] = h2[t + 1] = 104.5  # the next candle closes back above the neckline
+    l2[t + 1] = min(l2[t + 1], 104.4)
+    assert [x for x in patterns.detect(h2, l2, c2, indicators.atr(h2, l2, c2, 14), 2.0) if x.breakout == t] == []
+
+
+def test_the_zigzag_knows_a_swing_once_price_turns_by_the_atr_multiple():
+    o, h, l, c = zigzag([100, 110, 104, 110.2, 103, 96])
+    atr = indicators.atr(h, l, c, 14)
+    swings = patterns.zigzag(h, l, atr, 2.0)
+    assert [p.kind for p in swings] == ["high", "low", "high"] and [p.index for p in swings] == [6, 12, 18]
+    for p in swings:  # confirmed on the first bar 2 × ATR away from the swing, never before
+        k = p.confirmed
+        away = (h[p.index] - l[k]) if p.kind == "high" else (h[k] - l[p.index])
+        assert away >= 2.0 * atr[k] and k > p.index
 
 
 def _bars(points):
@@ -73,14 +99,14 @@ def _bars(points):
 
 def test_pattern_mode_waits_for_the_retest_and_stops_on_the_breakout_candles_atr_band():
     b = _bars([100, 110, 104, 110.2, 103, 104.5, 96, 90])  # breaks the neckline, comes back to it, then falls
-    p = training.replace(training.pattern_params("1h"), swing=2)
-    assert (p.method, p.entry, p.hold, p.sl_atr, p.take) == ("pattern", "retest", 0, 2.0, "both")
+    p = training.pattern_params("1h")
+    assert (p.method, p.entry, p.hold, p.sl_atr, p.take, p.zz) == ("pattern", "retest", 0, 2.0, "both", 2.0)
     s = next(x for x in training.signals(b, p) if x.kind == "DOUBLE TOP")  # the bounce forms later patterns too
     atr = indicators.atr(b.high, b.low, b.close, 14)
-    pat = patterns.detect(b.high, b.low, b.close, atr, 2)[0]
+    pat = patterns.detect(b.high, b.low, b.close, atr, 2.0)[0]
     t = pat.breakout
-    assert (s.kind, s.scope, s.direction, s.created) == ("DOUBLE TOP", "pattern", -1, t)
-    assert s.entry == pytest.approx(pat.level) and s.opened > t  # a limit on the neckline, filled on the retest
+    assert (s.kind, s.scope, s.direction, s.created) == ("DOUBLE TOP", "pattern", -1, pat.confirmed)
+    assert s.entry == pytest.approx(pat.level) and s.opened > pat.confirmed  # a limit on the neckline: the retest
     assert s.stop == pytest.approx(b.high[t] + 2.0 * atr[t])  # the ATR band above the breakout candle
     assert (s.tp1, s.target) == (pytest.approx(pat.tp1), pytest.approx(pat.tp2))
     assert s.status == "win" and s.reason.endswith("TP2")
@@ -89,15 +115,15 @@ def test_pattern_mode_waits_for_the_retest_and_stops_on_the_breakout_candles_atr
 
 def test_no_retest_no_trade():
     b = _bars([100, 110, 104, 110.2, 103, 96, 90, 85, 80, 75])  # straight down after the breakout
-    [s] = training.signals(b, training.replace(training.pattern_params("1h"), swing=2, expiry=6))
+    [s] = training.signals(b, training.replace(training.pattern_params("1h"), expiry=6))
     assert s.status == "cancelled" and s.opened is None
 
 
 @pytest.mark.parametrize("take", ["both", "tp1", "tp2"])
 def test_take_profit_choice(take):
     b = _bars([100, 110, 104, 110.2, 103, 104.5, 96, 90])
-    pat = patterns.detect(b.high, b.low, b.close, indicators.atr(b.high, b.low, b.close, 14), 2)[0]
-    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), swing=2, take=take))
+    pat = patterns.detect(b.high, b.low, b.close, indicators.atr(b.high, b.low, b.close, 14), 2.0)[0]
+    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), take=take))
              if x.kind == "DOUBLE TOP")
     risk = abs(s.entry - s.stop)
     if take == "both":  # half at TP1, the rest at TP2
@@ -113,18 +139,18 @@ def test_pattern_search_grid_keeps_the_rule():
     grid = list(training._grid("1h", 0, "pattern"))
     assert len(grid) == 9 and all(p.method == "pattern" and p.entry == "retest" and p.target == "tp12" and p.hold == 0
                                   for p in grid)
-    assert {p.sl_atr for p in grid} == {1.5, 2.0, 2.5}
+    assert {p.sl_atr for p in grid} == {1.5, 2.0, 2.5} and {p.zz for p in grid} == {1.5, 2.0, 3.0}
 
 
 def test_entry_choice_breakout_close():
     b = _bars([100, 110, 104, 110.2, 103, 96, 90])
-    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), swing=2, entry="close")))
-    assert s.opened == s.created and s.entry == pytest.approx(b.close[s.created])  # no waiting for a retest
+    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), entry="close")))
+    assert s.opened == s.created and s.entry == pytest.approx(b.close[s.created])  # the confirming close, no retest
 
 
 def test_retest_of_a_sloped_line_meets_it_where_it_is():
     b = _bars([100, 112, 102, 109, 105, 115, 107.5, 113, 118])  # symmetrical triangle, breakout up, pullback
-    p = training.replace(training.pattern_params("1h"), swing=2)
+    p = training.pattern_params("1h")
     s = next(x for x in training.signals(b, p) if x.kind == "SYMMETRICAL TRIANGLE")
     assert s.entry_slope < 0  # the upper line falls: the limit follows it
     if s.opened is not None:

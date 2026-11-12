@@ -214,10 +214,20 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   dibaca dari zigzag pivot yang sudah terkonfirmasi (tanpa look-ahead): **double top/bottom, head & shoulders (dan
   inverse), segitiga ascending/descending/symmetrical, rectangle, rising/falling wedge, bull/bear flag**. Ukuran
   minimal pola 2× ATR (tiang flag 3,5× ATR), toleransi "sama tinggi" dalam ATR.
+  - **Cara membaca breakout (v3.19)**: titik pola dari **zigzag ATR** — swing high/low diakui begitu harga berbalik
+    ≥ 2 × ATR darinya (dulu pivot baru diakui 8 candle kemudian, sehingga 51% breakout terbaca terlambat). **Breakout =
+    close pertama yang menembus garis ≥ 0,25 × ATR** (tembusan tipis diabaikan) dan **sah bila close candle berikutnya
+    tetap di luar garis** — breakout yang langsung close kembali ke dalam pola adalah breakout palsu dan tidak ditrading
+    (rujukan: Bulkowski — breakout = harga menembus garis pola; konvensi trader — konfirmasi dengan close, margin, dan
+    candle berikutnya tidak kembali ke dalam). Pola yang garisnya sudah tertembus sebelum pola bisa dikenali dibuang.
+    Diagnosis sebelum perbaikan (53.004 breakout): breakout yang langsung close kembali ke dalam → win 35,6% (−0,267R)
+    vs 59,3% (+0,128R); tembusan < 0,25 ATR → win 46,8% vs 58,3%. Sinyal muncul di candle konfirmasi; SL tetap dari
+    candle breakout.
   - **Entry (v3.18) = tunggu RETEST**: setelah close menembus garis pola (neckline / batas), limit order dipasang di
     garis yang ditembus dan terisi saat harga kembali menyentuhnya; untuk garis miring (segitiga, wedge, flag) limit
     mengikuti posisi garis di setiap candle. Batal bila harga sampai TP1 lebih dulu, close menembus SL, garis melewati
-    SL, atau tidak ada retest dalam 30 candle. Pilihan **ENTRY CLOSE BREAKOUT** = langsung di close candle breakout.
+    SL, atau tidak ada retest dalam 30 candle. Pilihan **ENTRY CLOSE KONFIRMASI** = langsung di close candle yang
+    mengkonfirmasi breakout (candle setelah candle breakout).
   - **Target = measured move** (aturan ukur T. Bulkowski, thepatternsite.com): tinggi pola diproyeksikan dari breakout.
     **TP2 = 100% tinggi pola** (target buku teks), **TP1 = porsi tinggi yang menurut data Bulkowski benar-benar
     tercapai**, dari titik dasar yang ia pakai — 50% posisi ditutup di TP1 lalu SL ke entry. Porsi TP1: double top 43%
@@ -249,6 +259,13 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
     44,1% (+0,100R), k 1,5 → 48,9% (+0,076R), k 2 → 52,1% (+0,055R). Di data ini menunggu retest menurunkan win rate:
     breakout terkuat sering tidak pernah retest (±14.500 setup batal karena harga lebih dulu ke TP1), sehingga yang
     terisi justru breakout yang lebih lemah.
+  - **Terukur v3.19** (breakout dibaca dengan aturan di atas, 57 aset × 15M/1H/4H/1D): **entry retest, SL band 2:
+    15.123 trade, win 42,0%, +0,011R** (v3.18: 37,1%, +0,051R); **entry close konfirmasi, SL band 2: 24.322 trade,
+    win 64,1%, +0,039R** (v3.18 close: 52,1%, +0,055R); close band 1: 56,5% (+0,059R); close band 1,5: 60,8%
+    (+0,045R); close band 2 hanya TP1: 64,8% (+0,032R), hanya TP2: 45,7% (+0,025R). Per pola (close, band 2): falling
+    wedge turun 85,4%, double top 80,9%, bull flag 77,4%, bear flag 78,3%, rising wedge turun 74,7%, double bottom
+    72,5%, inverse H&S 61,6% (+0,103R), symmetrical triangle naik 39,0% (+0,185R). Win rate naik, profit per trade
+    sedikit turun karena entry baru setelah konfirmasi.
 - **Cara membaca BOS/CHoCH** (v3.15): **BOS** = close menembus high struktur tren naik (high tertinggi sejak break
   terakhir — lower high di dalam pullback tidak menggantikannya) / low struktur tren turun. **CHoCH** = close menembus
   **level yang dilindungi**: *strong low* (low asal leg yang menembus high terakhir) pada tren naik, *strong high* pada

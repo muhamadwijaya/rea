@@ -62,7 +62,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from . import candles, fundamental, instruments, market_data, newsctx, paths, patterns, smc
+from . import candles, fundamental, indicators, instruments, market_data, newsctx, paths, patterns, smc
 from .errors import EngineError
 from .market_data import Bars
 
@@ -116,6 +116,7 @@ class Params:
     method: str = "smc"  # "smc" (BOS / CHoCH areas) | "pattern" (chart patterns: `swing` = pivot length, `entry` =
     # "retest" = limit on the broken line or "close" of the breakout bar, `sl_atr` = the breakout candle's ATR band)
     take: str = "both"  # targets used: "both" (half at TP1, stop to entry, rest at TP2) | "tp1" | "tp2" (all there)
+    zz: float = 2.0  # chart patterns: the ATR zigzag's turn (× ATR) that makes a swing point — the pattern size
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -150,12 +151,14 @@ def pattern_params(tf_key: str) -> Params:
     exit."""
     tf = market_data.timeframe(tf_key)
     return Params(swing=max(3, (tf.swing + tf.internal) // 2), internal=tf.internal, method="pattern", entry="retest",
-                  sl_atr=PATTERN_SL_ATR, target="tp12", hold=0, trend_filter=False, min_rr=0.0, scope="both", zone="fvg")
+                  sl_atr=PATTERN_SL_ATR, target="tp12", hold=0, trend_filter=False, min_rr=0.0, scope="both", zone="fvg",
+                  zz=PATTERN_ZZ)
 
 
 # ATR band of the breakout candle: measured on 57 core assets × 15m–1d with retest entries, 2 × ATR had the best
 # expectancy of 1–3 × (1.5 × ATR, the usual "ATR stop loss" multiple, came second)
 PATTERN_SL_ATR = 2.0
+PATTERN_ZZ = 2.0  # swing points of the patterns: a turn of 2 × ATR (patterns.zigzag)
 
 
 @dataclass
@@ -579,14 +582,13 @@ def _gap_in_leg(gaps: list, start: int, t: int) -> bool:
     return k < len(gaps) and gaps[k][1] <= t
 
 
-def _patterns_for(bars: Bars, length: int, r: smc.SmcResult | None) -> tuple[list[patterns.Pattern], np.ndarray]:
-    """Patterns of one pivot length, cached on the analysis object a search shares between settings."""
-    if r is None:
-        r = smc.analyze(bars.open, bars.high, bars.low, bars.close, length, max(2, length // 2))
-    cache = r.__dict__.setdefault("_patterns", {})
-    if length not in cache:
-        cache[length] = patterns.detect(bars.high, bars.low, bars.close, r.atr, length)
-    return cache[length], r.atr
+def _patterns_for(bars: Bars, reversal: float, r: smc.SmcResult | None) -> tuple[list[patterns.Pattern], np.ndarray]:
+    """Patterns of one zigzag size, cached on the analysis object a search shares between settings."""
+    atr = r.atr if r is not None else indicators.atr(bars.high, bars.low, bars.close, 14)
+    cache = r.__dict__.setdefault("_patterns", {}) if r is not None else {}
+    if reversal not in cache:
+        cache[reversal] = patterns.detect(bars.high, bars.low, bars.close, atr, reversal)
+    return cache[reversal], atr
 
 
 def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None,
@@ -595,13 +597,15 @@ def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align
     breakout, a limit on the broken line waits for the retest ("retest", default; "close" = the breakout close);
     stop on the breakout candle's ATR band (low − `sl_atr` × ATR / high + `sl_atr` × ATR); TP1 = Bulkowski's share
     of the height, TP2 = the full measured move (`take`: both, or only one of them)."""
-    found, atr = _patterns_for(bars, p.swing, r)
+    found, atr = _patterns_for(bars, p.zz, r)
     h, l, c = bars.high, bars.low, bars.close
     out: list[Signal] = []
     for pat in found:
-        t, d = pat.breakout, pat.direction
+        t, d = pat.breakout, pat.direction  # t: the breakout candle
+        k = pat.confirmed  # the next close confirmed it: the signal (nothing is known before)
         a = float(atr[t]) if np.isfinite(atr[t]) else 0.0
-        entry = float(c[t]) if p.entry == "close" else pat.level  # default: the retest of the broken line
+        line_k = pat.level + pat.slope * (k - t)  # where the broken line is on the signal bar
+        entry = float(c[k]) if p.entry == "close" else line_k  # default: the retest of the broken line
         # the stop is the ATR band of the breakout candle: below its low for a buy, above its high for a sell
         stop = float(l[t]) - p.sl_atr * a if d > 0 else float(h[t]) + p.sl_atr * a
         if (entry - stop) * d <= 0:
@@ -609,13 +613,13 @@ def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align
         if (pat.tp2 - entry) * d <= 0:
             continue  # the breakout bar already ran past the whole measured move: nothing left to trade
         tp1 = pat.tp1 if (pat.tp1 - entry) * d > 0 else entry + d * 0.5 * (pat.tp2 - entry)
-        s = Signal(d, pat.name, "pattern", t, entry, float(stop), pat.tp2, manage="tp12", tp1=float(tp1),
-                   align=float(align[t]) * d if align is not None else None, level=pat.level, pivot=pat.start,
+        s = Signal(d, pat.name, "pattern", k, entry, float(stop), pat.tp2, manage="tp12", tp1=float(tp1),
+                   align=float(align[k]) * d if align is not None else None, level=pat.level, pivot=pat.start,
                    fill="close" if p.entry == "close" else "limit", take=p.take,
                    pattern={"kind": pat.kind, "name": pat.name, "height": pat.height, "pct": pat.pct,
                             "points": pat.points, "lines": pat.lines})
         if p.entry != "close" and pat.slope:
-            s.entry_slope, s.entry_line0 = pat.slope, pat.level
+            s.entry_slope, s.entry_line0 = pat.slope, line_k
         out.append(_apply_take(simulate(bars, s, set(), p.expiry, p.hold)))
     return one_at_a_time(out) if one_position else out
 
@@ -739,20 +743,17 @@ def _grid(tf_key: str, level: int = 0, method: str = "smc"):
 
 
 def _pattern_grid(tf_key: str, level: int = 0):
-    """Chart-pattern settings — entry always on the retest, stop always on the breakout candle's ATR band, targets
-    always the measure rule; tuned: pivot length (pattern size), ATR band multiple, how long the retest may take
-    (9 → 24 → 90 settings)."""
+    """Chart-pattern settings — entry and targets stay as chosen, the stop stays on the breakout candle's ATR band;
+    tuned: the zigzag turn (pattern size), the ATR band multiple, how long the retest may take
+    (9 → 30 → 90 settings)."""
     base = pattern_params(tf_key)
-    lengths = {base.swing, max(3, base.swing - 3), base.swing + 4}
-    stops, expiries = (1.5, 2.0, 2.5), (base.expiry,)
+    sizes, stops, expiries = (1.5, 2.0, 3.0), (1.5, 2.0, 2.5), (base.expiry,)
     if level >= 1:
-        stops = (1.0, 1.5, 2.0, 2.5, 3.0, 3.5)
-        lengths |= {base.swing + 8}
+        sizes, stops = (1.5, 2.0, 2.5, 3.0, 4.0), (1.0, 1.5, 2.0, 2.5, 3.0, 3.5)
     if level >= 2:
-        lengths |= {max(3, base.swing - 5)}
         expiries = (max(5, base.expiry // 2), base.expiry, base.expiry * 2)
-    for length, sl_atr, expiry in itertools.product(sorted(lengths), stops, expiries):
-        yield replace(base, swing=length, sl_atr=sl_atr, expiry=expiry)
+    for zz, sl_atr, expiry in itertools.product(sizes, stops, expiries):
+        yield replace(base, zz=zz, sl_atr=sl_atr, expiry=expiry)
 
 
 def grid_size(tf_key: str, level: int = 0, method: str = "smc") -> int:

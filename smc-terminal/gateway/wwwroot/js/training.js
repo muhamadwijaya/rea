@@ -18,8 +18,9 @@ const ruleText = (p) => `pivot ${p.swing}/${p.internal} · semua BOS/CHoCH (tanp
   · order kedaluwarsa ${p.expiry} bar`;
 // settings of earlier versions still appear in the upgrade log
 const legacyText = (p) => `versi lama · pivot ${p.swing}/${p.internal} · ${SCOPE[p.scope] || p.scope} ${p.kinds === 'CHoCH' ? 'CHoCH saja' : 'BOS+CHoCH'} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
-const patternText = (p) => `CHART PATTERN · pivot ${p.swing} · entry ${p.entry === 'retest' ? 'retest garis' : 'close candle breakout'}
-  · SL titik invalidasi pola + ${p.sl_atr}×ATR · TP1 % Bulkowski tinggi pola (50%, lalu SL ke entry) · TP2 100% measured move`;
+const patternText = (p) => `CHART PATTERN · zigzag ${p.zz ?? 2}×ATR · breakout = close ≥ 0,25 ATR di luar garis + candle berikutnya tetap di luar
+  · entry ${p.entry === 'close' ? 'close candle konfirmasi' : 'retest garis'} · SL ATR band candle breakout ${p.sl_atr}×
+  · TP1 % Bulkowski tinggi pola · TP2 100% measured move`;
 const paramText = (p) => (p.method === 'pattern' ? patternText(p) : p.target === 'tp12' && p.zone === 'fvg' ? ruleText(p) : legacyText(p));
 // results per chart pattern (pattern mode)
 const patternLine = (g) => {
@@ -27,7 +28,7 @@ const patternLine = (g) => {
   return rows.length ? `<span class="tr-grades">POLA: ${rows.map(([k, v]) => `${esc(k)} <b>${pct(v.winRate)}</b>
     <span class="dim">(${v.trades}, ${rr(v.expectancyR)})</span>`).join(' · ')}</span>` : '<span class="dim">POLA: belum ada trade selesai</span>';
 };
-const ENTRY_BUTTONS = '<span class="tr-entry" title="Chart pattern: setelah breakout tunggu RETEST ke garis yang ditembus (limit di garis), atau entry langsung di CLOSE candle breakout"><button data-entry="retest">ENTRY RETEST</button><button data-entry="close">ENTRY CLOSE BREAKOUT</button></span>';
+const ENTRY_BUTTONS = '<span class="tr-entry" title="Chart pattern: setelah breakout terkonfirmasi tunggu RETEST ke garis yang ditembus (limit di garis), atau entry langsung di CLOSE candle konfirmasi"><button data-entry="retest">ENTRY RETEST</button><button data-entry="close">ENTRY CLOSE KONFIRMASI</button></span>';
 // The session / replay info box lives in the left panel (above the equity curve), not over the chart.
 const slot = (name) => document.querySelector(`#tab-training .tr-slot-${name}`);
 const METHOD_BUTTONS = '<span class="tr-method" title="Metode analisa: SMC (BOS/CHoCH → area FVG) atau chart pattern klasik (double top, H&S, segitiga, wedge, flag, rectangle) dengan target measured move"><button data-method="smc">SMC</button><button data-method="pattern">CHART PATTERN</button></span>';
@@ -635,7 +636,7 @@ function mountTrainingLab(el) {
     $('.lab-ctl .tr-entry').classList.toggle('hidden', prefs.method !== 'pattern');
     el.querySelectorAll('.lab-ctl .tr-entry button').forEach((b) => b.classList.toggle('active', b.dataset.entry === prefs.entry));
     $('.lab-method-note').textContent = prefs.method === 'pattern'
-      ? `chart pattern: ${prefs.entry === 'close' ? 'entry di close candle breakout' : 'setelah breakout tunggu retest ke garis'}, SL = ATR band candle breakout, TP1 % Bulkowski / TP2 100% tinggi pola`
+      ? `chart pattern: breakout = close menembus garis ≥ 0,25 ATR + candle berikutnya tetap di luar; ${prefs.entry === 'close' ? 'entry di close candle konfirmasi' : 'lalu tunggu retest ke garis'}; SL = ATR band candle breakout; TP1 % Bulkowski / TP2 100% tinggi pola`
       : 'SMC: setiap BOS/CHoCH → area FVG, TP1 puncak, TP2 lanjutan, SL ATR band';
   };
 
