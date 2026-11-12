@@ -213,8 +213,11 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
 - **Metode CHART PATTERN** (v3.17, pilih **METODE: SMC / CHART PATTERN** di LIVE CHART dan TRAINING LAB). Pola klasik
   dibaca dari zigzag pivot yang sudah terkonfirmasi (tanpa look-ahead): **double top/bottom, head & shoulders (dan
   inverse), segitiga ascending/descending/symmetrical, rectangle, rising/falling wedge, bull/bear flag**. Ukuran
-  minimal pola 2× ATR (tiang flag 3,5× ATR), toleransi "sama tinggi" dalam ATR. Trade dibuka pada **close candle yang
-  menembus garis pola** (neckline / batas); alternatif *retest* = limit di garis yang ditembus.
+  minimal pola 2× ATR (tiang flag 3,5× ATR), toleransi "sama tinggi" dalam ATR.
+  - **Entry (v3.18) = tunggu RETEST**: setelah close menembus garis pola (neckline / batas), limit order dipasang di
+    garis yang ditembus dan terisi saat harga kembali menyentuhnya; untuk garis miring (segitiga, wedge, flag) limit
+    mengikuti posisi garis di setiap candle. Batal bila harga sampai TP1 lebih dulu, close menembus SL, garis melewati
+    SL, atau tidak ada retest dalam 30 candle. Pilihan **ENTRY CLOSE BREAKOUT** = langsung di close candle breakout.
   - **Target = measured move** (aturan ukur T. Bulkowski, thepatternsite.com): tinggi pola diproyeksikan dari breakout.
     **TP2 = 100% tinggi pola** (target buku teks), **TP1 = porsi tinggi yang menurut data Bulkowski benar-benar
     tercapai**, dari titik dasar yang ia pakai — 50% posisi ditutup di TP1 lalu SL ke entry. Porsi TP1: double top 43%
@@ -222,8 +225,13 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
     turun 44%, descending naik 64% / turun 50%, symmetrical naik 58% / turun 36%, rectangle naik 78% / turun 54%,
     falling wedge naik 62% / turun 29%, rising wedge naik 63% / turun 32%, flag 46% dari panjang tiang. Tinggi:
     puncak − neckline (H&S), puncak − valley (double), lebar awal (segitiga, wedge, rectangle), panjang tiang (flag).
-  - **Stop loss** di titik invalidasi pola + 0,5 × ATR: di atas top kedua (double top), di atas bahu kanan (H&S), di
-    balik swing terakhir di dalam pola (segitiga, wedge, rectangle), di balik ujung flag.
+  - **Stop loss (v3.18) = ATR band candle breakout**: low candle breakout − k × ATR untuk BUY, high candle breakout +
+    k × ATR untuk SELL (k default 2). v3.17 memakai titik invalidasi pola + 0,5 × ATR.
+  - **TP1 / TP2 pakai centang** (di sebelah BALANCE/LOT, berlaku untuk SMC dan chart pattern): dua-duanya = 50% di TP1,
+    SL ke entry, sisa ke TP2; hanya TP1 atau hanya TP2 = seluruh posisi ditutup di target itu (chart hanya menampilkan
+    target yang dipakai). Di LIVE CHART trade langsung disimulasikan ulang; di TRAINING LAB berlaku untuk training
+    berikutnya. Jurnal live AI tetap TP1 + TP2.
+  - Kotak info TRAINING LIVE / REPLAY tampil di panel kiri (di atas KURVA EKUITAS VIRTUAL), tidak menutupi chart.
   - Satu posisi sekaligus, tanpa batas waktu, BALANCE & LOT, replay dan training live berlaku sama. Pola digambar di
     chart (garis cyan = titik pola, oranye putus-putus = neckline/batas); pola yang tidak jadi trade tampil redup.
     Statistik per pola tampil di bawah chart. Setting yang dipelajari AI dan jurnal live tetap milik mode SMC; hasil
@@ -235,6 +243,12 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
     wedge naik 47,3% (2.751, +0,127R), bull flag 62,7% (67, +0,216R). Varian: entry retest 42,1% (−0,009R); SL +0,25
     ATR 55,0% (+0,065R); SL +1 ATR 58,8% (+0,036R); hanya TP 100% 38,0% (+0,054R); hanya TP % Bulkowski 57,3%
     (+0,045R). Win rate tinggi beberapa pola datang dari TP1 yang dekat — lihat kolom R.
+  - **Terukur v3.18** (57 aset × 15M/1H/4H/1D, SL ATR band candle breakout): **entry retest, k 2 (default): 15.135
+    trade, win 37,1%, +0,051R**; retest k 1,5: 33,0% (+0,010R); k 1: 27,7% (+0,013R); k 3: 43,5% (−0,012R); retest
+    hanya TP1: 33,6% (+0,001R); hanya TP2: 22,7% (+0,013R). **Entry close breakout** dengan SL yang sama: k 1 →
+    44,1% (+0,100R), k 1,5 → 48,9% (+0,076R), k 2 → 52,1% (+0,055R). Di data ini menunggu retest menurunkan win rate:
+    breakout terkuat sering tidak pernah retest (±14.500 setup batal karena harga lebih dulu ke TP1), sehingga yang
+    terisi justru breakout yang lebih lemah.
 - **Cara membaca BOS/CHoCH** (v3.15): **BOS** = close menembus high struktur tren naik (high tertinggi sejak break
   terakhir — lower high di dalam pullback tidak menggantikannya) / low struktur tren turun. **CHoCH** = close menembus
   **level yang dilindungi**: *strong low* (low asal leg yang menembus high terakhir) pada tren naik, *strong high* pada

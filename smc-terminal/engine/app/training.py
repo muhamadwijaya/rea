@@ -114,7 +114,8 @@ class Params:
     ext: float = 0.618  # target "tp12": TP2 = TP1 + ext × the leg that broke structure
     min_rr: float = MIN_RR  # reward filter: setups paying less (TP1/TP2 blended) are not traded; 0 = every break
     method: str = "smc"  # "smc" (BOS / CHoCH areas) | "pattern" (chart patterns: `swing` = pivot length, `entry` =
-    # "close" of the breakout bar or "retest" = limit at the broken line, `sl_atr` = ATR buffer beyond the pattern)
+    # "retest" = limit on the broken line or "close" of the breakout bar, `sl_atr` = the breakout candle's ATR band)
+    take: str = "both"  # targets used: "both" (half at TP1, stop to entry, rest at TP2) | "tp1" | "tp2" (all there)
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -143,12 +144,18 @@ def default_params(tf_key: str) -> Params:
 
 
 def pattern_params(tf_key: str) -> Params:
-    """Chart-pattern mode: pivots between the internal and the swing length, entry on the close of the breakout bar,
-    stop at the pattern's invalidation point plus 0.5 × ATR, TP1 = Bulkowski's share of the height, TP2 = the full
-    measured move, no time exit."""
+    """Chart-pattern mode: pivots between the internal and the swing length; after the breakout, wait for the retest
+    of the broken line (limit entry there); stop on the ATR band of the breakout candle (its low − k × ATR for a buy,
+    its high + k × ATR for a sell); TP1 = Bulkowski's share of the height, TP2 = the full measured move; no time
+    exit."""
     tf = market_data.timeframe(tf_key)
-    return Params(swing=max(3, (tf.swing + tf.internal) // 2), internal=tf.internal, method="pattern", entry="close",
-                  sl_atr=0.5, target="tp12", hold=0, trend_filter=False, min_rr=0.0, scope="both", zone="fvg")
+    return Params(swing=max(3, (tf.swing + tf.internal) // 2), internal=tf.internal, method="pattern", entry="retest",
+                  sl_atr=PATTERN_SL_ATR, target="tp12", hold=0, trend_filter=False, min_rr=0.0, scope="both", zone="fvg")
+
+
+# ATR band of the breakout candle: measured on 57 core assets × 15m–1d with retest entries, 2 × ATR had the best
+# expectancy of 1–3 × (1.5 × ATR, the usual "ATR stop loss" multiple, came second)
+PATTERN_SL_ATR = 2.0
 
 
 @dataclass
@@ -175,6 +182,9 @@ class Signal:
     ext: float | None = None  # and TP2 stays `ext` × the leg beyond TP1
     tp1_hit: int | None = None  # bar on which TP1 was reached (the stop sits at entry from the next bar)
     fill: str = "limit"  # "limit" = waits for price to trade into `entry`; "close" = filled at the close of `created`
+    take: str = "both"  # Params.take
+    entry_slope: float = 0.0  # a limit that follows a sloped line: entry_line0 + slope × (bars since the signal)
+    entry_line0: float = 0.0
     pattern: dict | None = None  # chart-pattern mode: its shape, height and measure-rule share (bar indices)
     zone_top: float | None = None  # the buy / sell area (FVG or order block) the entry sits in
     zone_bottom: float | None = None
@@ -270,10 +280,17 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
         return advance(bars, s, s.opened + 1, end)
     k = s.created + 1
     end_pending = min(n, s.created + 1 + expiry)
+    first = s.tp1 if s.tp1 is not None and s.take != "tp2" else s.target  # the first target this trade uses
     while s.status == "pending" and k < end_pending:
         if k in against:
             s.status, s.closed, s.reason = "cancelled", k, "struktur berbalik sebelum entry"
             break
+        if s.entry_slope:  # the retest meets a sloped line where it is on this bar
+            limit = s.entry_line0 + s.entry_slope * (k - s.created)
+            if (limit - s.stop) * d <= 0:
+                s.status, s.closed, s.reason = "cancelled", k, "garis retest melewati stop"
+                break
+            s.entry = float(limit)
         touched = l[k] <= s.entry if d > 0 else h[k] >= s.entry
         if touched:
             s.status, s.opened = "open", k
@@ -283,7 +300,7 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
             if (peak - s.tp1) * d > 0:
                 s.tp1 = float(peak)
                 s.target = float(peak + d * s.ext * abs(peak - s.origin))
-        elif (h[k] >= s.target) if d > 0 else (l[k] <= s.target):
+        elif (h[k] >= first) if d > 0 else (l[k] <= first):
             s.status, s.closed, s.reason = "cancelled", k, "target tercapai sebelum entry"
             break
         if (c[k] < s.stop) if d > 0 else (c[k] > s.stop):
@@ -318,23 +335,27 @@ def _first(mask: np.ndarray) -> int | None:
 
 def advance(bars: Bars, s: Signal, start: int, end: int) -> Signal:
     """Run an open trade over bars [start, end): until TP1 the stop is the original one (the end of the red zone);
-    a bar that touches the stop and a target counts as the stop. After TP1, half is closed and the stop sits at
-    entry from the next bar. Targets count from the bar after the fill (start == s.opened); a trade resumed later
-    (live journal) counts them from `start`. Vectorised: an open trade has no time limit with the rule."""
+    a bar that touches the stop and a target counts as the stop. With `s.take` "both", half closes at TP1 and the
+    stop sits at entry from the next bar, the rest runs to TP2; "tp1" closes everything at TP1; "tp2" everything at
+    TP2 (the stop stays). Targets count from the bar after the fill (start == s.opened); a trade resumed later (live
+    journal) counts them from `start`. Vectorised: an open trade has no time limit with the rule."""
     h, l = bars.high, bars.low
     d = s.direction
     risk = abs(s.entry - s.stop)
-    reward = abs(s.target - s.entry) / risk
     level = _first_target(s)
-    partial = s.tp1 is not None or (s.manage == "partial" and reward > 1.0 + 1e-9)
+    only_tp1 = s.take == "tp1" and s.tp1 is not None
+    target = s.tp1 if only_tp1 else s.target
+    reward = abs(target - s.entry) / risk
+    partial = s.take == "both" and (s.tp1 is not None or (s.manage == "partial" and reward > 1.0 + 1e-9))
     half = abs(level - s.entry) / risk
     tp_name = "TP1" if s.tp1 is not None else "TP1 +1R"
+    final = "TP1" if only_tp1 else "TP2" if s.tp1 is not None else "target"
     hit = (lambda lo, hi, x: lo <= x) if d > 0 else (lambda lo, hi, x: hi >= x)  # price reached x against us
     reach = (lambda lo, hi, x: hi >= x) if d > 0 else (lambda lo, hi, x: lo <= x)  # ... in our favour
     k = start
     if s.tp1_hit is None:
         lo, hi = l[k:end], h[k:end]
-        stop_m, tgt_m = hit(lo, hi, s.stop), reach(lo, hi, s.target)
+        stop_m, tgt_m = hit(lo, hi, s.stop), reach(lo, hi, target)
         lvl_m = reach(lo, hi, level) if partial else np.zeros(len(lo), dtype=bool)
         if k == s.opened and len(lo):
             tgt_m[0] = lvl_m[0] = False  # targets count from the bar after the fill (order inside the bar unknown)
@@ -344,9 +365,9 @@ def advance(bars: Bars, s: Signal, start: int, end: int) -> Signal:
             s.status, s.closed, s.exit, s.r, s.reason = "loss", k + i_stop, s.stop, -1.0, "stop loss"
             return s
         if i_tgt < never and i_tgt <= i_lvl:
-            s.status, s.closed, s.exit = "win", k + i_tgt, s.target
+            s.status, s.closed, s.exit = "win", k + i_tgt, target
             s.r = round(float(0.5 * half + 0.5 * reward if partial else reward), 3)
-            s.reason = (f"{tp_name} (50%) lalu TP2" if s.tp1 is not None else f"{tp_name} (50%) lalu target") if partial else "target"
+            s.reason = f"{tp_name} (50%) lalu {final}" if partial else final
             if partial:
                 s.tp1_hit = k + i_tgt
             return s
@@ -357,13 +378,22 @@ def advance(bars: Bars, s: Signal, start: int, end: int) -> Signal:
     else:
         k = max(k, s.tp1_hit + 1)
     lo, hi = l[k:end], h[k:end]
-    i_be, i_tgt = _first(hit(lo, hi, s.entry)), _first(reach(lo, hi, s.target))
+    i_be, i_tgt = _first(hit(lo, hi, s.entry)), _first(reach(lo, hi, target))
     if i_be is not None and (i_tgt is None or i_be <= i_tgt):
         s.status, s.closed, s.exit, s.r = "win", k + i_be, s.entry, round(float(0.5 * half), 3)
         s.reason = f"{tp_name} (50%), sisa ditutup di entry (BE)"
     elif i_tgt is not None:
-        s.status, s.closed, s.exit, s.r = "win", k + i_tgt, s.target, round(float(0.5 * half + 0.5 * reward), 3)
-        s.reason = f"{tp_name} (50%) lalu TP2" if s.tp1 is not None else f"{tp_name} (50%) lalu target"
+        s.status, s.closed, s.exit, s.r = "win", k + i_tgt, target, round(float(0.5 * half + 0.5 * reward), 3)
+        s.reason = f"{tp_name} (50%) lalu {final}"
+    return s
+
+
+def _apply_take(s: Signal) -> Signal:
+    """After the simulation, show only the targets the trade used: one TP when `take` is "tp1" or "tp2"."""
+    if s.take == "tp1" and s.tp1 is not None:
+        s.target, s.tp1, s.manage = s.tp1, None, "none"
+    elif s.take == "tp2" and s.tp1 is not None:
+        s.tp1, s.manage = None, "none"
     return s
 
 
@@ -529,10 +559,10 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
             continue
         s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage="tp12" if tp1 is not None else p.manage,
                    align=aligned, level=float(b.level), pivot=b.pivot_index, zone_top=float(top), zone_bottom=float(bottom),
-                   ict=ict)
+                   ict=ict, take=p.take)
         if tp1 is not None:
             s.tp1, s.origin, s.ext = float(tp1), float(origin), float(p.ext)
-        out.append(simulate(bars, s, against[(b.scope, d)], p.expiry, p.hold))
+        out.append(_apply_take(simulate(bars, s, against[(b.scope, d)], p.expiry, p.hold)))
     return one_at_a_time(out) if one_position else out
 
 
@@ -561,17 +591,19 @@ def _patterns_for(bars: Bars, length: int, r: smc.SmcResult | None) -> tuple[lis
 
 def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None,
                     one_position: bool = True) -> list[Signal]:
-    """Chart-pattern mode: one trade per pattern breakout (patterns.detect), in the breakout's direction. Entry on the
-    breakout close ("close") or a limit on the broken line ("retest"); stop beyond the pattern's invalidation point by
-    `sl_atr` × ATR; TP1 = Bulkowski's share of the height (half closes, stop to entry), TP2 = the full measured move."""
+    """Chart-pattern mode: one trade per pattern breakout (patterns.detect), in the breakout's direction. After the
+    breakout, a limit on the broken line waits for the retest ("retest", default; "close" = the breakout close);
+    stop on the breakout candle's ATR band (low − `sl_atr` × ATR / high + `sl_atr` × ATR); TP1 = Bulkowski's share
+    of the height, TP2 = the full measured move (`take`: both, or only one of them)."""
     found, atr = _patterns_for(bars, p.swing, r)
-    c = bars.close
+    h, l, c = bars.high, bars.low, bars.close
     out: list[Signal] = []
     for pat in found:
         t, d = pat.breakout, pat.direction
         a = float(atr[t]) if np.isfinite(atr[t]) else 0.0
-        entry = float(c[t]) if p.entry != "retest" else pat.level
-        stop = pat.stop - d * p.sl_atr * a
+        entry = float(c[t]) if p.entry == "close" else pat.level  # default: the retest of the broken line
+        # the stop is the ATR band of the breakout candle: below its low for a buy, above its high for a sell
+        stop = float(l[t]) - p.sl_atr * a if d > 0 else float(h[t]) + p.sl_atr * a
         if (entry - stop) * d <= 0:
             stop = entry - d * max(p.sl_atr * a, 1e-9)
         if (pat.tp2 - entry) * d <= 0:
@@ -579,10 +611,12 @@ def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align
         tp1 = pat.tp1 if (pat.tp1 - entry) * d > 0 else entry + d * 0.5 * (pat.tp2 - entry)
         s = Signal(d, pat.name, "pattern", t, entry, float(stop), pat.tp2, manage="tp12", tp1=float(tp1),
                    align=float(align[t]) * d if align is not None else None, level=pat.level, pivot=pat.start,
-                   fill="close" if p.entry != "retest" else "limit",
+                   fill="close" if p.entry == "close" else "limit", take=p.take,
                    pattern={"kind": pat.kind, "name": pat.name, "height": pat.height, "pct": pat.pct,
                             "points": pat.points, "lines": pat.lines})
-        out.append(simulate(bars, s, set(), p.expiry, p.hold))
+        if p.entry != "close" and pat.slope:
+            s.entry_slope, s.entry_line0 = pat.slope, pat.level
+        out.append(_apply_take(simulate(bars, s, set(), p.expiry, p.hold)))
     return one_at_a_time(out) if one_position else out
 
 
@@ -705,19 +739,20 @@ def _grid(tf_key: str, level: int = 0, method: str = "smc"):
 
 
 def _pattern_grid(tf_key: str, level: int = 0):
-    """Chart-pattern settings: pivot length (pattern size), entry on the breakout close or on a retest of the line,
-    ATR buffer beyond the pattern's invalidation point (18 → 40 → 120 settings). The targets stay the measure rule."""
+    """Chart-pattern settings — entry always on the retest, stop always on the breakout candle's ATR band, targets
+    always the measure rule; tuned: pivot length (pattern size), ATR band multiple, how long the retest may take
+    (9 → 24 → 90 settings)."""
     base = pattern_params(tf_key)
     lengths = {base.swing, max(3, base.swing - 3), base.swing + 4}
-    stops, expiries = (0.25, 0.5, 1.0), (base.expiry,)
+    stops, expiries = (1.5, 2.0, 2.5), (base.expiry,)
     if level >= 1:
-        stops = (0.1, 0.25, 0.5, 1.0, 1.5)
+        stops = (1.0, 1.5, 2.0, 2.5, 3.0, 3.5)
         lengths |= {base.swing + 8}
     if level >= 2:
-        lengths |= {max(3, base.swing - 5), base.swing + 12}
+        lengths |= {max(3, base.swing - 5)}
         expiries = (max(5, base.expiry // 2), base.expiry, base.expiry * 2)
-    for length, entry, sl_atr, expiry in itertools.product(sorted(lengths), ("close", "retest"), stops, expiries):
-        yield replace(base, swing=length, entry=entry, sl_atr=sl_atr, expiry=expiry)
+    for length, sl_atr, expiry in itertools.product(sorted(lengths), stops, expiries):
+        yield replace(base, swing=length, sl_atr=sl_atr, expiry=expiry)
 
 
 def grid_size(tf_key: str, level: int = 0, method: str = "smc") -> int:
@@ -748,7 +783,10 @@ def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = No
         report = walk_forward(bars, p, analysis_for(p), align)
         return _score(report["inSample"], MIN_IS_TRADES), p, report
 
-    ranked = sorted((evaluate(p) for p in _grid(tf_key, level, current.method)), key=lambda x: x[0], reverse=True)
+    # the viewer's choices stay: targets used and, for chart patterns, the entry (retest / breakout close)
+    candidates = (replace(q, take=current.take, **({"entry": current.entry} if current.method == "pattern" else {}))
+                  for q in _grid(tf_key, level, current.method))
+    ranked = sorted((evaluate(p) for p in candidates), key=lambda x: x[0], reverse=True)
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -1428,16 +1466,18 @@ def _rate(quote: str, account: str) -> float | None:
     return None
 
 
-def chart(symbol: str, tf: str, bars_wanted: int | None = None, method: str = "smc") -> dict:
+def chart(symbol: str, tf: str, bars_wanted: int | None = None, method: str = "smc", take: str = "both",
+          entry: str = "retest") -> dict:
     """Live training chart of one pair: the bars the tuner learns from (long history with a fresh tail), the
     structure the active setting sees, and its virtual trades — the journal's live rows replacing their
     re-simulated twins. Times are bar opens (UTC seconds). method "pattern": the chart-pattern trades of
     pattern_params on the same bars (the live journal and the learned settings belong to the SMC mode)."""
     inst = instruments.resolve(symbol)
     if method == "pattern":
-        source, version, p = "pattern", 0, pattern_params(tf)
+        source, version, p = "pattern", 0, replace(pattern_params(tf), entry="close" if entry == "close" else "retest")
     else:
         source, version, p = active(inst.symbol, tf)
+    p = replace(p, take=take if take in ("tp1", "tp2") else "both")  # the targets the viewer chose
     bars = history(inst, tf, max(200, min(MAX_TRAIN_BARS, bars_wanted)) if bars_wanted else None)
     if bars is None or len(bars) < 50:
         bars = market_data.load(inst, tf)

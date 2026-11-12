@@ -259,7 +259,7 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/training/chart", async (string symbol, string? tf, int? bars, string? method, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/training/chart", async (string symbol, string? tf, int? bars, string? method, string? take, string? entry, EngineClient engine, CancellationToken ct) =>
         {
             tf = string.IsNullOrWhiteSpace(tf) ? "1h" : tf.ToLowerInvariant();
             if (!Timeframes.Contains(tf))
@@ -268,6 +268,8 @@ public static class Api
             }
             var window = bars is > 0 ? $"&bars={bars.Value}" : "";
             var mode = method == "pattern" ? "&method=pattern" : "";  // chart patterns instead of SMC
+            mode += take is "tp1" or "tp2" ? $"&take={take}" : "";  // only TP1 / only TP2 instead of both
+            mode += entry == "close" ? "&entry=close" : "";  // chart patterns: breakout close instead of the retest
             var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}{window}{mode}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
@@ -306,7 +308,7 @@ public static class Api
 
         api.MapPost("/training/session/start", async (SessionRequest body, EngineClient engine, CancellationToken ct) =>
         {
-            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars, improve = body.Improve, method = body.Method == "pattern" ? "pattern" : "smc" }, ct);
+            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars, improve = body.Improve, method = body.Method == "pattern" ? "pattern" : "smc", take = body.Take is "tp1" or "tp2" ? body.Take : "both", entry = body.Entry == "close" ? "close" : "retest" }, ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -404,7 +406,7 @@ public static class Api
 
     public sealed record LabRequest(string[] Markets, string[] Tfs, int Bars);
 
-    public sealed record SessionRequest(string Symbol, string Tf, int Bars, bool Improve = false, string? Method = null);
+    public sealed record SessionRequest(string Symbol, string Tf, int Bars, bool Improve = false, string? Method = null, string? Take = null, string? Entry = null);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

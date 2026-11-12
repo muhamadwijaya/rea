@@ -881,3 +881,21 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   background: transparent; color: var(--muted); border: 0; border-right: 1px solid var(--line-2); }
 .tr-method button:last-child { border-right: 0; }
 .tr-method button.active { color: #002644; background: var(--go); }
+/* session / replay info box in the left panel instead of over the chart (v3.18) */
+.tr-slot { display: none; flex: 0 0 auto; max-height: 42%; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--line);
+  font-size: 11px; color: var(--text-2); background: rgba(0, 10, 22, .25); }
+#tab-training[data-subtab="lab"] .tr-slot-lab:not(:empty),
+#tab-training[data-subtab="live"] .tr-slot-live:not(:empty) { display: block; }
+.tr-slot .rp-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tr-slot .rp-head b { color: var(--go); letter-spacing: .08em; }
+.tr-slot .rp-bar { height: 4px; margin: 5px 0; background: rgba(255, 255, 255, .08); border-radius: 2px; overflow: hidden; }
+.tr-slot .rp-bar i { display: block; height: 100%; background: var(--go); }
+.tr-slot .rp-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.tr-slot .rp-note { margin-top: 5px; font-size: 10px; line-height: 1.5; }
+.tr-entry { display: inline-flex; border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+.tr-entry button { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 4px 9px; cursor: pointer;
+  background: transparent; color: var(--muted); border: 0; border-right: 1px solid var(--line-2); }
+.tr-entry button:last-child { border-right: 0; }
+.tr-entry button.active { color: #002644; background: var(--go); }
+.acct-tp { display: inline-flex; gap: 8px; align-items: center; }
+.acct-tp label { gap: 3px; }

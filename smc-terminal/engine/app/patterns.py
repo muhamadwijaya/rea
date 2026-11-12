@@ -69,6 +69,7 @@ class Pattern:
     start: int
     points: list[tuple[int, float]]
     lines: list[tuple[tuple[int, float], tuple[int, float]]] = field(default_factory=list)
+    slope: float = 0.0  # of the broken line, per bar: a retest meets it where it is then (sloped triangles, wedges)
 
     @property
     def name(self) -> str:
@@ -248,15 +249,15 @@ def detect(h: np.ndarray, l: np.ndarray, c: np.ndarray, atr: np.ndarray, length:
                 continue
             hit = None
             if cand.up is not None and 1 in MEASURE[cand.kind] and c[t] > cand.up.at(t):
-                hit = (1, cand.up.at(t))
+                hit = (1, cand.up.at(t), cand.up.slope)
             elif cand.down is not None and -1 in MEASURE[cand.kind] and c[t] < cand.down.at(t):
-                hit = (-1, cand.down.at(t))
+                hit = (-1, cand.down.at(t), cand.down.slope)
             elif (cand.up is not None and c[t] > cand.up.at(t)) or (cand.down is not None and c[t] < cand.down.at(t)):
                 continue  # broke out the side the pattern is not traded on: done
             if hit is None:
                 still.append(cand)
                 continue
-            d, level = hit
+            d, level, slope = hit
             base_key, pct = MEASURE[cand.kind][d]
             base = level if base_key == "B" else cand.bases[base_key]
             tp1, tp2 = base + d * pct * cand.height, level + d * cand.height
@@ -265,7 +266,7 @@ def detect(h: np.ndarray, l: np.ndarray, c: np.ndarray, atr: np.ndarray, length:
             pat = Pattern(cand.kind, d, t, float(level), float(cand.height), float(tp1), float(tp2), pct,
                           float(cand.stops[d]), cand.points[0].index, [(q.index, float(q.price)) for q in cand.points],
                           [((ln.i0 if ln.i0 >= cand.points[0].index else cand.points[0].index,
-                             ln.at(max(ln.i0, cand.points[0].index))), (t, ln.at(t))) for ln in cand.draw])
+                             ln.at(max(ln.i0, cand.points[0].index))), (t, ln.at(t))) for ln in cand.draw], float(slope))
             key = (t, d)
             if key not in found or PRIORITY.index(pat.kind) < PRIORITY.index(found[key].kind):
                 found[key] = pat

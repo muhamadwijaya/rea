@@ -6,12 +6,14 @@ const KEY = 'sharx.account';
 const DEFAULTS = {
   balance: { USD: 1000, IDR: 10_000_000 },
   lot: { forex: 0.1, kripto: 0.1, 'saham-as': 1, 'saham-idx': 10 },
+  take: { tp1: true, tp2: true },  // targets used: both = half at TP1, stop to entry, rest at TP2
 };
 
 export function loadAccount() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { /* private window: defaults */ }
-  return { balance: { ...DEFAULTS.balance, ...(saved.balance || {}) }, lot: { ...DEFAULTS.lot, ...(saved.lot || {}) } };
+  return { balance: { ...DEFAULTS.balance, ...(saved.balance || {}) }, lot: { ...DEFAULTS.lot, ...(saved.lot || {}) },
+    take: { ...DEFAULTS.take, ...(saved.take || {}) } };
 }
 
 export function saveAccount(account) {
@@ -88,10 +90,11 @@ export function fmtMoney(v, currency, signed = false) {
 const MARKET_ACCOUNT = { 'saham-idx': 'IDR' };
 
 /**
- * BALANCE / LOT inputs for one market. `onChange()` runs after every valid edit (values are saved).
- * Returns { el, balance(), lot(), currency(spec), market(m) } — `market(m)` switches the lot remembered per market.
+ * BALANCE / LOT inputs for one market and the TP1 / TP2 checkboxes. `onChange()` runs after a balance or lot edit
+ * (money only), `onTake()` after the targets changed (the trades must be simulated again). Values are saved.
+ * Returns { el, balance(), lot(), take(), market(m) } — `market(m)` switches the lot remembered per market.
  */
-export function accountInputs(onChange) {
+export function accountInputs(onChange, onTake = onChange) {
   let account = loadAccount();
   let market = 'forex';
   const el = document.createElement('span');
@@ -99,15 +102,20 @@ export function accountInputs(onChange) {
   el.innerHTML = `<label title="Saldo awal akun virtual (mata uang akun: USD, saham IDX: Rupiah)">BALANCE
       <input class="input acct-balance" type="number" min="0" step="any"><b class="acct-cur">USD</b></label>
     <label title="Ukuran posisi per trade dalam lot (forex 1 lot = 100.000 unit, emas 1 lot = 100 oz, saham 1 lot = 100 lembar, kripto 1 lot = 1 koin)">LOT
-      <input class="input acct-lot" type="number" min="0" step="any"></label>`;
+      <input class="input acct-lot" type="number" min="0" step="any"></label>
+    <span class="acct-tp" title="Target yang dipakai. Dua-duanya: 50% ditutup di TP1, SL pindah ke entry, sisa ke TP2. Satu saja: seluruh posisi ditutup di target itu.">
+      <label><input type="checkbox" class="acct-tp1"> TP1</label><label><input type="checkbox" class="acct-tp2"> TP2</label></span>`;
   const balanceInput = el.querySelector('.acct-balance');
   const lotInput = el.querySelector('.acct-lot');
+  const tp1Box = el.querySelector('.acct-tp1'), tp2Box = el.querySelector('.acct-tp2');
   const currency = () => MARKET_ACCOUNT[market] || 'USD';
   const show = () => {
     balanceInput.value = account.balance[currency()];
     lotInput.value = account.lot[market] ?? 0.1;
     el.querySelector('.acct-cur').textContent = currency();
     lotInput.step = market === 'saham-idx' || market === 'saham-as' ? '1' : '0.01';
+    tp1Box.checked = account.take.tp1;
+    tp2Box.checked = account.take.tp2;
   };
   const read = () => {
     const b = Number(balanceInput.value), l = Number(lotInput.value);
@@ -118,17 +126,30 @@ export function accountInputs(onChange) {
   };
   balanceInput.addEventListener('change', read);
   lotInput.addEventListener('change', read);
+  const readTake = (e) => {
+    account.take = { tp1: tp1Box.checked, tp2: tp2Box.checked };
+    if (!account.take.tp1 && !account.take.tp2) {  // a trade needs a target: the other one stays
+      account.take[e.target === tp1Box ? 'tp2' : 'tp1'] = true;
+      show();
+    }
+    saveAccount(account);
+    onTake();
+  };
+  tp1Box.addEventListener('change', readTake);
+  tp2Box.addEventListener('change', readTake);
   window.addEventListener('sharx-account', (e) => {
     if (e.detail === account) return;
-    account = { balance: { ...e.detail.balance }, lot: { ...e.detail.lot } };
+    const takeChanged = e.detail.take.tp1 !== account.take.tp1 || e.detail.take.tp2 !== account.take.tp2;
+    account = { balance: { ...e.detail.balance }, lot: { ...e.detail.lot }, take: { ...e.detail.take } };
     show();
-    onChange();
+    (takeChanged ? onTake : onChange)();
   });
   show();
   return {
     el,
     balance: () => account.balance[currency()],
     lot: () => account.lot[market] ?? 0.1,
+    take: () => (account.take.tp1 && account.take.tp2 ? 'both' : account.take.tp1 ? 'tp1' : 'tp2'),
     market(m) { if (m && m !== market) { market = m; show(); } },
   };
 }

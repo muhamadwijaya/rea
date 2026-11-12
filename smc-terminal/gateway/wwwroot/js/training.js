@@ -27,6 +27,9 @@ const patternLine = (g) => {
   return rows.length ? `<span class="tr-grades">POLA: ${rows.map(([k, v]) => `${esc(k)} <b>${pct(v.winRate)}</b>
     <span class="dim">(${v.trades}, ${rr(v.expectancyR)})</span>`).join(' · ')}</span>` : '<span class="dim">POLA: belum ada trade selesai</span>';
 };
+const ENTRY_BUTTONS = '<span class="tr-entry" title="Chart pattern: setelah breakout tunggu RETEST ke garis yang ditembus (limit di garis), atau entry langsung di CLOSE candle breakout"><button data-entry="retest">ENTRY RETEST</button><button data-entry="close">ENTRY CLOSE BREAKOUT</button></span>';
+// The session / replay info box lives in the left panel (above the equity curve), not over the chart.
+const slot = (name) => document.querySelector(`#tab-training .tr-slot-${name}`);
 const METHOD_BUTTONS = '<span class="tr-method" title="Metode analisa: SMC (BOS/CHoCH → area FVG) atau chart pattern klasik (double top, H&S, segitiga, wedge, flag, rectangle) dengan target measured move"><button data-method="smc">SMC</button><button data-method="pattern">CHART PATTERN</button></span>';
 // Precision level reached by a setting (lower bound of its proven win rate); thresholds come from the engine.
 function levelTag(modes, qualified, low) {
@@ -222,7 +225,7 @@ const clock = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2
 function mountTrainingChart(el) {
   el.innerHTML = `
     <div class="tr-live-bar">
-      ${METHOD_BUTTONS}
+      ${METHOD_BUTTONS}${ENTRY_BUTTONS}
       <select class="input tr-live-pick" title="Aset & timeframe yang dilatih"></select>
       <button class="tr-follow" title="Pindah otomatis ke aset yang sedang dilatih di TRAINING LAB, atau ke aktivitas trade virtual terbaru">IKUTI TRAINING</button>
       <button class="tr-smc" title="Tampilkan struktur SMC (BOS/CHoCH swing & internal)">SMC</button>
@@ -239,14 +242,14 @@ function mountTrainingChart(el) {
     <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div><div class="chart-replay hidden"></div></div>
     <div class="tr-live-foot"></div>`;
   const $ = (q) => el.querySelector(q);
-  const prefs = { follow: false, smc: true, speed: 4, method: 'smc', ...loadChartPrefs() };
+  const prefs = { follow: false, smc: true, speed: 4, method: 'smc', entry: 'retest', ...loadChartPrefs() };
   const patternMode = () => prefs.method === 'pattern';
   let chart = null, current = null, summary = null, chartData = null, liveState = null, busy = false, seq = 0;
   let replay = null;  // { full, i, start, playing, acc, last, raf }
   const visible = () => el.offsetParent !== null && !document.hidden;
   const save = () => saveChartPrefs({ ...prefs, symbol: current?.symbol, tf: current?.tf });
   // virtual account: balance & lot → money per trade (the trades themselves do not change)
-  const acct = accountInputs(() => refreshMoney());
+  const acct = accountInputs(() => refreshMoney(), () => { if (!replay) load(true); });  // TP1 / TP2: simulate again
   $('.tr-acct-host').append(acct.el);
   const spec = () => effectiveSpec(chartData?.contract);
   const withMoney = (trades) => moneyLabels(trades, spec(), acct.lot());
@@ -259,12 +262,14 @@ function mountTrainingChart(el) {
     $('.tr-smc').classList.toggle('active', prefs.smc);
     $('.tr-smc').classList.toggle('hidden', patternMode());
     el.querySelectorAll('.tr-method button').forEach((b) => b.classList.toggle('active', b.dataset.method === prefs.method));
+    $('.tr-entry').classList.toggle('hidden', !patternMode());
+    el.querySelectorAll('.tr-entry button').forEach((b) => b.classList.toggle('active', b.dataset.entry === prefs.entry));
     el.querySelectorAll('.tr-speed button').forEach((b) => b.classList.toggle('active', +b.dataset.speed === prefs.speed));
     $('.tr-play').textContent = !replay ? '▶ REPLAY' : replay.playing ? '⏸ JEDA' : replay.i >= replay.full.candles.length ? '↺ ULANG' : '▶ LANJUT';
     $('.tr-play').classList.toggle('active', !!replay?.playing);
     $('.tr-end').classList.toggle('hidden', !replay);
     $('.tr-stop').classList.toggle('hidden', !replay);
-    $('.chart-replay').classList.toggle('hidden', !replay);
+    if (!replay && slot('live')) slot('live').innerHTML = '';
     $('.chart-live').classList.toggle('hidden', !!replay);
   };
 
@@ -294,7 +299,7 @@ function mountTrainingChart(el) {
         } catch (e) {
           replay.playing = false;  // keep what is shown; the error is visible instead of a frozen replay
           syncButtons();
-          $('.chart-replay').insertAdjacentHTML('beforeend', `<div class="down">${esc(e.message)}</div>`);
+          slot('live')?.insertAdjacentHTML('beforeend', `<div class="down">${esc(e.message)}</div>`);
         }
       }
     }
@@ -320,7 +325,8 @@ function mountTrainingChart(el) {
     const total = done.reduce((a, s) => a + (s.r || 0), 0);
     const active = full.trades.filter((s) => { const v = tradeAt(s, T); return v && s.status !== 'cancelled' && (v.status === 'open' || v.status === 'pending'); }).length;
     const progressPct = ((i - start) / Math.max(1, full.candles.length - start)) * 100;
-    $('.chart-replay').innerHTML = `
+    const box = slot('live') || $('.chart-replay');
+    box.innerHTML = `
       <div class="rp-head"><b>REPLAY ×${prefs.speed}</b><span>${esc(dateText(T, full.tf))}</span><span class="dim">${i >= full.candles.length ? 'SELESAI' : `${Math.round(progressPct)}%`}</span></div>
       <div class="rp-bar"><i style="width:${progressPct.toFixed(1)}%"></i></div>
       <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
@@ -372,16 +378,18 @@ function mountTrainingChart(el) {
     await load(false);
   }
 
+  let loading = false, replayAfterLoad = false;  // REPLAY pressed while the trades are being simulated again
   async function load(keepRange) {
     if (!current) return;
     const my = ++seq;
     const { symbol, tf } = current;
+    loading = true;
     if (!chart) {
       chart = new SmcChart($('.chart-host'), $('.tr-live-chart'));
       chart.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
     }
     try {
-      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}${current.bars ? `&bars=${current.bars}` : ''}&method=${prefs.method}`);
+      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}${current.bars ? `&bars=${current.bars}` : ''}&method=${prefs.method}&take=${acct.take()}&entry=${prefs.entry}`);
       if (my !== seq || replay) return;
       chartData = t;
       chart.setData({ ...t, candles: t.candles.map((c) => ({ ...c })) }, { keepRange });
@@ -393,6 +401,11 @@ function mountTrainingChart(el) {
       pollLive();
     } catch (e) {
       if (my === seq) $('.tr-live-foot').innerHTML = `<span class="down">${esc(e.message)}</span>`;
+    } finally {
+      if (my === seq) {
+        loading = false;
+        if (replayAfterLoad) { replayAfterLoad = false; startReplay(); }
+      }
     }
   }
 
@@ -470,6 +483,15 @@ function mountTrainingChart(el) {
     save();
     chart?.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
   });
+  el.querySelector('.tr-entry').addEventListener('click', (e) => {  // chart patterns: retest ↔ breakout close
+    const v = e.target.closest('button')?.dataset.entry;
+    if (!v || v === prefs.entry) return;
+    prefs.entry = v;
+    stopReplay(false);
+    syncButtons();
+    save();
+    load(false);
+  });
   el.querySelector('.tr-method').addEventListener('click', (e) => {  // SMC ↔ chart pattern: same asset, other method
     const m = e.target.closest('button')?.dataset.method;
     if (!m || m === prefs.method) return;
@@ -494,6 +516,7 @@ function mountTrainingChart(el) {
     } catch { /* the next tick retries */ }
   }, 5000);
   $('.tr-play').addEventListener('click', () => {
+    if (!replay && loading) { replayAfterLoad = true; return; }  // replay the trades being loaded, not the old ones
     if (!replay) { startReplay(); return; }
     if (replay.i >= replay.full.candles.length) { stopReplay(false); startReplay(); return; }
     replay.playing = !replay.playing;
@@ -547,12 +570,12 @@ const thin = (n) => (n < 30 ? ` <span class="flat">· sampel kecil (${n} trade),
 const savedText = (sv) => (!sv ? '' : `trade disimpan ke kamus AI · setting aset ${sv.upgrade ? `<span class="up">di-upgrade ke v${sv.version}</span>` : sv.version ? `tetap v${sv.version}` : 'tetap default'}`);
 
 function mountTrainingLab(el) {
-  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4, improve: true, method: 'smc' };
+  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4, improve: true, method: 'smc', entry: 'retest' };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LAB_KEY) || '{}') }; } catch { /* per-viewer convenience only */ }
   const save = () => { try { localStorage.setItem(LAB_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
   el.innerHTML = `
     <div class="lab-ctl">
-      <div class="lab-row"><span>METODE</span>${METHOD_BUTTONS}<span class="dim lab-method-note"></span></div>
+      <div class="lab-row"><span>METODE</span>${METHOD_BUTTONS}${ENTRY_BUTTONS}<span class="dim lab-method-note"></span></div>
       <div class="lab-row"><span>PASAR</span><div class="lab-set" data-set="markets">${LAB_MARKETS.map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}<button data-all="markets">SEMUA</button></div></div>
       <div class="lab-row"><span>ASET</span><select class="input lab-asset"></select><span class="dim lab-asset-note"></span></div>
       <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
@@ -560,7 +583,7 @@ function mountTrainingLab(el) {
         <span class="dim lab-hint"></span></div>
       <div class="lab-row lab-improve-row"><span></span><label class="check" title="Selama belum mencapai target, training maju diulang dengan pencarian SMC yang makin luas (54 → 900 kombinasi) dan hasil terbaik dipakai; berhenti bila target tercapai atau pencarian lebih luas tidak membantu lagi. 20% candle terakhir dikunci untuk ujian akhir.">
         <input type="checkbox" class="lab-improve"> TERUS PERBAIKI SAMPAI TARGET 99% — ulang dengan pencarian SMC makin luas, lalu ujian akhir di 20% candle terakhir</label></div>
-      <div class="lab-row"><span>AKUN</span><span class="lab-acct-host"></span><span class="dim">uang per trade = R × jarak stop × lot × ukuran kontrak</span></div>
+      <div class="lab-row"><span>AKUN</span><span class="lab-acct-host"></span><span class="dim lab-acct-note">uang per trade = R × jarak stop × lot × ukuran kontrak</span></div>
       <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
       <div class="tr-progress lab-progress"><i></i><span></span></div>
       <div class="lab-current"></div>
@@ -580,13 +603,15 @@ function mountTrainingLab(el) {
           <button class="lab-end" title="Lompat ke candle terakhir yang sudah dilatih">⏭</button>
           <span class="lab-live-info"></span>
         </div>
-        <div class="chart-shell lab-chart"><div class="chart-host"></div><div class="chart-replay"></div></div>
+        <div class="chart-shell lab-chart"><div class="chart-host"></div></div>
         <div class="lab-learn"></div>
       </div>
     </div>`;
   const $ = (q) => el.querySelector(q);
   // virtual account of the live training chart (shared with LIVE CHART through account.js)
-  const acct = accountInputs(() => { if (play) drawPlay(); });
+  const acct = accountInputs(() => { if (play) drawPlay(); }, () => {
+    $('.lab-acct-note').textContent = 'TP1/TP2 berubah: berlaku untuk training berikutnya (klik MULAI TRAINING lagi)';
+  });
   $('.lab-acct-host').append(acct.el);
   const labSpec = () => effectiveSpec(sess?.contract);
   let status = null, summary = null, timer = null, assets = new Map();
@@ -607,8 +632,10 @@ function mountTrainingLab(el) {
     $('.lab-improve').checked = prefs.improve;
     if (prefs.markets.length === 1) acct.market(prefs.markets[0]);  // balance currency & lot of the chosen market
     el.querySelectorAll('.lab-ctl .tr-method button').forEach((b) => b.classList.toggle('active', b.dataset.method === prefs.method));
+    $('.lab-ctl .tr-entry').classList.toggle('hidden', prefs.method !== 'pattern');
+    el.querySelectorAll('.lab-ctl .tr-entry button').forEach((b) => b.classList.toggle('active', b.dataset.entry === prefs.entry));
     $('.lab-method-note').textContent = prefs.method === 'pattern'
-      ? 'chart pattern: double top/bottom, H&S, segitiga, rectangle, wedge, flag — target measured move (TP1 % Bulkowski, TP2 100% tinggi pola)'
+      ? `chart pattern: ${prefs.entry === 'close' ? 'entry di close candle breakout' : 'setelah breakout tunggu retest ke garis'}, SL = ATR band candle breakout, TP1 % Bulkowski / TP2 100% tinggi pola`
       : 'SMC: setiap BOS/CHoCH → area FVG, TP1 puncak, TP2 lanjutan, SL ATR band';
   };
 
@@ -692,6 +719,7 @@ function mountTrainingLab(el) {
   function showLive(on) {
     $('.lab-live').classList.toggle('hidden', !on);
     $('.lab-batch').classList.toggle('hidden', on);
+    if (!on && slot('lab')) slot('lab').innerHTML = '';  // the info box belongs to the live training chart
   }
 
   async function feedPlayer() {
@@ -744,7 +772,7 @@ function mountTrainingLab(el) {
     const learned = segs.filter((sg) => sg.learn).pop()?.learn;
     const waiting = sess && (sess.state === 'running' || sess.state === 'loading') && i >= (sess.computedTo || 0);
     const finished = i >= data.candles.length;
-    $('.lab-chart .chart-replay').innerHTML = `
+    (slot('lab') || document.createElement('div')).innerHTML = `
       <div class="rp-head"><b>TRAINING LIVE ×${prefs.speed}</b><span>${esc(sess?.symbol || '')} ${esc((sess?.tf || '').toUpperCase())}</span>
         <span>${esc(dateText(T, sess?.tf))}</span><span class="dim">candle ${i} / ${data.candles.length}${seg ? ` · AI v${seg.version}` : ''}</span></div>
       <div class="rp-bar"><i style="width:${((100 * i) / data.candles.length).toFixed(1)}%"></i></div>
@@ -790,6 +818,7 @@ function mountTrainingLab(el) {
     if (!b) return;
     if (b.dataset.speed) { prefs.speed = +b.dataset.speed; save(); syncPlay(); if (play) drawPlay(); return; }
     if (b.dataset.method) { prefs.method = b.dataset.method; save(); renderSets(); return; }  // used by the next start
+    if (b.dataset.entry) { prefs.entry = b.dataset.entry; save(); renderSets(); return; }
     if (b.classList.contains('lab-play')) { if (play) { play.playing = !play.playing; play.last = performance.now(); } syncPlay(); return; }
     if (b.classList.contains('lab-end')) {
       if (play) { const limit = Math.min(play.data.candles.length, sess?.computedTo || 0); while (play.i < limit) chart.appendCandle({ ...play.data.candles[play.i++] }); drawPlay(); }
@@ -813,7 +842,9 @@ function mountTrainingLab(el) {
         if (single()) {
           resetPlayer();
           showLive(true);
-          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars, improve: prefs.improve, method: prefs.method } });
+          $('.lab-acct-note').textContent = 'uang per trade = R × jarak stop × lot × ukuran kontrak';
+          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars,
+            improve: prefs.improve, method: prefs.method, take: acct.take(), entry: prefs.entry } });
         } else {
           showLive(false);
           status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } });
@@ -857,6 +888,7 @@ export const trainingPage = {
   init() {
     this.el = document.getElementById('tab-training');
     this.tab = 'board';
+    this.el.dataset.subtab = this.tab;
     this.precision = loadPrecision();
     this.el.innerHTML = `
       <div class="tr-kpis"></div>
@@ -864,6 +896,7 @@ export const trainingPage = {
         <div class="panel col-panel">
           <div class="panel-head"><span class="diamond">◆</span> PROGRES AKURASI <span class="sub">trade virtual live & backtest out-of-sample</span><span class="right time tr-updated"></span></div>
           <div class="panel-body tr-overview"></div>
+          <div class="tr-slot tr-slot-lab"></div><div class="tr-slot tr-slot-live"></div>
           <div class="panel-head"><span class="diamond">◆</span> KURVA EKUITAS VIRTUAL <span class="sub">akumulasi R dari trade live yang selesai</span></div>
           <div class="tr-equity"><canvas></canvas></div>
         </div>
@@ -878,6 +911,7 @@ export const trainingPage = {
       const b = e.target.closest('button[data-v]');
       if (!b) return;
       this.tab = b.dataset.v;
+      this.el.dataset.subtab = this.tab;  // which info box of the left panel shows (TRAINING LAB / LIVE CHART replay)
       this.el.querySelectorAll('.tr-tabs button').forEach((x) => x.classList.toggle('active', x === b));
       this.renderBody();
     });

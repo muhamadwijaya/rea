@@ -66,22 +66,66 @@ def test_no_pattern_before_its_breakout_close():
     assert [(x.kind, x.breakout) for x in again] == [("double_top", t)]
 
 
-def test_pattern_mode_trades_the_breakout_close_with_tp1_tp2_and_the_atr_buffer():
-    o, h, l, c = zigzag([100, 110, 104, 110.2, 103, 96, 90, 85, 80])
-    b = Bars(np.arange(len(c), dtype=np.int64) * 3600, o, h, l, c, np.zeros(len(c)), 0.0)
+def _bars(points):
+    o, h, l, c = zigzag(points)
+    return Bars(np.arange(len(c), dtype=np.int64) * 3600, o, h, l, c, np.zeros(len(c)), 0.0)
+
+
+def test_pattern_mode_waits_for_the_retest_and_stops_on_the_breakout_candles_atr_band():
+    b = _bars([100, 110, 104, 110.2, 103, 104.5, 96, 90])  # breaks the neckline, comes back to it, then falls
     p = training.replace(training.pattern_params("1h"), swing=2)
-    assert (p.method, p.entry, p.hold) == ("pattern", "close", 0)
-    [s] = training.signals(b, p)
-    pat = patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2)[0]
-    atr = indicators.atr(h, l, c, 14)
-    assert (s.kind, s.scope, s.direction, s.created, s.opened) == ("DOUBLE TOP", "pattern", -1, pat.breakout, pat.breakout)
-    assert s.entry == pytest.approx(c[pat.breakout]) and s.stop == pytest.approx(pat.stop + 0.5 * atr[pat.breakout])
+    assert (p.method, p.entry, p.hold, p.sl_atr, p.take) == ("pattern", "retest", 0, 2.0, "both")
+    s = next(x for x in training.signals(b, p) if x.kind == "DOUBLE TOP")  # the bounce forms later patterns too
+    atr = indicators.atr(b.high, b.low, b.close, 14)
+    pat = patterns.detect(b.high, b.low, b.close, atr, 2)[0]
+    t = pat.breakout
+    assert (s.kind, s.scope, s.direction, s.created) == ("DOUBLE TOP", "pattern", -1, t)
+    assert s.entry == pytest.approx(pat.level) and s.opened > t  # a limit on the neckline, filled on the retest
+    assert s.stop == pytest.approx(b.high[t] + 2.0 * atr[t])  # the ATR band above the breakout candle
     assert (s.tp1, s.target) == (pytest.approx(pat.tp1), pytest.approx(pat.tp2))
-    assert s.status == "win" and s.reason.endswith("TP2")  # the fall runs through both targets
+    assert s.status == "win" and s.reason.endswith("TP2")
     assert training.pattern_metrics([s])["DOUBLE TOP"]["trades"] == 1
 
 
-def test_pattern_search_grid_keeps_the_measure_rule():
+def test_no_retest_no_trade():
+    b = _bars([100, 110, 104, 110.2, 103, 96, 90, 85, 80, 75])  # straight down after the breakout
+    [s] = training.signals(b, training.replace(training.pattern_params("1h"), swing=2, expiry=6))
+    assert s.status == "cancelled" and s.opened is None
+
+
+@pytest.mark.parametrize("take", ["both", "tp1", "tp2"])
+def test_take_profit_choice(take):
+    b = _bars([100, 110, 104, 110.2, 103, 104.5, 96, 90])
+    pat = patterns.detect(b.high, b.low, b.close, indicators.atr(b.high, b.low, b.close, 14), 2)[0]
+    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), swing=2, take=take))
+             if x.kind == "DOUBLE TOP")
+    risk = abs(s.entry - s.stop)
+    if take == "both":  # half at TP1, the rest at TP2
+        assert s.tp1 == pytest.approx(pat.tp1) and s.target == pytest.approx(pat.tp2)
+        assert s.r == pytest.approx(round(0.5 * abs(pat.tp1 - s.entry) / risk + 0.5 * abs(pat.tp2 - s.entry) / risk, 3))
+    else:  # everything at the one target chosen; the chart shows only that one
+        goal = pat.tp1 if take == "tp1" else pat.tp2
+        assert s.tp1 is None and s.target == pytest.approx(goal) and s.exit == pytest.approx(goal)
+        assert s.r == pytest.approx(round(abs(goal - s.entry) / risk, 3)) and s.reason == take.upper()
+
+
+def test_pattern_search_grid_keeps_the_rule():
     grid = list(training._grid("1h", 0, "pattern"))
-    assert len(grid) == 18 and all(p.method == "pattern" and p.target == "tp12" and p.hold == 0 for p in grid)
-    assert {p.entry for p in grid} == {"close", "retest"}
+    assert len(grid) == 9 and all(p.method == "pattern" and p.entry == "retest" and p.target == "tp12" and p.hold == 0
+                                  for p in grid)
+    assert {p.sl_atr for p in grid} == {1.5, 2.0, 2.5}
+
+
+def test_entry_choice_breakout_close():
+    b = _bars([100, 110, 104, 110.2, 103, 96, 90])
+    s = next(x for x in training.signals(b, training.replace(training.pattern_params("1h"), swing=2, entry="close")))
+    assert s.opened == s.created and s.entry == pytest.approx(b.close[s.created])  # no waiting for a retest
+
+
+def test_retest_of_a_sloped_line_meets_it_where_it_is():
+    b = _bars([100, 112, 102, 109, 105, 115, 107.5, 113, 118])  # symmetrical triangle, breakout up, pullback
+    p = training.replace(training.pattern_params("1h"), swing=2)
+    s = next(x for x in training.signals(b, p) if x.kind == "SYMMETRICAL TRIANGLE")
+    assert s.entry_slope < 0  # the upper line falls: the limit follows it
+    if s.opened is not None:
+        assert s.entry == pytest.approx(s.entry_line0 + s.entry_slope * (s.opened - s.created))

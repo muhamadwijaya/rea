@@ -243,9 +243,11 @@ def training_asset(symbol: str, tf: str = "1h") -> dict:
 
 
 @app.get("/training/chart")
-def training_chart(symbol: str, tf: str = "1h", bars: int | None = None, method: str = "smc") -> dict:
+def training_chart(symbol: str, tf: str = "1h", bars: int | None = None, method: str = "smc", take: str = "both",
+                   entry: str = "retest") -> dict:
     market_data.timeframe(tf)  # validates the timeframe
-    return training.chart(symbol, tf, bars, "pattern" if method == "pattern" else "smc")
+    return training.chart(symbol, tf, bars, "pattern" if method == "pattern" else "smc",
+                          take if take in ("tp1", "tp2") else "both", "close" if entry == "close" else "retest")
 
 
 class LabRequest(BaseModel):
@@ -275,6 +277,8 @@ class SessionRequest(BaseModel):
     bars: int = 5000
     improve: bool = False  # repeat with a wider search until the goal or no improvement, then a final exam
     method: str = "smc"  # "smc" | "pattern" (chart patterns)
+    take: str = "both"  # targets: "both" (TP1 + TP2) | "tp1" | "tp2"
+    entry: str = "retest"  # chart patterns: "retest" of the broken line | "close" of the breakout candle
 
 
 @app.get("/training/session")
@@ -289,7 +293,7 @@ def training_session_candles() -> dict:
 
 @app.post("/training/session/start")
 def training_session_start(body: SessionRequest) -> dict:
-    return session.start(body.symbol, body.tf, body.bars, body.improve, body.method)
+    return session.start(body.symbol, body.tf, body.bars, body.improve, body.method, body.take, body.entry)
 
 
 @app.post("/training/session/stop")
