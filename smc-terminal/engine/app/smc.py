@@ -190,27 +190,52 @@ def _order_block(direction: int, start: int, end: int, o, h, l, c, atr, scope: s
 
 
 def detect_structure(o, h, l, c, atr, pivots: list[Pivot], scope: str) -> Structure:
+    """Market structure with protected levels, bar by bar on closes.
+
+    * BOS — the trend continues: a close beyond the structure high of a bullish trend (the highest swing high since
+      the last break; a lower high inside a pullback does not replace it) or the structure low of a bearish trend.
+    * CHoCH — the character changes: a close beyond the *protected* level, i.e. the low that produced the last
+      bullish break (strong low) or the high that produced the last bearish break (strong high).
+    * A pullback that does not close beyond the protected level is internal structure / inducement: on this scale it
+      is no break at all, and the trend stays as it is.
+
+    After every break the protected level is the extreme between the broken level and the breaking bar (the origin of
+    the leg that broke structure — also its order block), and the next continuation level is the next swing point that
+    forms after the break.
+    """
     n = len(c)
     by_confirm: dict[int, list[Pivot]] = defaultdict(list)
     for p in pivots:
         if p.confirmed < n:
             by_confirm[p.confirmed].append(p)
 
-    top: Pivot | None = None
-    bottom: Pivot | None = None
-    top_live = bottom_live = False
+    top: Pivot | None = None  # level of the next bullish break (trend not bearish)
+    bottom: Pivot | None = None  # level of the next bearish break (trend not bullish)
+    strong: tuple[float, int] | None = None  # protected level of the current trend (price, bar)
     trend = 0
     breaks: list[Break] = []
     blocks: list[OrderBlock] = []
     live_blocks: list[OrderBlock] = []
     history = np.zeros(n, dtype=np.int8)
 
+    def leg_extreme(direction: int, start: int, t: int) -> tuple[float, int]:
+        """Protected level after a break: the low (bullish) / high (bearish) the breaking leg started from."""
+        k = start + int(np.argmin(l[start:t + 1]) if direction == BULL else np.argmax(h[start:t + 1]))
+        return (float(l[k]), k) if direction == BULL else (float(h[k]), k)
+
+    def record(kind: str, direction: int, level: float, origin: int, t: int) -> None:
+        breaks.append(Break(kind, direction, level, origin, t, scope))
+        ob = _order_block(direction, origin, t, o, h, l, c, atr, scope, t)
+        if ob:
+            blocks.append(ob)
+            live_blocks.append(ob)
+
     for t in range(n):
         for p in by_confirm.get(t, ()):
-            if p.kind == "high":
-                top, top_live = p, True
-            else:
-                bottom, bottom_live = p, True
+            if p.kind == "high" and trend != BEAR and (top is None or p.price > top.price):
+                top = p  # a new structure high (not a lower high inside the pullback)
+            elif p.kind == "low" and trend != BULL and (bottom is None or p.price < bottom.price):
+                bottom = p
 
         # Update existing blocks with this bar before adding new ones.
         if live_blocks:
@@ -230,23 +255,20 @@ def detect_structure(o, h, l, c, atr, pivots: list[Pivot], scope: str) -> Struct
                     still.append(ob)
             live_blocks = still
 
-        if top is not None and top_live and c[t] > top.price:
-            breaks.append(Break("CHoCH" if trend == BEAR else "BOS", BULL, top.price, top.index, t, scope))
-            top_live = False
-            trend = BULL
-            ob = _order_block(BULL, top.index, t, o, h, l, c, atr, scope, t)
-            if ob:
-                blocks.append(ob)
-                live_blocks.append(ob)
-
-        if bottom is not None and bottom_live and c[t] < bottom.price:
-            breaks.append(Break("CHoCH" if trend == BULL else "BOS", BEAR, bottom.price, bottom.index, t, scope))
-            bottom_live = False
-            trend = BEAR
-            ob = _order_block(BEAR, bottom.index, t, o, h, l, c, atr, scope, t)
-            if ob:
-                blocks.append(ob)
-                live_blocks.append(ob)
+        if trend == BEAR and strong is not None and c[t] > strong[0]:  # strong high taken: bullish CHoCH
+            level, origin = strong
+            record("CHoCH", BULL, level, origin, t)
+            trend, strong, top, bottom = BULL, leg_extreme(BULL, origin, t), None, None
+        elif trend == BULL and strong is not None and c[t] < strong[0]:  # strong low taken: bearish CHoCH
+            level, origin = strong
+            record("CHoCH", BEAR, level, origin, t)
+            trend, strong, top, bottom = BEAR, leg_extreme(BEAR, origin, t), None, None
+        elif trend != BEAR and top is not None and c[t] > top.price:  # bullish BOS (or the first break)
+            record("BOS", BULL, top.price, top.index, t)
+            trend, strong, top = BULL, leg_extreme(BULL, top.index, t), None
+        elif trend != BULL and bottom is not None and c[t] < bottom.price:  # bearish BOS (or the first break)
+            record("BOS", BEAR, bottom.price, bottom.index, t)
+            trend, strong, bottom = BEAR, leg_extreme(BEAR, bottom.index, t), None
 
         history[t] = trend
 

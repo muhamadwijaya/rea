@@ -191,6 +191,14 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   +0,028R. Sekitar separuh area tidak pernah disentuh harga lagi (tanpa entry). Aturan ini sendiri **tidak**
   menghasilkan 99%. Mode presisi dan EXPERT menilai aset/trade mana yang terbukti, tanpa menghapus area dari chart.
 
+- **Cara membaca BOS/CHoCH** (v3.15): **BOS** = close menembus high struktur tren naik (high tertinggi sejak break
+  terakhir — lower high di dalam pullback tidak menggantikannya) / low struktur tren turun. **CHoCH** = close menembus
+  **level yang dilindungi**: *strong low* (low asal leg yang menembus high terakhir) pada tren naik, *strong high* pada
+  tren turun. Pullback yang hanya menembus low/high kecil di dalamnya (inducement) **bukan** CHoCH — tren tetap.
+  Sebelumnya CHoCH dibaca dari pivot terbaru mana pun (seperti indikator SMC umum), sehingga pullback kecil ikut terbaca
+  CHoCH dan ditrading berlawanan tren. Terukur (57 aset × 15M/1H/4H/1D, aturan & satu posisi sama): CHoCH lama 56.232
+  break → baru 20.277; trade 32.069 → 16.369; **win 41,8% → 46,5%** (CHoCH 43,8% → **53,5%**, BOS 39,9% → 42,5%);
+  ekspektasi +0,078R → +0,044R per trade (CHoCH yang sah datang lebih lambat sehingga TP1 lebih dekat dibanding stop).
 - **Checklist ICT per setup** (grade di setiap area chart & kartu PLAN). Model ICT yang umum diajarkan: bias TF besar →
   **sweep likuiditas** (harga mengambil stop di high/low sebelumnya) → **displacement** (candle body besar searah, di
   sini body ≥ 1× ATR) yang membuat **MSS/CHoCH** dan meninggalkan **FVG** → entry saat retrace ke FVG di **discount**

@@ -40,6 +40,18 @@ def test_uptrend_then_breakdown_is_bos_then_choch():
     assert any(ob.direction == smc.BULL for ob in r.swing.order_blocks)
 
 
+def test_choch_needs_the_protected_low_not_a_pullback_low():
+    # up: BOS over 12; the dip to 11.6 takes the small pullback low (12.25, inducement) but not the strong low (11.0)
+    # → no CHoCH, the trend stays bullish; the lower high 12.85 is no structure high, the next BOS is over 13.05;
+    # the CHoCH comes when the low that produced that break (11.55) is closed below
+    o, h, l, c = zigzag([10, 12, 11, 13, 12.3, 12.8, 11.6, 14, 13.2, 13.6, 10.5, 11.5, 9.5])
+    r = smc.analyze(o, h, l, c, swing_length=2, internal_length=1)
+    assert [(b.kind, b.direction, round(b.level, 2)) for b in r.swing.breaks] == [
+        ("BOS", smc.BULL, 12.05), ("BOS", smc.BULL, 13.05), ("CHoCH", smc.BEAR, 11.55), ("BOS", smc.BEAR, 10.45)]
+    choch = r.swing.breaks[2]
+    assert r.swing.trend_history[choch.index - 1] == smc.BULL and r.swing.trend_history[choch.index] == smc.BEAR
+
+
 def test_break_never_uses_future_bars():
     o, h, l, c = zigzag([10, 12, 11, 13, 12, 14, 13, 15])
     full = smc.analyze(o, h, l, c, 3, 2)
