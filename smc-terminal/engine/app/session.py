@@ -67,9 +67,9 @@ def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int,
     t = lambda i: int(b.time[i]) if i is not None and i < len(b) else None  # noqa: E731
     return {"created_t": t(s.created), "opened_t": t(s.opened), "closed_t": t(s.closed),
             "expiry_t": int(b.time[s.created]) + tf_sec * p.expiry, "direction": s.direction, "kind": s.kind,
-            "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "status": s.status, "r": s.r,
-            "manage": s.manage, "align": s.align, "version": version, "segment": segment, "live": False,
-            "sample": "oos", "exam": exam}
+            "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "tp1": s.tp1, "status": s.status,
+            "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
+            "align": s.align, "version": version, "segment": segment, "live": False, "sample": "oos", "exam": exam}
 
 
 def _stats(trades: list[dict]) -> dict:
@@ -159,10 +159,12 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
                      "after": report["outOfSample"], "params": asdict(best)}
             if best != p:
                 p, version = best, version + 1
-        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align) if a <= s.created < z]
+        diag: list[dict] = []
+        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align, diag) if a <= s.created < z]
         trades += seg
         segments.append({"index": k, "from": a, "to": z, "fromT": int(b.time[a]), "toT": int(b.time[z - 1]),
-                         "version": version, "learn": event, "stats": _stats(seg)})
+                         "version": version, "learn": event, "stats": _stats(seg),
+                         "skipped": training.skipped_json(diag, b.time, a, z)})
         if publish:
             publish(trades, segments, z)
     return trades, segments, p, version

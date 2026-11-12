@@ -6,6 +6,7 @@ const C = {
   bull: '#2fd28c', bear: '#ff4d5e', neu: '#f2c94c', blue: '#6b9bff', cyan: '#38d3f5', orange: '#ff9f43',
   text: '#c9d6e6', dim: '#5d7896', grid: 'rgba(21, 76, 124, .35)', bg: '#001b33',
 };
+const MUTED = '#8592a8';  // hints: setups that were skipped or never filled
 
 const rgba = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
@@ -236,8 +237,12 @@ export class SmcChart {
     }
     const lastT = this.data.candles[this.data.candles.length - 1].t;
     const labels = [];  // result labels already drawn: skip one that would overlap
+    const free = (x, y, w) => !labels.some((b) => x < b.x + b.w && b.x < x + w && Math.abs(y - b.y) < 11);
+    const ts = this.chart.timeScale();
+    const wide = (ts.logicalToCoordinate(1) ?? 0) - (ts.logicalToCoordinate(0) ?? 0) >= 5;  // room for reason texts
+    this.drawSkipped(tr.skipped || [], X, Y, right, labels, free, wide);
     for (const s of tr.trades) {
-      if (s.status === 'cancelled') continue;
+      if (s.status === 'cancelled') { if (wide) this.drawCancelled(s, X, Y, right, labels, free); continue; }
       const pending = s.status === 'pending';
       const x1 = X(pending ? s.created_t : s.opened_t);
       let x2 = pending ? X(Math.min(s.expiry_t, lastT)) : s.closed_t ? X(s.closed_t) : X(lastT);
@@ -249,7 +254,11 @@ export class SmcChart {
       if (pending) {
         const end = Math.min(right, Math.max(x2, x1 + 60));  // a signal of the last candle still shows its levels
         ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
-        for (const [y, c, tag] of [[yE, C.blue, `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'}${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'], [yT, C.bull, 'TP']]) {
+        const y1 = s.tp1 != null ? Y(s.tp1) : null;
+        const lines = [[yE, C.blue, `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'} · FVG${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'],
+          ...(y1 !== null ? [[y1, C.bull, 'TP1 puncak BOS/CHoCH'], [yT, C.bull, 'TP2']] : [[yT, C.bull, 'TP']])];
+        if (s.tp1 == null) lines[0][2] = `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'}${s.live ? ' · LIVE' : ''}`;
+        for (const [y, c, tag] of lines) {
           ctx.strokeStyle = rgba(c, 0.9); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
           const fits = end + 6 + tag.length * 6.2 < right;
           ctx.textAlign = fits ? 'left' : 'right'; ctx.fillStyle = rgba(c, 1);
@@ -267,7 +276,18 @@ export class SmcChart {
       ctx.strokeRect(x1 + 0.5, top + 0.5, x2 - x1 - 1, bottom - top - 1);
       ctx.strokeStyle = rgba(C.text, 0.55 * faint); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x1, yE); ctx.lineTo(x2, yE); ctx.stroke();
-      if (s.manage === 'partial') {
+      if (s.tp1 != null) {  // TP1 at the BOS / CHoCH extreme: half closes here, the rest runs to TP2
+        const y1 = Y(s.tp1);
+        if (y1 !== null) {
+          ctx.setLineDash([4, 3]); ctx.strokeStyle = rgba(C.bull, 0.9 * faint);
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y1); ctx.stroke(); ctx.setLineDash([]);
+          if (x2 - x1 > 34) {
+            ctx.textAlign = 'left'; ctx.fillStyle = rgba(C.bull, 0.9 * faint);
+            ctx.fillText('TP1', x1 + 3, y1 + (s.direction > 0 ? 6 : -6));
+            ctx.fillText('TP2', x1 + 3, yT + (s.direction > 0 ? 6 : -6));
+          }
+        }
+      } else if (s.manage === 'partial') {
         const y1r = Y(s.entry + (s.entry - s.stop));
         if (y1r !== null && Math.abs(yT - yE) > Math.abs(y1r - yE) + 1) {
           ctx.setLineDash([2, 3]); ctx.strokeStyle = rgba(C.bull, 0.8 * faint);
@@ -283,13 +303,59 @@ export class SmcChart {
       const text = s.live ? `${label} LIVE` : label;
       const lw = text.length * 6.2, ly = top - 7 < 8 ? bottom + 8 : top - 7;
       const lx = x2 + 3 + lw < right ? x2 + 3 : Math.max(0, x1 - 3 - lw);  // keep clear of the price axis
-      if (!s.live && labels.some((b) => lx < b.x + b.w && b.x < lx + lw && Math.abs(ly - b.y) < 11)) continue;
+      if (!s.live && !free(lx, ly, lw)) continue;
       labels.push({ x: lx, y: ly, w: lw });
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'left'; ctx.fillStyle = s.live ? '#99ff00' : rgba(color, faint);
       ctx.fillText(text, lx, ly);
       ctx.font = '10px "JetBrains Mono", monospace';
     }
+  }
+
+  /** A setup that never filled: faint dashed levels until it was dropped, with the reason. */
+  drawCancelled(s, X, Y, right, labels, free) {
+    const { ctx } = this;
+    const x1 = X(s.created_t), x2 = X(s.closed_t ?? s.expiry_t);
+    const yE = Y(s.entry), yS = Y(s.stop), yT = Y(s.tp1 ?? s.target);
+    if (x1 === null || x2 === null || x2 < 0 || x1 > right || [yE, yS, yT].some((v) => v === null)) return;
+    const end = Math.max(x2, x1 + 6);
+    ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+    for (const [y, c] of [[yE, MUTED], [yS, C.bear], [yT, C.bull]]) {
+      ctx.strokeStyle = rgba(c, 0.35); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    const text = `BATAL: ${s.reason || 'tanpa entry'}`;
+    const w = text.length * 5.6, y = yE + (s.direction > 0 ? 9 : -9);
+    const x = end + 3 + w < right ? end + 3 : Math.max(0, x1 - 3 - w);
+    if (!free(x, y, w)) return;
+    labels.push({ x, y, w });
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left'; ctx.fillStyle = rgba(MUTED, 0.9); ctx.fillText(text, x, y);
+    ctx.font = '10px "JetBrains Mono", monospace';
+  }
+
+  /** BOS / CHoCH that did not become a trade, marked ✕ at the break with the reason (training chart). */
+  drawSkipped(list, X, Y, right, labels, free, wide) {
+    const { ctx } = this;
+    ctx.font = '9px "JetBrains Mono", monospace';
+    for (const b of list) {
+      if (this.until != null && b.t > this.until) continue;
+      if (!((b.scope === 'swing' && this.layers.swing) || (b.scope === 'internal' && this.layers.internal))) continue;
+      if (b.reason.startsWith('sama dengan')) continue;  // the swing break on the same candle carries the trade
+      const x = X(b.t), y = Y(b.level);
+      if (x === null || y === null || x < 0 || x > right) continue;
+      const up = b.direction === 'bullish';
+      const yy = y + (up ? 10 : -10);
+      ctx.textAlign = 'center'; ctx.fillStyle = rgba(MUTED, 0.95); ctx.fillText('✕', x, yy);
+      if (!wide) continue;  // zoomed out: the mark only, zoom in to read why
+      const text = `${b.scope === 'swing' ? '' : 'i'}${b.kind}: ${b.reason}`;
+      const w = text.length * 5.6;
+      const tx = x + 7 + w < right ? x + 7 : Math.max(0, x - 7 - w);
+      if (!free(tx, yy, w)) continue;
+      labels.push({ x: tx, y: yy, w });
+      ctx.textAlign = 'left'; ctx.fillStyle = rgba(MUTED, 0.85); ctx.fillText(text, tx, yy);
+    }
+    ctx.font = '10px "JetBrains Mono", monospace';
   }
 
   drawZones(z, X, Y, right) {

@@ -173,18 +173,33 @@ di pengaturan suara melewati tautan Google News.
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
 Setiap aset inti (TF 15M/1H/4H/1D) dan seluruh universe (TF 1D) dipantau. Strategi (kausal — hanya memakai bar
-sampai saat itu): break struktur (CHoCH/BOS) membuat **sinyal** dari order block-nya — entry limit di OB, stop di balik
-OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
+sampai saat itu) — **aturan SMC BOS/CHoCH → FVG**: setiap BOS atau CHoCH, baik **swing (besar)** maupun **internal
+(kecil)** dan masing-masing ke arah break-nya (bullish = beli, bearish = jual), langsung dicari **FVG** di leg yang
+mematahkan struktur. Entry limit di FVG itu (tengah atau tepi; FVG yang sudah tertutup sebelum break tidak dipakai),
+stop di balik awal leg ± ATR, **TP1 = puncak BOS/CHoCH** (high tertinggi leg bullish / low terendah leg bearish) dan
+**TP2 = lanjutan** di luar puncak (0,618 atau 1× panjang leg). Di TP1 50% ditutup dan stop pindah ke entry; sisanya ke
+TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup tidak dibatalkan). Reward gabungan minimal
+**1:1**. Setting lama (entry di order block, satu target) tetap dicoba tuner dan dipakai bila terbukti lebih baik.
+
+- **BOS/CHoCH tanpa trade selalu dijelaskan**: di chart training setiap break yang tidak menjadi trade diberi tanda ✕
+  dan (saat chart diperbesar) alasannya — *tanpa FVG di leg break*, *reward kurang dari 1:1*, *target sudah terlewati*,
+  *melawan tren swing*, *skala swing/internal tidak dipakai setting ini*, dll. Setup yang tidak pernah entry tampil
+  redup dengan alasan batalnya (*kedaluwarsa tanpa entry*, *struktur berbalik sebelum entry*).
+- **Hasil terukur aturan ini** (57 aset inti × 15M/1H/4H/1D, 1,33 juta candle, tanpa tuning): aturan lama 5.255 trade,
+  win 30,4%, +0,039R/trade (sebagian besar setup batal karena harga lebih dulu ke target); aturan BOS/CHoCH → FVG
+  17.035 trade, win 42,9% (TP1 lalu BE dihitung menang), +0,007R/trade; TP2 = 1× leg: 21.513 trade, win 46,3%,
+  +0,011R. Aturan ini sendiri **tidak** menghasilkan 99% — tuner, mode presisi dan EXPERT tetap menyaring per aset.
 
 - **Timestamp**: waktu bar sinyal muncul, waktu sistem pertama mendeteksinya, waktu kedaluwarsa, waktu entry terpicu,
   waktu selesai.
 - **Konfluensi SMC (opsional, dipilih tuner)**: sinyal hanya diambil bila sebelum break ada **sweep likuiditas** (ujung
   leg menembus low/high yang sudah diketahui dan belum tersentuh, lalu close kembali ke dalam) dan/atau ada **FVG** di
   leg yang mematahkan struktur.
-- **Manajemen posisi (opsional, dipilih tuner)**: 50% ditutup di +1R dan stop dipindah ke entry. Trade yang sempat
-  +1R lalu kembali ke entry tercatat PROFIT +0,5R; bila +1R dan stop tersentuh di bar yang sama tetap dihitung LOSS.
-- **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan), harga mencapai target lebih dulu,
-  harga close menembus stop, atau kedaluwarsa (mis. 30 bar).
+- **Manajemen posisi**: aturan TP1/TP2 — 50% di TP1 (puncak BOS/CHoCH), stop ke entry, sisa ke TP2; trade yang sempat
+  TP1 lalu kembali ke entry tercatat PROFIT (½ × R TP1). Untuk setting target tunggal tuner juga mencoba 50% di +1R.
+  Bila TP1 dan stop tersentuh di bar yang sama tetap dihitung LOSS.
+- **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan di skala yang sama), harga close
+  menembus stop, atau kedaluwarsa (mis. 30 bar); pada setting target tunggal juga bila harga mencapai target lebih dulu.
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
 - **Timeframe 5M sampai mingguan**: setiap aset dilatih terpisah di 5M, 15M, 1H, 4H, 1D dan 1W — tiap timeframe punya
@@ -207,7 +222,7 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   disimpan di kamus trade. "SEMUA ASET" tetap menjalankan training batch tanpa chart.
 - **SMC terus diperbaiki**: setting SMC tidak pernah final. Selama aset inti masih di bawah tujuan dan putaran tuning tidak
   menemukan yang lebih baik, pencarian berikutnya diperluas otomatis (level 0 → 2: stop lebih lebar, target sampai 1:3,
-  panjang pivot dan kedaluwarsa lain; 1.152 → 3.456 → 8.640 kombinasi). Setting yang lebih baik tetap harus lulus uji
+  CHoCH saja, panjang pivot lain; 960 → 2.880 → 9.600 kombinasi). Setting yang lebih baik tetap harus lulus uji
   out-of-sample yang sama, jadi pencarian lebih luas tidak bisa "membeli" win rate dengan mencocokkan noise.
 - **TERUS PERBAIKI SAMPAI TARGET** (training live 1 aset): 20% candle terakhir dikunci untuk ujian akhir. Di sisanya,
   training maju diulang putaran demi putaran dengan pencarian makin luas, hasil terbaik disimpan, dan berhenti bila target
@@ -243,8 +258,8 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   aset jadi beberapa kali lebih banyak (uji 474 pasangan: 922 → 2.545 trade uji). Riwayat ini disimpan di cache terbatas
   (240 aset × timeframe) dan diunduh bertahap; tuning memakai CPU ±4× lebih banyak daripada versi sebelumnya.
 - **Belajar per grup pasar**: riwayat hingga 150 aset satu pasar & timeframe (mis. SAHAM IDX 1D) digabung dan dibagi
-  menurut waktu: 60% awal untuk mengurutkan ±1.150 kombinasi parameter SMC (panjang pivot, scope, CHoCH/BOS, entry,
-  stop, target, filter premium/discount & tren, kedaluwarsa), 20% berikutnya (validasi) untuk memilih, dan 20% terakhir
+  menurut waktu: 60% awal untuk mengurutkan ±960 kombinasi parameter SMC (panjang pivot, zona entry FVG/OB, skala
+  swing+internal/swing/internal, entry, stop, target TP1/TP2, filter premium/discount & tren), 20% berikutnya (validasi) untuk memilih, dan 20% terakhir
   (data uji yang tidak ikut memilih) untuk melaporkan hasil. Aset yang datanya sedikit memakai parameter grupnya.
 - **Upgrade per aset**: kombinasi yang sama diuji pada 70% riwayat aset lalu diverifikasi pada 30% terakhir. Parameter
   aset dipakai hanya bila **lower bound win rate (90%) out-of-sample lebih tinggi** daripada parameter yang diwarisi,
@@ -252,8 +267,9 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   ke parameter grup. Urutan pewarisan: upgrade aset → grup pasar → default. Diulang tiap 6 jam; panjang pivot yang
   dipakai juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
 - **Live chart training** (tab LIVE CHART): candle aset yang dilatih (diperbarui tiap 3 detik dari bar 1 menit) dengan
-  setiap trade virtual sebagai kotak posisi — zona TP hijau, zona SL merah, garis TP1 +1R, hasil dalam R; trade live
-  diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis LIMIT/SL/TP. Area sebelum garis
+  setiap trade virtual sebagai kotak posisi — zona TP hijau, zona SL merah, garis TP1 (puncak BOS/CHoCH) dan TP2, hasil
+  dalam R; trade live diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis LIMIT · FVG / SL /
+  TP1 / TP2. BOS/CHoCH swing dan internal sama-sama digaris; yang tidak menjadi trade diberi ✕ dan alasannya. Area sebelum garis
   "DATA UJI" adalah data latih (redup); tombol DATA UJI memperbesar ke seluruh periode out-of-sample. IKUTI AKTIVITAS
   memindahkan chart otomatis ke aset dengan aktivitas trade virtual terbaru.
 - **Replay dipercepat ×1–×7** (tab LIVE CHART): memutar ulang data uji (periode yang tidak dipakai melatih) candle demi

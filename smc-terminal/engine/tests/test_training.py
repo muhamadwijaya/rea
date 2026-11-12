@@ -131,6 +131,8 @@ def test_journal_written_by_earlier_versions_is_migrated(store):
     dump = lambda p: json.dumps(training.asdict(p))  # noqa: E731
     rows = [
         ("PLACEHOLDER", dump(training.default_params("1h")), 1),  # earlier versions stored un-upgraded defaults
+        # … before v3.11 without the entry-zone fields: the old starting setting, still not an override
+        ("LEGACY", json.dumps({k: v for k, v in training.asdict(training.legacy_default("1h")).items() if k not in ("zone", "ext")}), 1),
         ("UPGRADED", dump(custom(swing=20)), 1),
         ("BACK", dump(custom(swing=20)), 1),
         ("BACK", json.dumps({"inherit": True}), 2),  # went back to the group's parameters
@@ -147,6 +149,7 @@ def test_journal_written_by_earlier_versions_is_migrated(store):
     assert set(training._params) == {("UPGRADED", "1h")}
     assert training._groups[("forex", "1h")][1].swing == 30
     assert training.active("PLACEHOLDER", "1h")[0] == "group"
+    assert training.active("LEGACY", "1h")[0] == "group"
     assert training.active("BACK", "1h")[0] == "group"
     row = training._live_rows()[0]
     assert row["id"] == "s1" and row["qualified"] is None  # kept, but not counted as a qualified AI trade
@@ -236,7 +239,7 @@ def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
     monkeypatch.setattr(training, "history", lambda i, tf, bars=None: b)
-    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None: [early, late])
+    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None, diag=None: [early, late])
     monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)  # no network in tests
     db = training._db()
     db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
@@ -306,3 +309,101 @@ def test_evaluations_on_older_data_are_redone_first():
     assert training._due(("A", "1d"), last, {"basis": training.HISTORY_BASIS}, now) is False
     assert training._due(("A", "1d"), last, {}, now) is True  # evaluated on the short history of earlier versions
     assert training._due(("A", "1d"), {("A", "1d"): now - training.TUNE_EVERY}, {"basis": training.HISTORY_BASIS}, now) is True
+
+
+# ------------------------------------------------------------------ BOS / CHoCH → FVG rule (TP1 at the break's extreme, TP2 beyond)
+
+def _leg(extra):
+    """A bullish leg: origin low 95 at bar 10, a fair value gap 99–101 (bar 13), break above 104 at bar 15 (high 106)."""
+    rows = [(100, 101, 99, 100)] * 10 + [(97, 98, 95, 96), (96, 99, 96, 98), (98, 99, 97, 98.5), (99, 103, 98.5, 102.5),
+                                          (102, 104, 101, 103.5), (103.5, 106, 103, 105)]
+    return bars(rows + extra)
+
+
+def _structure(b, breaks, blocks, gaps):
+    from types import SimpleNamespace
+    from app import smc
+    n = len(b)
+    empty = smc.Structure("swing", [], [], [], 0, np.zeros(n, dtype=int))
+    internal = smc.Structure("internal", [], breaks, blocks, 1, np.ones(n, dtype=int))
+    return SimpleNamespace(internal=internal, swing=empty, gaps=gaps, atr=np.ones(n))
+
+
+def _bos(b, gaps):
+    from app import smc
+    brk = smc.Break("BOS", 1, 104.0, 5, 15, "internal")
+    ob = smc.OrderBlock(1, 98.0, 95.0, 10, 15, "internal")
+    return _structure(b, [brk], [ob], gaps)
+
+
+def test_fvg_rule_enters_at_the_gap_of_the_leg_tp1_follows_the_peak_then_break_even():
+    b = _leg([(105, 107, 103, 106),  # the leg keeps running: TP1 moves to the new high 107 (not cancelled)
+              (106, 106.5, 99.5, 100.5),  # pulls back into the gap: long at its middle (100)
+              (100.5, 107.5, 100.2, 107),  # TP1 hit: half closed, stop to entry
+              (107, 107.2, 99, 99.5)])  # back to entry: the rest closes at break-even
+    from app import smc
+    p = training.default_params("1h")
+    assert (p.zone, p.scope, p.target) == ("fvg", "both", "tp12")
+    r = _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)])
+    [s] = training.signals(b, training.replace(p, sl_atr=0.3), r)
+    assert s.entry == 100.0 and s.stop == pytest.approx(94.7)  # stop beyond the leg's origin, not beyond the gap
+    assert s.opened == 17 and s.tp1 == 107.0 and s.target == pytest.approx(107 + 0.618 * 12)
+    assert (s.status, s.closed, s.exit) == ("win", 19, 100.0)
+    assert s.r == pytest.approx(round(0.5 * 7 / 5.3, 3)) and s.reason.startswith("TP1 (50%)")
+
+
+def test_fvg_rule_full_run_to_tp2_and_stop_before_tp1():
+    from app import smc
+    p = training.replace(training.default_params("1h"), sl_atr=0.3)
+    gaps = [smc.Gap(1, 101.0, 99.0, 13, 14)]
+    b = _leg([(105, 105.5, 99.8, 100.5), (100.5, 106.5, 100.2, 106.2), (106.2, 113, 105, 112.9)])
+    [s] = training.signals(b, p, _bos(b, gaps))
+    tp2 = 106 + 0.618 * 11
+    assert (s.status, s.exit) == ("win", pytest.approx(tp2))
+    assert s.r == pytest.approx(round(0.5 * 6 / 5.3 + 0.5 * (tp2 - 100) / 5.3, 3)) and s.reason.endswith("TP2")
+    b = _leg([(105, 105.5, 99.8, 100.5), (100.5, 101, 94, 94.5)])
+    [s] = training.signals(b, p, _bos(b, gaps))
+    assert (s.status, s.r) == ("loss", -1.0)
+
+
+def test_breaks_without_a_trade_are_explained():
+    from app import smc
+    b = _leg([(105, 105.5, 103, 104)] * 5)
+    diag = []
+    assert training.signals(b, training.default_params("1h"), _bos(b, []), None, diag) == []
+    assert [d["reason"] for d in diag] == ["tanpa FVG di leg break"]  # BOS without a gap in its leg: no trade
+    filled = [smc.Gap(1, 101.0, 99.0, 13, 14, filled=14)]  # the gap was already traded through: not an entry
+    diag = []
+    assert training.signals(b, training.default_params("1h"), _bos(b, filled), None, diag) == []
+    out = training.skipped_json(diag, b.time)
+    assert out == [{"t": 15 * 3600, "fromT": 5 * 3600, "kind": "BOS", "scope": "internal", "direction": "bullish",
+                    "level": 104.0, "reason": "tanpa FVG di leg break"}]
+    diag = []
+    training.signals(b, training.replace(training.default_params("1h"), scope="swing"), _bos(b, []), None, diag)
+    assert diag[0]["reason"] == "skala internal tidak dipakai setting ini"
+
+
+def test_old_settings_keep_order_block_entry_and_one_target():
+    from app import smc
+    b = _leg([(105, 105.5, 96, 97.5), (97.5, 106.5, 97.4, 106)])
+    old = training.legacy_default("1h")
+    assert (old.zone, old.target) == ("ob", "liq")
+    [s] = training.signals(b, training.replace(old, trend_filter=False), _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)]))
+    assert s.entry == 96.5 and s.tp1 is None and s.target == 106.0 and s.status == "win" and s.r == pytest.approx(round(9.5 / 1.8, 3))
+
+
+def test_live_journal_keeps_tp1_of_a_setup_from_an_older_setting(store, monkeypatch):
+    from types import SimpleNamespace
+    inst = SimpleNamespace(symbol="EURUSD", market="forex")
+    b = _leg([(105, 105.5, 99.8, 100.5), (100.5, 106.5, 100.2, 106.2), (106.2, 106.3, 99.9, 100)])
+    monkeypatch.setattr(training, "active", lambda s, tf: ("asset", 2, training.default_params(tf)))
+    monkeypatch.setattr(training, "signals", lambda *a, **k: [])
+    monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)
+    db = training._db()
+    training._since("EURUSD", "1h", 0)
+    db.execute("INSERT INTO signals(id, symbol, market, tf, version, direction, created_t, entry, stop, target, status, "
+               "manage, tp1, origin, ext) VALUES ('x', 'EURUSD', 'forex', '1h', 1, 1, ?, 100, 94.7, 112.8, 'pending', "
+               "'tp12', 106, 95, 0.618)", (15 * 3600,))
+    training.track(inst, "1h", b)
+    status, r, reason = db.execute("SELECT status, r, reason FROM signals WHERE id='x'").fetchone()
+    assert (status, r) == ("win", round(0.5 * 6 / 5.3, 3)) and reason.startswith("TP1 (50%)")  # TP1, then break-even

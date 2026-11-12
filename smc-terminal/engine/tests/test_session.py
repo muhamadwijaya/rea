@@ -36,7 +36,7 @@ def fake_env(monkeypatch):
         rep = {"outOfSample": {"trades": 5, "wins": 3}}
         return better, rep, rep
 
-    def fake_signals(bars, p, r=None, align=None):  # one trade every 50 candles; wins when the rr-2 setting is active
+    def fake_signals(bars, p, r=None, align=None, diag=None):  # one trade every 50 candles; wins when the rr-2 setting is active
         return [training.Signal(1, "CHoCH", "internal", i, 1, 0.9, 1.2, status="win" if p.rr == 2.0 else "loss",
                                 r=2.0 if p.rr == 2.0 else -1.0, opened=i + 1, closed=i + 5) for i in range(10, len(bars), 50)]
 
@@ -109,7 +109,7 @@ def test_search_widens_while_a_core_pair_stays_below_goal(tmp_path, monkeypatch)
             training.tune_pair(other, "1h", b)
         assert seen[0::2] == [0, 1, 2, 2]  # core: wider every round without success, capped at MAX_LEVEL
         assert seen[1::2] == [0, 0, 0, 0]  # universe assets keep the base search (CPU)
-        assert training.grid_size("1h", 0) == 1152 < training.grid_size("1h", 1) < training.grid_size("1h", 2)
+        assert training.grid_size("1h", 0) == 960 < training.grid_size("1h", 1) < training.grid_size("1h", 2)
     finally:
         training._conn.close()
         training._conn = None

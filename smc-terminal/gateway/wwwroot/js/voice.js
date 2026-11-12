@@ -476,7 +476,7 @@ export class VoiceAssistant {
       const s = t.setup;
       const side = t.direction === 'bullish' ? '<span class="tag bull">BUY</span>' : '<span class="tag bear">SELL</span>';
       const cell = t.status === 'signal'
-        ? (s?.entry != null ? `${side} <span class="num">${price(s.entry)}</span> · SL <span class="num">${price(s.stop)}</span> · TP <span class="num">${price(s.target)}</span>${s.rr ? ` <span class="dim">RR ${s.rr}</span>` : ''}`
+        ? (s?.entry != null ? `${side} <span class="num">${price(s.entry)}</span> · SL <span class="num">${price(s.stop)}</span>${s.tp1 != null ? ` · TP1 <span class="num">${price(s.tp1)}</span> · TP2` : ' · TP'} <span class="num">${price(s.target)}</span>${s.rr ? ` <span class="dim">RR ${s.rr}</span>` : ''}`
           : `${side} <span class="dim">tunggu zona entry</span>`)
         : `<span class="${st?.[1] || 'dim'}">${esc(st?.[0] || t.status)}</span>`;
       return `<tr><td><b>${esc(t.tf.toUpperCase())}</b></td><td class="${t.smcScore > 0 ? 'up' : t.smcScore < 0 ? 'down' : ''}">${t.smcScore ?? '–'}</td><td>${cell}</td>
@@ -511,7 +511,8 @@ export class VoiceAssistant {
         const s = t.setup;
         const side = t.direction === 'bullish' ? 'beli' : 'jual';
         if (s?.entry == null) return `${when}: ${side}, tunggu zona entry.`;
-        return `${when}: ${side}, entry ${spokenPrice(s.entry, decimals)}, stop loss ${spokenPrice(s.stop, decimals)}, target ${spokenPrice(s.target, decimals)}${s.level ? `, presisi ${s.level.toLowerCase()}` : ''}.`;
+        const tp = s.tp1 != null ? `target satu ${spokenPrice(s.tp1, decimals)}, target dua ${spokenPrice(s.target, decimals)}` : `target ${spokenPrice(s.target, decimals)}`;
+        return `${when}: ${side}, entry ${spokenPrice(s.entry, decimals)}, stop loss ${spokenPrice(s.stop, decimals)}, ${tp}${s.level ? `, presisi ${s.level.toLowerCase()}` : ''}.`;
       }
       return t.status === 'against' ? `${when}: berlawanan.` : t.status === 'no_momentum' ? `${when}: belum ada momentum.` : '';
     }).filter(Boolean);

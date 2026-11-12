@@ -37,10 +37,13 @@ public static class GatewayHost
         builder.Services.Configure<TerminalOptions>(builder.Configuration.GetSection("Terminal"));
         builder.Services.AddSignalR();
         builder.Services.AddHttpClient<EngineClient>(client =>
-        {
-            client.BaseAddress = new Uri(options.EngineUrl.TrimEnd('/') + "/");
-            client.Timeout = TimeSpan.FromSeconds(240); // AI analysis can take a few minutes
-        });
+            {
+                client.BaseAddress = new Uri(options.EngineUrl.TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromSeconds(240); // AI analysis can take a few minutes
+            })
+            // uvicorn closes an idle keep-alive connection after 5 s; reusing one it is closing fails the request
+            // ("error while sending"), so idle connections are dropped well before that
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { PooledConnectionIdleTimeout = TimeSpan.FromSeconds(2) });
         builder.Services.AddHttpClient(NewsWorker.HttpName, client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(20);

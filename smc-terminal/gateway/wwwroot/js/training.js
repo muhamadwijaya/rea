@@ -11,7 +11,10 @@ const STATUS = {
 const MARKET_NAME = { forex: 'FOREX', 'saham-as': 'SAHAM AS', 'saham-idx': 'SAHAM IDX', kripto: 'KRIPTO' };
 const SOURCE = { asset: ['UPGRADE ASET', 'bull'], group: ['PARAMETER GRUP', 'info'], default: ['DEFAULT', 'ghost'] };
 const CONFLUENCE = { sweep: 'wajib sweep likuiditas', fvg: 'wajib FVG', both: 'wajib sweep + FVG' };
-const paramText = (p) => `pivot ${p.swing}/${p.internal} · ${p.scope} ${p.kinds} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
+const SCOPE = { both: 'swing + internal', swing: 'swing', internal: 'internal' };
+const targetText = (p) => (p.target === 'tp12' ? `TP1 puncak BOS/CHoCH (50%, lalu SL ke entry) · TP2 +${p.ext ?? 0.618}× leg`
+  : p.target === 'liq' ? 'TP puncak BOS/CHoCH' : `TP ${p.rr}R`);
+const paramText = (p) => `pivot ${p.swing}/${p.internal} · ${SCOPE[p.scope] || p.scope} ${p.kinds === 'CHoCH' ? 'CHoCH saja' : 'BOS+CHoCH'} · entry ${(p.zone || 'ob') === 'fvg' ? 'FVG' : 'order block'} ${p.entry} · SL ${p.sl_atr}×ATR · ${targetText(p)}${p.manage === 'partial' && p.target !== 'tp12' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
 // Precision level reached by a setting (lower bound of its proven win rate); thresholds come from the engine.
 function levelTag(modes, qualified, low) {
   if (!qualified) return '<span class="tag ghost">BAYANGAN</span>';
@@ -87,7 +90,8 @@ function signalCard(s, rules, decimals, modes) {
       <div><span>SELESAI</span><b>${dt(s.closed_t)}</b></div>
     </div>
     <div class="chips"><span class="chip">entry ${f(s.entry)}</span><span class="chip">SL ${f(s.stop)}</span>
-      <span class="chip">TP ${f(s.target)}</span><span class="chip">RR ${risk ? (Math.abs(s.target - s.entry) / risk).toFixed(2) : '–'}</span>
+      ${s.tp1 != null ? `<span class="chip" title="Puncak BOS/CHoCH: 50% ditutup, SL pindah ke entry">TP1 ${f(s.tp1)} · RR ${risk ? (Math.abs(s.tp1 - s.entry) / risk).toFixed(2) : '–'}</span>` : ''}
+      <span class="chip">${s.tp1 != null ? 'TP2' : 'TP'} ${f(s.target)}</span><span class="chip">RR ${risk ? (Math.abs(s.target - s.entry) / risk).toFixed(2) : '–'}</span>
       ${s.r != null ? `<span class="chip ${s.r > 0 ? 'up' : 'down'}">hasil ${rr(s.r)}</span>` : ''}</div>
     ${s.reason ? `<div class="note">Keterangan: ${esc(s.reason)}</div>` : ''}
     ${s.status === 'pending' && rules?.length ? `<h5>BATAL OTOMATIS BILA</h5><ul class="tr-rules">${rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
@@ -491,7 +495,7 @@ function mountTrainingLab(el) {
       <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
       <div class="lab-row"><span>CANDLE</span><input class="input lab-bars" type="number" min="300" max="20000" step="100" value="${prefs.bars}">
         <span class="dim lab-hint"></span></div>
-      <div class="lab-row lab-improve-row"><span></span><label class="check" title="Selama belum mencapai target, training maju diulang dengan pencarian SMC yang makin luas (1.152 → 8.640 kombinasi) dan hasil terbaik dipakai; berhenti bila target tercapai atau pencarian lebih luas tidak membantu lagi. 20% candle terakhir dikunci untuk ujian akhir.">
+      <div class="lab-row lab-improve-row"><span></span><label class="check" title="Selama belum mencapai target, training maju diulang dengan pencarian SMC yang makin luas (960 → 9.600 kombinasi) dan hasil terbaik dipakai; berhenti bila target tercapai atau pencarian lebih luas tidak membantu lagi. 20% candle terakhir dikunci untuk ujian akhir.">
         <input type="checkbox" class="lab-improve"> TERUS PERBAIKI SAMPAI TARGET 99% — ulang dengan pencarian SMC makin luas, lalu ujian akhir di 20% candle terakhir</label></div>
       <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
       <div class="tr-progress lab-progress"><i></i><span></span></div>
@@ -603,7 +607,7 @@ function mountTrainingLab(el) {
   async function poll() {
     try { status = await api('/api/training/lab'); } catch (e) { status = { ...(status || {}), error: e.message }; }
     try { sess = await api('/api/training/session'); } catch { /* engine warming */ }
-    if (single() && sess?.state && sess.state !== 'idle' && sess.symbol === prefs.asset) showLive(true);  // e.g. after a reload
+    if (single() && sess?.state && sess.state !== 'idle' && sess.symbol === prefs.asset && sess.tf === prefs.tfs[0]) showLive(true);  // e.g. after a reload
     render();
     if (sess && sess.state !== 'idle' && !$('.lab-live').classList.contains('hidden')) await feedPlayer();
     clearTimeout(timer);
@@ -620,7 +624,7 @@ function mountTrainingLab(el) {
   async function feedPlayer() {
     if (!chart) {
       chart = new SmcChart($('.lab-chart .chart-host'), $('.lab-chart'));
-      chart.setLayers({ ...SMC_ON, swing: true, internal: false });
+      chart.setLayers({ ...SMC_ON, swing: true, internal: true });  // the rule trades swing and internal BOS / CHoCH
     }
     if (!play && (sess.state === 'running' || sess.state === 'done' || sess.state === 'stopped') && sess.total) {
       const data = await api('/api/training/session/candles');
@@ -656,7 +660,8 @@ function mountTrainingLab(el) {
     const T = data.candles[i - 1].t;
     const trades = (sess?.trades || []);
     chart.until = T;
-    chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean) });
+    chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean),
+      skipped: (sess?.segments || []).flatMap((sg) => sg.skipped || []) });
     const done = trades.filter((t) => t.closed_t != null && t.closed_t <= T && ['win', 'loss', 'timeout'].includes(t.status));
     const wins = done.filter((t) => t.r > 0).length;
     const total = done.reduce((a, t) => a + (t.r || 0), 0);
@@ -718,6 +723,7 @@ function mountTrainingLab(el) {
       if (set === 'tfs' && single()) prefs.tfs = [b.dataset.v];
       else prefs[set] = list.includes(b.dataset.v) ? list.filter((x) => x !== b.dataset.v) : [...list, b.dataset.v];
       if (set === 'markets') { save(); loadAssets(); return; }
+      if (set === 'tfs' && single()) { save(); renderSets(); showLive(false); poll(); return; }
     } else if (b.dataset.all) {
       const all = b.dataset.all === 'markets' ? LAB_MARKETS.map(([k]) => k) : LAB_TFS;
       prefs[b.dataset.all] = prefs[b.dataset.all].length === all.length ? [] : [...all];
@@ -752,7 +758,8 @@ function mountTrainingLab(el) {
     save();
     renderSets();
   });
-  $('.lab-asset').addEventListener('change', (e) => { prefs.asset = e.target.value; save(); renderSets(); showLive(single() && sess && sess.state !== 'idle'); });
+  // the live chart belongs to the session's own asset: another asset shows the batch view until it is started
+  $('.lab-asset').addEventListener('change', (e) => { prefs.asset = e.target.value; save(); renderSets(); showLive(false); poll(); });
   $('.lab-bars').addEventListener('change', (e) => { prefs.bars = Number(e.target.value) || 5000; save(); });
   $('.lab-improve').addEventListener('change', (e) => { prefs.improve = e.target.checked; save(); });
   loadAssets();
@@ -761,7 +768,6 @@ function mountTrainingLab(el) {
     show(d) {
       summary = d;
       status = d.lab || status;
-      if (single() && sess?.state && sess.state !== 'idle') showLive(true);
       render();
       poll();
     },
