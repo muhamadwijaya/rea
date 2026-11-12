@@ -795,7 +795,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .lab-live-bar .tr-speed button { border: 0; border-radius: 0; padding: 4px 6px; border-right: 1px solid var(--line); }
 .lab-live-bar .tr-speed button.active { color: #002644; background: var(--go); }
 .lab-chart { flex: 1 1 auto; min-height: 240px; }
-.lab-learn { max-height: 150px; overflow: auto; }
+.lab-learn { max-height: 190px; overflow: auto; }
 .lab-asset { min-width: 240px; max-width: 420px; }
 .lab-ctl { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .lab-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; }

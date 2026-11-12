@@ -264,7 +264,7 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
         k += 1
     if n > s.opened + hold:
         k = s.opened + hold
-        rest = (c[k] - s.entry) * d / risk
+        rest = float((c[k] - s.entry) * d / risk)  # plain floats: results are serialised as JSON
         s.status, s.closed, s.exit = "timeout", k, float(c[k])
         s.r, s.reason = round(0.5 + 0.5 * rest if taken else rest, 3), "batas waktu, ditutup di harga pasar"
     return s
@@ -367,7 +367,7 @@ def metrics(sigs: list[Signal]) -> dict:
         "cancelled": sum(1 for s in sigs if s.status == "cancelled"),
         "winRate": round(wins / n, 4) if n else None, "winRateLow": round(wilson_low(wins, n), 4) if n else None,
         "expectancyR": round(float(np.mean(rs)), 3) if rs else None, "totalR": round(float(sum(rs)), 2),
-        "profitFactor": round(gross_win / gross_loss, 2) if gross_loss else (None if not gross_win else 99.0),
+        "profitFactor": round(float(gross_win / gross_loss), 2) if gross_loss else (None if not gross_win else 99.0),
         "maxDrawdownR": round(drawdown, 2),
     }
 
@@ -391,13 +391,37 @@ def walk_forward(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: n
     return {"inSample": metrics(ins), "outOfSample": metrics(oos), "all": metrics(sigs)}
 
 
-def _grid(tf_key: str):
+_breaths = itertools.count()
+
+
+def _breathe() -> None:
+    """Long searches run in a background thread; a short pause every 25 evaluations lets the engine's web server
+    (same process, same interpreter lock) keep answering the app's requests."""
+    if next(_breaths) % 25 == 0:
+        time.sleep(0.002)
+
+
+MAX_LEVEL = 2  # search levels: 0 = base grid; while a pair stays below its goal its next search widens
+REFINE_TOPS = (6, 10, 15)
+
+
+def _grid(tf_key: str, level: int = 0):
+    """Settings the tuner tries. Level 1 adds wider stops and targets up to 1:3; level 2 also wider / tighter pivot
+    lengths and a shorter expiry (1152 → 3456 → 8640 settings)."""
     base = default_params(tf_key)
-    lengths = sorted({(base.swing, base.internal), (max(4, base.swing - 4), base.internal), (base.swing + 4, base.internal + 1)})
+    lengths = {(base.swing, base.internal), (max(4, base.swing - 4), base.internal), (base.swing + 4, base.internal + 1)}
     targets = (("liq", base.rr), ("rr", 1.0), ("rr", 1.5), ("rr", 2.0))
+    stops = (0.25, 0.5)
+    expiries = (base.expiry, base.expiry * 2)
+    if level >= 1:
+        stops += (0.75, 1.0)
+        targets += (("rr", 2.5), ("rr", 3.0))
+    if level >= 2:
+        lengths |= {(max(3, base.swing - 7), max(2, base.internal - 1)), (base.swing + 8, base.internal + 2)}
+        expiries += (max(5, base.expiry // 2),)
     for (swing, internal), scope, kinds, entry, sl_atr, (target, rr), pd, trend, expiry in itertools.product(
-            lengths, ("internal", "swing"), ("all", "CHoCH"), ("mid", "edge"), (0.25, 0.5), targets, (False, True), (True, False),
-            (base.expiry, base.expiry * 2)):
+            sorted(lengths), ("internal", "swing"), ("all", "CHoCH"), ("mid", "edge"), stops, targets, (False, True), (True, False),
+            expiries):
         if scope == "swing" and not trend:
             continue  # the trend filter only applies to internal breaks
         yield replace(base, swing=swing, internal=internal, scope=scope, kinds=kinds, entry=entry, sl_atr=sl_atr,
@@ -408,12 +432,16 @@ VARIANTS = tuple((c, m) for c in ("none", "sweep", "fvg", "both") for m in ("non
 REFINE_TOP = 6
 
 
-def _refine(ranked: list, evaluate, mtf: tuple[str, ...] = ("none",)) -> list:
+def grid_size(tf_key: str, level: int = 0) -> int:
+    return sum(1 for _ in _grid(tf_key, level))
+
+
+def _refine(ranked: list, evaluate, mtf: tuple[str, ...] = ("none",), top: int = REFINE_TOP) -> list:
     """Second search stage: the best base settings with every confluence filter, trade-management variant and (with
     higher-timeframe data) the higher-timeframe alignment filter."""
     seen = {p for _, p, _ in ranked}
     extra = []
-    for _, p, _ in ranked[:REFINE_TOP]:
+    for _, p, _ in ranked[:top]:
         for (confluence, manage), m in itertools.product(VARIANTS, mtf):
             q = replace(p, confluence=confluence, manage=manage, mtf=m)
             if q not in seen:
@@ -428,8 +456,9 @@ def _score(m: dict, min_trades: int) -> float:
     return wilson_low(m["wins"], m["trades"], ADOPT_Z)
 
 
-def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = None) -> tuple[Params, dict, dict]:
-    """(best params, its walk-forward report, the current params' report)."""
+def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = None, level: int = 0) -> tuple[Params, dict, dict]:
+    """(best params, its walk-forward report, the current params' report); `level` widens the search (see _grid)."""
+    level = max(0, min(MAX_LEVEL, level))
     analyses: dict[tuple[int, int], smc.SmcResult] = {}
 
     def analysis_for(p: Params) -> smc.SmcResult:
@@ -441,11 +470,12 @@ def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = No
     current_report = walk_forward(bars, current, analysis_for(current), align)
 
     def evaluate(p: Params):
+        _breathe()
         report = walk_forward(bars, p, analysis_for(p), align)
         return _score(report["inSample"], MIN_IS_TRADES), p, report
 
-    ranked = sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True)
-    ranked = _refine(ranked, evaluate, ("none", "align") if align is not None else ("none",))
+    ranked = sorted((evaluate(p) for p in _grid(tf_key, level)), key=lambda x: x[0], reverse=True)
+    ranked = _refine(ranked, evaluate, ("none", "align") if align is not None else ("none",), REFINE_TOPS[level])
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -484,6 +514,7 @@ def tune_group(pairs: list[tuple[str, Bars]], tf_key: str, current: Params) -> t
     analyses: dict[tuple[str, int, int], smc.SmcResult] = {}
 
     def pooled(p: Params) -> dict:
+        _breathe()
         train, valid, test = [], [], []
         for sym, bars in pairs:
             key = (sym, p.swing, p.internal)
@@ -566,6 +597,8 @@ def _db() -> sqlite3.Connection:
         for column, kind in (("quality", "REAL"), ("manage", "TEXT"), ("align", "REAL"), ("news", "REAL")):
             if column not in _columns(_conn, "signals"):
                 _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
+        if "level" not in _columns(_conn, "tracking"):
+            _conn.execute("ALTER TABLE tracking ADD COLUMN level INTEGER DEFAULT 0")
         if "report" not in _columns(_conn, "tracking"):
             _conn.execute("ALTER TABLE tracking ADD COLUMN report TEXT")
         upgraded = {(s, tf) for s, tf in _conn.execute("SELECT DISTINCT symbol, tf FROM upgrades")}
@@ -746,12 +779,28 @@ def _record_patterns(inst: instruments.Instrument, tf: str, bars: Bars, p: Param
     return len(rows)
 
 
-def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars, align: np.ndarray | None = None) -> dict | None:
+def search_level(symbol: str, tf: str) -> int:
+    with _db_lock:
+        row = _db().execute("SELECT level FROM tracking WHERE symbol=? AND tf=?", (symbol, tf)).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def at_goal(ev: dict) -> bool:
+    return bool(ev.get("qualified")) and (ev.get("winRate") or 0) >= GOAL_WIN_RATE
+
+
+def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars, align: np.ndarray | None = None,
+              level: int | None = None) -> dict | None:
     """Give an asset its own parameters only when they beat its inherited ones (group / default) out of sample;
     drop an own setting that the inherited one now beats. Every evaluation is kept for the accuracy board, and the
-    active setting's trades go to the trade dictionary."""
+    active setting's trades go to the trade dictionary.
+
+    The SMC setting is never final: while a core pair stays below the goal and this round found nothing better, its
+    next search is wider (`search_level`, up to MAX_LEVEL); a better setting still has to pass the same out-of-sample
+    test, so a wider search cannot buy a win rate by fitting noise."""
+    level = search_level(inst.symbol, tf) if level is None else max(0, min(MAX_LEVEL, level))
     source, version, current = active(inst.symbol, tf)
-    best, best_report, current_report = tune(bars, tf, current, align)
+    best, best_report, current_report = tune(bars, tf, current, align, level)
     now = int(time.time())
     upgrade = None
     with _db_lock:
@@ -779,6 +828,10 @@ def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars, align: np.ndarr
         db.commit()
     _, now_version, now_params = active(inst.symbol, tf)
     _record_patterns(inst, tf, bars, now_params, now_version, align)
+    if getattr(inst, "core", False) and not upgrade and not at_goal(evidence(inst.symbol, tf)) and level < MAX_LEVEL:
+        with _db_lock:  # still short of the goal and nothing better at this width: search wider next time
+            _db().execute("UPDATE tracking SET level=? WHERE symbol=? AND tf=?", (level + 1, inst.symbol, tf))
+            _db().commit()
     if upgrade:
         log.info("SMC upgrade %s %s v%d→v%d: OOS win %.0f%% → %.0f%%", inst.symbol, tf, version, upgrade["to"],
                  100 * (upgrade["before"]["winRate"] or 0), 100 * (upgrade["after"]["winRate"] or 0))
@@ -928,6 +981,7 @@ def summary() -> dict:
         tuned = _db().execute("SELECT COUNT(*) FROM tracking WHERE last_tuned > 0 AND symbol NOT LIKE '@%'").fetchone()[0]
         tracked = _db().execute("SELECT COUNT(*) FROM tracking WHERE symbol NOT LIKE '@%'").fetchone()[0]
         upgrades_total = _db().execute("SELECT COUNT(*) FROM upgrades").fetchone()[0]
+        levels = {(s, tf): lv or 0 for s, tf, lv in _db().execute("SELECT symbol, tf, level FROM tracking")}
     closed = sorted((r for r in rows if r["status"] in ("win", "loss", "timeout") and r["qualified"]), key=lambda r: r["closed_t"] or 0)
     equity, total = [], 0.0
     for r in closed:
@@ -951,7 +1005,7 @@ def summary() -> dict:
                 if (ev["winRateLow"] or 0) >= low:
                     by_mode[key].append(oos)
         source, version, _ = active(symbol, tf)
-        board.append({"symbol": symbol, "tf": tf, "market": market, "version": version, "source": source,
+        board.append({"symbol": symbol, "tf": tf, "market": market, "version": version, "source": source, "level": levels.get((symbol, tf), 0),
                       "qualified": ev["qualified"], "evidence": ev, "backtest": oos,
                       "live": _live_metrics([r for r in rows_by_pair.get((symbol, tf), []) if r["qualified"]])})
     board.sort(key=lambda b: (b["qualified"], b["evidence"].get("winRateLow") or 0, b["backtest"].get("trades") or 0), reverse=True)

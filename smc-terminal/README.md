@@ -205,6 +205,18 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   selesai, menang/kalah, win rate dan R; tabel di bawah menunjukkan setiap langkah belajar (data belum cukup / setting
   tetap / setting baru, dengan uji internalnya). Selesai: aset dilatih seperti biasa pada semua candle itu dan tradenya
   disimpan di kamus trade. "SEMUA ASET" tetap menjalankan training batch tanpa chart.
+- **SMC terus diperbaiki**: setting SMC tidak pernah final. Selama aset inti masih di bawah tujuan dan putaran tuning tidak
+  menemukan yang lebih baik, pencarian berikutnya diperluas otomatis (level 0 → 2: stop lebih lebar, target sampai 1:3,
+  panjang pivot dan kedaluwarsa lain; 1.152 → 3.456 → 8.640 kombinasi). Setting yang lebih baik tetap harus lulus uji
+  out-of-sample yang sama, jadi pencarian lebih luas tidak bisa "membeli" win rate dengan mencocokkan noise.
+- **TERUS PERBAIKI SAMPAI TARGET** (training live 1 aset): 20% candle terakhir dikunci untuk ujian akhir. Di sisanya,
+  training maju diulang putaran demi putaran dengan pencarian makin luas, hasil terbaik disimpan, dan berhenti bila target
+  99% tercapai (minimal 30 trade) atau pencarian lebih luas tidak lebih baik lagi. Lalu setting terbaik diuji **sekali**
+  pada candle yang dikunci — angka ujian akhir itulah yang jujur. Contoh nyata 12 Nov: BTCUSD 15M putaran 1 35,5% →
+  putaran 2 32,3% (berhenti), ujian akhir 50% dari 12 trade; ETHUSD 15M ujian akhir 70% dari 10 trade (+4,46R). Hasil
+  dengan kurang dari 30 trade ditandai "sampel kecil, belum bukti", dan bila bagian belajar terlalu sedikit trade-nya,
+  aplikasi menyarankan menambah candle atau memilih timeframe lebih kecil. 99% tidak tercapai di uji mana pun; tujuan
+  itu tetap arah perbaikan, bukan jaminan.
 - **Kamus trade**: setiap trade dari setting aktif tiap aset & timeframe disimpan permanen (tabel `patterns`) bersama
   kondisi saat sinyal muncul. Baris di luar jendela riwayat terbaru tetap disimpan, jadi kamus terus bertambah (mis. trade
   5M lebih lama dari 60 hari Yahoo).
@@ -313,7 +325,7 @@ Engine Python — FastAPI (engine/)
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
 | `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h&bars=5000` | Virtual trading: akurasi, multi-timeframe, jurnal, upgrade, trade untuk live chart |
 | `GET /api/training/lab` · `POST /api/training/lab/start` `{"markets":["forex"],"tfs":["5m"],"bars":5000}` · `POST /api/training/lab/stop` | Training lab (batch) |
-| `GET /api/training/session` · `GET /api/training/session/candles` · `POST /api/training/session/start` `{"symbol":"EURUSD","tf":"15m","bars":5000}` · `POST /api/training/session/stop` | Training live 1 aset (walk-forward) |
+| `GET /api/training/session` · `GET /api/training/session/candles` · `POST /api/training/session/start` `{"symbol":"EURUSD","tf":"15m","bars":5000,"improve":true}` · `POST /api/training/session/stop` | Training live 1 aset (walk-forward; `improve` = terus perbaiki + ujian akhir) |
 | `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["st3","stt"]}`; Piper: `id`, `en`, `engb`) |
 | `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"engine":"supertonic","voice":"M1","persona":"natural","mixed":true}` | Suara (audio/wav): Supertonic 3 atau Piper; `mixed` = frasa Inggris dibaca dalam bahasa Inggris |
 | `POST /api/ai/news` `{"id":"…","symbol":"NVDA"}` | Analisa AI satu berita (isi dari link-nya) + sinyal per timeframe yang punya momentum |

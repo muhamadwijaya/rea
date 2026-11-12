@@ -305,7 +305,7 @@ public static class Api
 
         api.MapPost("/training/session/start", async (SessionRequest body, EngineClient engine, CancellationToken ct) =>
         {
-            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars }, ct);
+            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars, improve = body.Improve }, ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -403,7 +403,7 @@ public static class Api
 
     public sealed record LabRequest(string[] Markets, string[] Tfs, int Bars);
 
-    public sealed record SessionRequest(string Symbol, string Tf, int Bars);
+    public sealed record SessionRequest(string Symbol, string Tf, int Bars, bool Improve = false);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

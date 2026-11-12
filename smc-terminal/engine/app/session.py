@@ -6,7 +6,12 @@ check, adoption rules) and then trades that stretch with what it has learned. Ev
 setting chosen without seeing it — an anchored walk-forward — and the running win rate is out of sample throughout.
 
 Stretches are published as they finish, so the chart can play the candles forward (×1–×7) while the next stretch is
-still being learned. When the run ends, the asset is tuned on all N candles as usual and its trades go to the trade
+still being learned.
+
+"Terus perbaiki" (improve): the last EXAM_SHARE of the candles are locked away. On the rest, the forward training is
+repeated with an ever wider search (training.MAX_LEVEL) until the goal is reached or a round brings no improvement;
+the best round is kept. Only then is its setting run once over the locked candles — the final exam, the honest
+number, since nothing was chosen on them. When the run ends, the asset is tuned on all N candles as usual and its trades go to the trade
 dictionary, so what was learned is kept. One session at a time; it does not run beside the training lab.
 """
 
@@ -17,7 +22,7 @@ import threading
 import time
 from dataclasses import asdict
 
-from . import instruments, smc, training
+from . import instruments, market_data, smc, training
 from .errors import EngineError
 from .market_data import Bars
 
@@ -26,6 +31,9 @@ log = logging.getLogger("smc.session")
 SEGMENTS = 10
 MIN_BARS = 300
 MIN_WARMUP = 200
+EXAM_SHARE = 0.2
+MIN_EXAM = 150
+GOAL_TRADES = 30  # a round counts as reaching the goal only with at least this many trades
 
 
 class SessionBusy(EngineError):
@@ -55,13 +63,13 @@ def bounds(n: int, segments: int = SEGMENTS) -> list[tuple[int, int]]:
     return list(zip(edges[:-1], edges[1:]))
 
 
-def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int, p: training.Params) -> dict:
+def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int, p: training.Params, exam: bool = False) -> dict:
     t = lambda i: int(b.time[i]) if i is not None and i < len(b) else None  # noqa: E731
     return {"created_t": t(s.created), "opened_t": t(s.opened), "closed_t": t(s.closed),
             "expiry_t": int(b.time[s.created]) + tf_sec * p.expiry, "direction": s.direction, "kind": s.kind,
             "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "status": s.status, "r": s.r,
             "manage": s.manage, "align": s.align, "version": version, "segment": segment, "live": False,
-            "sample": "oos"}
+            "sample": "oos", "exam": exam}
 
 
 def _stats(trades: list[dict]) -> dict:
@@ -76,6 +84,7 @@ def status() -> dict:
     with _lock:
         out = {**_s, "trades": list(_s.get("trades", [])), "segments": list(_s.get("segments", []))}
     out["maxBars"] = training.MAX_TRAIN_BARS
+    out["maxRounds"] = training.MAX_LEVEL + 1
     return out
 
 
@@ -97,7 +106,7 @@ def candles() -> dict:
             "ema": {"ema50": [], "ema200": []}, "plan": None}
 
 
-def start(symbol: str, tf: str, bars: int) -> dict:
+def start(symbol: str, tf: str, bars: int, improve: bool = False) -> dict:
     if tf not in training.CORE_TFS:
         raise training.LabInvalid(f"Timeframe {tf} tidak dilatih (pilih {', '.join(training.CORE_TFS)}).")
     try:
@@ -116,10 +125,11 @@ def start(symbol: str, tf: str, bars: int) -> dict:
         _s.clear()
         _s.update({"state": "loading", "symbol": inst.symbol, "tf": tf, "bars": n, "instrument": inst.to_json(),
                    "startedAt": int(time.time()), "finishedAt": None, "error": None, "segments": [], "trades": [],
-                   "computedTo": 0, "total": n, "stats": _stats([]), "saved": None})
+                   "computedTo": 0, "total": n, "stats": _stats([]), "saved": None, "improve": bool(improve),
+                   "rounds": [], "exam": None, "goal": training.GOAL_WIN_RATE, "reached": False, "hint": None})
         _bars = None
         _stop.clear()
-    threading.Thread(target=_run, args=(inst, tf, n), daemon=True, name="training-session").start()
+    threading.Thread(target=_run, args=(inst, tf, n, bool(improve)), daemon=True, name="training-session").start()
     return status()
 
 
@@ -133,52 +143,117 @@ def _set(**kw) -> None:
         _s.update(kw)
 
 
-def _run(inst, tf: str, n: int) -> None:
+def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], list[dict], training.Params, int] | None:
+    """Anchored walk-forward over `b`; `publish(trades, segments, upto)` after each stretch (None: stopped)."""
+    tf_sec = training.TF_SECONDS.get(tf, 3600)
+    p, version = training.default_params(tf), 1
+    trades: list[dict] = []
+    segments: list[dict] = []
+    for k, (a, z) in enumerate(bounds(len(b))):
+        if _stop.is_set():
+            return None
+        event = None
+        if a > 0:  # learn from the candles before this stretch only
+            best, report, current = training.tune(_first(b, a), tf, p, align[:a] if align is not None else None, level)
+            event = {"bar": a, "t": int(b.time[a]), "changed": best != p, "before": current["outOfSample"],
+                     "after": report["outOfSample"], "params": asdict(best)}
+            if best != p:
+                p, version = best, version + 1
+        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align) if a <= s.created < z]
+        trades += seg
+        segments.append({"index": k, "from": a, "to": z, "fromT": int(b.time[a]), "toT": int(b.time[z - 1]),
+                         "version": version, "learn": event, "stats": _stats(seg)})
+        if publish:
+            publish(trades, segments, z)
+    return trades, segments, p, version
+
+
+def _publish(trades, segments, upto) -> None:
+    with _lock:
+        _s.update(trades=trades[:], segments=segments[:], computedTo=upto, stats=_stats(trades))
+
+
+def _run(inst, tf: str, n: int, improve: bool) -> None:
     global _bars
     state = "done"
     try:
         b = training.history(inst, tf, n)
-        if b is None or len(b) < MIN_BARS:
+        if b is None:  # the long history could not be fetched (e.g. Yahoo rate limit): the chart's bars, or why not
+            try:
+                b = market_data.load(inst, tf)
+            except Exception as exc:
+                raise training.LabInvalid(f"Data harga {inst.symbol} {tf} tidak bisa diambil dari Yahoo saat ini "
+                                          f"({getattr(exc, 'message', exc)}). Coba lagi sebentar lagi.") from exc
+        if len(b) < MIN_BARS:
             raise training.LabInvalid(f"Riwayat {inst.symbol} {tf} terlalu pendek ({0 if b is None else len(b)} candle).")
         align = training.htf_alignment(inst, tf, b, download=True)
         with _lock:
             _bars = b
             _s.update(state="running", total=len(b))
-        tf_sec = training.TF_SECONDS.get(tf, 3600)
-        p, version = training.default_params(tf), 1
-        trades: list[dict] = []
-        for k, (a, z) in enumerate(bounds(len(b))):
-            if _stop.is_set():
+        level = 0
+        if not improve:
+            _set(stage="training maju dari candle terlama")
+            if _forward(b, tf, align, 0, _publish) is None:
                 state = "stopped"
-                break
-            event = None
-            if a > 0:  # learn from the candles before this stretch only
-                _set(stage=f"belajar dari {a} candle sebelumnya")
-                best, report, current = training.tune(_first(b, a), tf, p, align[:a] if align is not None else None)
-                event = {"bar": a, "t": int(b.time[a]), "changed": best != p, "before": current["outOfSample"],
-                         "after": report["outOfSample"], "params": asdict(best)}
-                if best != p:
-                    p, version = best, version + 1
-            _set(stage=f"trading candle {a}–{z}")
-            seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align) if a <= s.created < z]
-            trades += seg
-            with _lock:
-                _s["trades"] = trades[:]
-                _s["segments"] = _s["segments"] + [{"index": k, "from": a, "to": z, "fromT": int(b.time[a]),
-                                                    "toT": int(b.time[z - 1]), "version": version, "learn": event,
-                                                    "stats": _stats(seg)}]
-                _s["computedTo"] = z
-                _s["stats"] = _stats(trades)
+        else:
+            level = _improve(b, tf, align)
+            if level is None:
+                state = "stopped"
         if state == "done":  # keep what was learned: the usual tuning on all candles + the trade dictionary
             _set(stage="menyimpan hasil ke AI")
-            upgrade = training.tune_pair(inst, tf, b, align)
-            _set(saved={"upgrade": bool(upgrade), "version": training.active(inst.symbol, tf)[1]})
+            upgrade = training.tune_pair(inst, tf, b, align, level)
+            _set(saved={"upgrade": bool(upgrade), "version": training.active(inst.symbol, tf)[1], "level": level})
     except Exception as exc:  # reported in the status
         log.exception("training session failed")
         state = "error"
         _set(error=str(getattr(exc, "message", exc))[:200])
     finally:
         _set(state=state, stage=None, finishedAt=int(time.time()))
+
+
+def _improve(b: Bars, tf: str, align) -> int | None:
+    """Improvement rounds on the candles before the exam, each with a wider search; then the final exam. Returns the
+    search level of the best round (None: stopped)."""
+    cut = max(MIN_BARS, len(b) - max(MIN_EXAM, int(len(b) * EXAM_SHARE)))
+    work = _first(b, cut)
+    work_align = align[:cut] if align is not None else None
+    best = None
+    rounds: list[dict] = []
+    for level in range(training.MAX_LEVEL + 1):
+        combos = training.grid_size(tf, level)
+        _set(stage=f"putaran {level + 1}: belajar maju dengan {combos} kombinasi SMC")
+        first = best is None
+        out = _forward(work, tf, work_align, level, _publish if first else None)
+        if out is None:
+            return None
+        trades, segments, p, _ = out
+        st = _stats(trades)
+        low = training.wilson_low(st["wins"], st["trades"]) if st["trades"] else 0.0
+        better = bool(first or ((st["expectancyR"] or 0) > 0 and low > best["low"] + 0.01))
+        rounds.append({"round": level + 1, "level": level, "combos": combos, **st, "winRateLow": round(low, 4), "best": better})
+        if better:
+            best = {"level": level, "low": low, "p": p, "trades": trades, "segments": segments}
+            for r in rounds[:-1]:
+                r["best"] = False
+            _publish(trades, segments, cut)
+        reached = bool(st["trades"] >= GOAL_TRADES and (st["winRate"] or 0) >= training.GOAL_WIN_RATE)
+        _set(rounds=[dict(r) for r in rounds], reached=reached)
+        if reached or (not better and level > 0):
+            break  # goal reached, or a wider search no longer helps
+    learned_from = len(best["trades"])
+    if learned_from < GOAL_TRADES:
+        _set(hint=f"Bagian belajar hanya menghasilkan {learned_from} trade — terlalu sedikit untuk membuktikan setting yang lebih baik. "
+                  "Tambah jumlah candle atau pilih timeframe lebih kecil.")
+    # final exam: the best round's setting, once, on candles never used while improving
+    _set(stage="ujian akhir pada candle yang tidak pernah dipakai belajar")
+    tf_sec = training.TF_SECONDS.get(tf, 3600)
+    exam = [_trade(b, s, 0, -1, tf_sec, best["p"], exam=True)
+            for s in training.signals(b, best["p"], None, align) if s.created >= cut]
+    with _lock:
+        _s["exam"] = {"from": cut, "fromT": int(b.time[cut]), "candles": len(b) - cut, "stats": _stats(exam),
+                      "params": asdict(best["p"]), "level": best["level"]}
+    _publish(best["trades"] + exam, best["segments"], len(b))
+    return best["level"]
 
 
 def running() -> bool:

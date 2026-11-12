@@ -476,10 +476,12 @@ const duration = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.f
 const learnText = (l) => (!l ? '<span class="dim">default (belum belajar)</span>'
   : !l.after?.trades ? '<span class="dim">data belum cukup untuk belajar</span>'
     : `${l.changed ? '<span class="up">setting baru</span>' : 'setting tetap'} <span class="dim">(uji internal ${pct(l.before?.winRate)} → ${pct(l.after?.winRate)})</span>`);
+// An exam (or any result) on few trades is not evidence: 3 / 3 says little about 99 %
+const thin = (n) => (n < 30 ? ` <span class="flat">· sampel kecil (${n} trade), belum bukti</span>` : '');
 const savedText = (sv) => (!sv ? '' : `trade disimpan ke kamus AI · setting aset ${sv.upgrade ? `<span class="up">di-upgrade ke v${sv.version}</span>` : sv.version ? `tetap v${sv.version}` : 'tetap default'}`);
 
 function mountTrainingLab(el) {
-  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4 };
+  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4, improve: true };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LAB_KEY) || '{}') }; } catch { /* per-viewer convenience only */ }
   const save = () => { try { localStorage.setItem(LAB_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
   el.innerHTML = `
@@ -489,6 +491,8 @@ function mountTrainingLab(el) {
       <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
       <div class="lab-row"><span>CANDLE</span><input class="input lab-bars" type="number" min="300" max="20000" step="100" value="${prefs.bars}">
         <span class="dim lab-hint"></span></div>
+      <div class="lab-row lab-improve-row"><span></span><label class="check" title="Selama belum mencapai target, training maju diulang dengan pencarian SMC yang makin luas (1.152 → 8.640 kombinasi) dan hasil terbaik dipakai; berhenti bila target tercapai atau pencarian lebih luas tidak membantu lagi. 20% candle terakhir dikunci untuk ujian akhir.">
+        <input type="checkbox" class="lab-improve"> TERUS PERBAIKI SAMPAI TARGET 99% — ulang dengan pencarian SMC makin luas, lalu ujian akhir di 20% candle terakhir</label></div>
       <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
       <div class="tr-progress lab-progress"><i></i><span></span></div>
       <div class="lab-current"></div>
@@ -527,6 +531,8 @@ function mountTrainingLab(el) {
     }
     $('.lab-hint').textContent = `riwayat tersedia: ${prefs.tfs.map((t) => `${t.toUpperCase()} ${LAB_HISTORY[t]}`).join(' · ') || '–'} (bila riwayat lebih pendek, dipakai seluruhnya)`;
     $('.lab-asset-note').textContent = single() ? 'training live 1 aset × 1 timeframe, tampil di chart' : 'semua aset pasar terpilih (batch, tanpa chart)';
+    $('.lab-improve-row').classList.toggle('hidden', !single());
+    $('.lab-improve').checked = prefs.improve;
   };
 
   async function loadAssets() {
@@ -578,7 +584,9 @@ function mountTrainingLab(el) {
       const pctDone = st.total ? Math.round((100 * (st.computedTo || 0)) / st.total) : 0;
       $('.lab-progress i').style.width = `${pctDone}%`;
       $('.lab-progress span').textContent = `AI sudah belajar & trading ${st.computedTo || 0} / ${st.total || st.bars} candle · ${pctDone}% · ${duration(elapsed)}`;
+      const lastRound = st.rounds?.[st.rounds.length - 1];
       $('.lab-current').innerHTML = `${esc(st.symbol || '')} · ${esc((st.tf || '').toUpperCase())}${st.stage ? ` · ${esc(st.stage)}` : ''}
+        ${st.improve && lastRound ? ` · putaran ${lastRound.round}/${st.maxRounds || lastRound.round}` : ''}${st.exam ? ` · <b>ujian akhir: ${pct(st.exam.stats.winRate)}</b> dari ${st.exam.stats.trades} trade (${rr(st.exam.stats.totalR)})${thin(st.exam.stats.trades)}` : ''}
         · trade selesai ${st.stats?.trades ?? 0} · menang <b>${pct(st.stats?.winRate)}</b> · ${rr(st.stats?.totalR)}${st.saved ? ` · ${savedText(st.saved)}` : ''}`;
     } else {
       const pctDone = st.progressPct ?? 0;
@@ -648,7 +656,7 @@ function mountTrainingLab(el) {
     const T = data.candles[i - 1].t;
     const trades = (sess?.trades || []);
     chart.until = T;
-    chart.setTrades({ split: null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean) });
+    chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean) });
     const done = trades.filter((t) => t.closed_t != null && t.closed_t <= T && ['win', 'loss', 'timeout'].includes(t.status));
     const wins = done.filter((t) => t.r > 0).length;
     const total = done.reduce((a, t) => a + (t.r || 0), 0);
@@ -664,14 +672,22 @@ function mountTrainingLab(el) {
       <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
         <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
         <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span></div>
-      <div class="rp-note ${waiting ? 'flat' : 'dim'}">${waiting ? 'AI sedang belajar stretch berikutnya…'
+      ${sess?.improve && sess.rounds?.length ? `<div class="rp-note">Putaran ${sess.rounds[sess.rounds.length - 1].round} · terbaik putaran
+        ${sess.rounds.find((r) => r.best)?.round ?? '–'} (${pct(sess.rounds.find((r) => r.best)?.winRate)})${sess.exam ? ` · <b>UJIAN AKHIR ${pct(sess.exam.stats.winRate)}</b> dari ${sess.exam.stats.trades} trade${thin(sess.exam.stats.trades)}` : ''}
+        · target ${Math.round((sess.goal || 0.99) * 100)}% ${sess.reached ? '<span class="up">tercapai</span>' : '<span class="flat">belum tercapai</span>'}</div>` : ''}
+      <div class="rp-note ${waiting ? 'flat' : 'dim'}">${waiting ? (sess?.improve && sess.rounds?.length ? 'AI memperbaiki dengan pencarian lebih luas…' : 'AI sedang belajar stretch berikutnya…')
         : finished && sess?.state === 'done' ? `SELESAI · ${savedText(sess.saved)}`
           : learned ? `Belajar terakhir di candle ${learned.bar}: ${learnText(learned)}`
             : 'Fase awal: AI belum belajar (setting default)'}</div>`;
-    $('.lab-learn').innerHTML = (sess?.segments || []).length ? `<table class="co-table"><thead><tr><th>Candle</th><th>Setting</th><th>Belajar dari candle sebelumnya</th><th>Trade</th><th>Win</th><th>R</th></tr></thead><tbody>
+    const hint = sess?.hint ? `<div class="note flat">${esc(sess.hint)}</div>` : '';
+    const rounds = sess?.improve && sess.rounds?.length ? `${hint}<table class="co-table"><thead><tr><th>Putaran</th><th>Pencarian SMC</th><th>Trade</th><th>Win</th><th>Batas bawah</th><th>Ekspektasi</th><th></th></tr></thead><tbody>
+      ${sess.rounds.map((r) => `<tr class="${r.best ? 'sel' : ''}"><td>${r.round}</td><td>${r.combos.toLocaleString('id-ID')} kombinasi</td><td>${r.trades}</td><td>${pct(r.winRate)}</td><td>${pct(r.winRateLow)}</td><td>${rr(r.expectancyR)}</td><td>${r.best ? '<span class="tag bull">TERBAIK</span>' : '<span class="dim">tidak lebih baik</span>'}</td></tr>`).join('')}
+      ${sess.exam ? `<tr><td><b>UJIAN AKHIR</b></td><td class="dim">candle ${sess.exam.from}–${sess.total} (tidak pernah dipakai belajar)</td><td>${sess.exam.stats.trades}</td><td><b class="${sess.exam.stats.winRate >= 0.5 ? 'up' : 'down'}">${pct(sess.exam.stats.winRate)}</b></td><td></td><td>${rr(sess.exam.stats.expectancyR)}</td><td>${thin(sess.exam.stats.trades)}</td></tr>` : ''}
+      </tbody></table>` : '';
+    $('.lab-learn').innerHTML = rounds + ((sess?.segments || []).length ? `<table class="co-table"><thead><tr><th>Candle</th><th>Setting</th><th>Belajar dari candle sebelumnya</th><th>Trade</th><th>Win</th><th>R</th></tr></thead><tbody>
       ${sess.segments.map((sg) => `<tr class="${seg && sg.index === seg.index ? 'sel' : ''}"><td>${sg.from}–${sg.to}</td><td>v${sg.version}</td>
         <td>${learnText(sg.learn)}</td>
-        <td>${sg.stats.trades}</td><td>${pct(sg.stats.winRate)}</td><td>${rr(sg.stats.totalR)}</td></tr>`).join('')}</tbody></table>` : '';
+        <td>${sg.stats.trades}</td><td>${pct(sg.stats.winRate)}</td><td>${rr(sg.stats.totalR)}</td></tr>`).join('')}</tbody></table>` : '');
     $('.lab-live-info').textContent = sess ? `${sess.symbol} · ${sess.tf?.toUpperCase()} · ${sess.total || sess.bars} candle` : '';
   }
 
@@ -713,7 +729,7 @@ function mountTrainingLab(el) {
         if (single()) {
           resetPlayer();
           showLive(true);
-          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars } });
+          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars, improve: prefs.improve } });
         } else {
           showLive(false);
           status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } });
@@ -738,6 +754,7 @@ function mountTrainingLab(el) {
   });
   $('.lab-asset').addEventListener('change', (e) => { prefs.asset = e.target.value; save(); renderSets(); showLive(single() && sess && sess.state !== 'idle'); });
   $('.lab-bars').addEventListener('change', (e) => { prefs.bars = Number(e.target.value) || 5000; save(); });
+  $('.lab-improve').addEventListener('change', (e) => { prefs.improve = e.target.checked; save(); });
   loadAssets();
   syncPlay();
   return {
@@ -852,7 +869,7 @@ export const trainingPage = {
     if (this.tab === 'board') {
       body.innerHTML = d.leaderboard.length ? `<table class="co-table tr-table"><thead><tr><th>Aset</th><th>TF</th><th>Status</th><th>Backtest win</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
         ${d.leaderboard.map((b) => `<tr data-sym="${esc(b.symbol)}" data-tf="${esc(b.tf)}"><td><b>${esc(b.symbol)}</b><small class="dim">${esc(MARKET_NAME[b.market] || '')}</small></td><td>${esc(b.tf.toUpperCase())}</td>
-          <td title="Bukti parameter aktif: ${pct(b.evidence.winRate)} dari ${b.evidence.trades} trade out-of-sample">${levelTag(d.modes, b.qualified, b.evidence.winRateLow)}<small class="dim">${(SOURCE[b.source] || SOURCE.default)[0].toLowerCase()} v${b.version} · bukti ${pct(b.evidence.winRate)}/${b.evidence.trades}</small></td>
+          <td title="Bukti parameter aktif: ${pct(b.evidence.winRate)} dari ${b.evidence.trades} trade out-of-sample">${levelTag(d.modes, b.qualified, b.evidence.winRateLow)}<small class="dim">${(SOURCE[b.source] || SOURCE.default)[0].toLowerCase()} v${b.version} · bukti ${pct(b.evidence.winRate)}/${b.evidence.trades}${b.level ? ` · pencarian L${b.level}` : ''}</small></td>
           <td class="${b.backtest.winRate >= d.target ? 'up' : ''}">${pct(b.backtest.winRate)}</td><td>${b.backtest.trades ?? 0}</td><td>${rr(b.backtest.expectancyR)}</td>
           <td class="${b.live.winRate >= d.target ? 'up' : ''}">${pct(b.live.winRate)}</td><td>${b.live.trades}</td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Pelatihan dimulai ±2 menit setelah aplikasi dibuka, setelah data harga terkumpul.</div>';

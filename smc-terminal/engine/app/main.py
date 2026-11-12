@@ -273,6 +273,7 @@ class SessionRequest(BaseModel):
     symbol: str
     tf: str = "5m"
     bars: int = 5000
+    improve: bool = False  # repeat with a wider search until the goal or no improvement, then a final exam
 
 
 @app.get("/training/session")
@@ -287,7 +288,7 @@ def training_session_candles() -> dict:
 
 @app.post("/training/session/start")
 def training_session_start(body: SessionRequest) -> dict:
-    return session.start(body.symbol, body.tf, body.bars)
+    return session.start(body.symbol, body.tf, body.bars, body.improve)
 
 
 @app.post("/training/session/stop")
