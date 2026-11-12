@@ -18,7 +18,16 @@ const ruleText = (p) => `pivot ${p.swing}/${p.internal} · semua BOS/CHoCH (tanp
   · order kedaluwarsa ${p.expiry} bar`;
 // settings of earlier versions still appear in the upgrade log
 const legacyText = (p) => `versi lama · pivot ${p.swing}/${p.internal} · ${SCOPE[p.scope] || p.scope} ${p.kinds === 'CHoCH' ? 'CHoCH saja' : 'BOS+CHoCH'} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
-const paramText = (p) => (p.target === 'tp12' && p.zone === 'fvg' ? ruleText(p) : legacyText(p));
+const patternText = (p) => `CHART PATTERN · pivot ${p.swing} · entry ${p.entry === 'retest' ? 'retest garis' : 'close candle breakout'}
+  · SL titik invalidasi pola + ${p.sl_atr}×ATR · TP1 % Bulkowski tinggi pola (50%, lalu SL ke entry) · TP2 100% measured move`;
+const paramText = (p) => (p.method === 'pattern' ? patternText(p) : p.target === 'tp12' && p.zone === 'fvg' ? ruleText(p) : legacyText(p));
+// results per chart pattern (pattern mode)
+const patternLine = (g) => {
+  const rows = Object.entries(g || {}).filter(([, v]) => v.trades).sort((a, b) => b[1].trades - a[1].trades);
+  return rows.length ? `<span class="tr-grades">POLA: ${rows.map(([k, v]) => `${esc(k)} <b>${pct(v.winRate)}</b>
+    <span class="dim">(${v.trades}, ${rr(v.expectancyR)})</span>`).join(' · ')}</span>` : '<span class="dim">POLA: belum ada trade selesai</span>';
+};
+const METHOD_BUTTONS = '<span class="tr-method" title="Metode analisa: SMC (BOS/CHoCH → area FVG) atau chart pattern klasik (double top, H&S, segitiga, wedge, flag, rectangle) dengan target measured move"><button data-method="smc">SMC</button><button data-method="pattern">CHART PATTERN</button></span>';
 // Precision level reached by a setting (lower bound of its proven win rate); thresholds come from the engine.
 function levelTag(modes, qualified, low) {
   if (!qualified) return '<span class="tag ghost">BAYANGAN</span>';
@@ -213,6 +222,7 @@ const clock = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2
 function mountTrainingChart(el) {
   el.innerHTML = `
     <div class="tr-live-bar">
+      ${METHOD_BUTTONS}
       <select class="input tr-live-pick" title="Aset & timeframe yang dilatih"></select>
       <button class="tr-follow" title="Pindah otomatis ke aset yang sedang dilatih di TRAINING LAB, atau ke aktivitas trade virtual terbaru">IKUTI TRAINING</button>
       <button class="tr-smc" title="Tampilkan struktur SMC (BOS/CHoCH swing & internal)">SMC</button>
@@ -229,7 +239,8 @@ function mountTrainingChart(el) {
     <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div><div class="chart-replay hidden"></div></div>
     <div class="tr-live-foot"></div>`;
   const $ = (q) => el.querySelector(q);
-  const prefs = { follow: false, smc: true, speed: 4, ...loadChartPrefs() };
+  const prefs = { follow: false, smc: true, speed: 4, method: 'smc', ...loadChartPrefs() };
+  const patternMode = () => prefs.method === 'pattern';
   let chart = null, current = null, summary = null, chartData = null, liveState = null, busy = false, seq = 0;
   let replay = null;  // { full, i, start, playing, acc, last, raf }
   const visible = () => el.offsetParent !== null && !document.hidden;
@@ -246,6 +257,8 @@ function mountTrainingChart(el) {
   const syncButtons = () => {
     $('.tr-follow').classList.toggle('active', prefs.follow);
     $('.tr-smc').classList.toggle('active', prefs.smc);
+    $('.tr-smc').classList.toggle('hidden', patternMode());
+    el.querySelectorAll('.tr-method button').forEach((b) => b.classList.toggle('active', b.dataset.method === prefs.method));
     el.querySelectorAll('.tr-speed button').forEach((b) => b.classList.toggle('active', +b.dataset.speed === prefs.speed));
     $('.tr-play').textContent = !replay ? '▶ REPLAY' : replay.playing ? '⏸ JEDA' : replay.i >= replay.full.candles.length ? '↺ ULANG' : '▶ LANJUT';
     $('.tr-play').classList.toggle('active', !!replay?.playing);
@@ -368,10 +381,11 @@ function mountTrainingChart(el) {
       chart.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
     }
     try {
-      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}${current.bars ? `&bars=${current.bars}` : ''}`);
+      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}${current.bars ? `&bars=${current.bars}` : ''}&method=${prefs.method}`);
       if (my !== seq || replay) return;
       chartData = t;
       chart.setData({ ...t, candles: t.candles.map((c) => ({ ...c })) }, { keepRange });
+      chart.setLayers(prefs.smc && !patternMode() ? SMC_ON : SMC_OFF);  // pattern mode: the patterns, not BOS / CHoCH
       acct.market(t.instrument?.market);
       chart.setTrades({ ...t, trades: withMoney(t.trades) });
       if (!keepRange) liveState = null;
@@ -425,7 +439,7 @@ function mountTrainingChart(el) {
       <span>DATA UJI (OOS): <b class="${oos.winRate >= 0.5 ? 'up' : oos.winRate != null ? 'down' : ''}">${pct(oos.winRate)}</b> dari ${oos.trades ?? 0} trade · ekspektasi ${rr(oos.expectancyR)}</span>
       <span>LIVE: <b>${pct(t.live?.winRate)}</b> dari ${t.live?.trades ?? 0} selesai · ${live.length} sinyal tercatat</span>
       <span>AKTIF: ${open.length}</span>
-      ${gradeLine(t.grades)}
+      ${t.method === 'pattern' ? patternLine(t.patternStats) : gradeLine(t.grades)}
       ${spec() ? accountLine(accountStats(t.trades, spec(), acct.balance(), acct.lot()), spec(), acct.lot()) : ''}
       <span class="tr-legend"><i class="lg-tp"></i>zona TP <i class="lg-sl"></i>zona SL <i class="lg-1r"></i>TP1 puncak / TP2 <i class="lg-live"></i>LIVE <i class="lg-is"></i>data latih (redup)</span>`;
   }
@@ -455,6 +469,15 @@ function mountTrainingChart(el) {
     syncButtons();
     save();
     chart?.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
+  });
+  el.querySelector('.tr-method').addEventListener('click', (e) => {  // SMC ↔ chart pattern: same asset, other method
+    const m = e.target.closest('button')?.dataset.method;
+    if (!m || m === prefs.method) return;
+    prefs.method = m;
+    stopReplay(false);
+    syncButtons();
+    save();
+    load(false);
   });
   syncButtons();
   setInterval(pollLive, 3000);
@@ -524,11 +547,12 @@ const thin = (n) => (n < 30 ? ` <span class="flat">· sampel kecil (${n} trade),
 const savedText = (sv) => (!sv ? '' : `trade disimpan ke kamus AI · setting aset ${sv.upgrade ? `<span class="up">di-upgrade ke v${sv.version}</span>` : sv.version ? `tetap v${sv.version}` : 'tetap default'}`);
 
 function mountTrainingLab(el) {
-  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4, improve: true };
+  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000, asset: '', speed: 4, improve: true, method: 'smc' };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LAB_KEY) || '{}') }; } catch { /* per-viewer convenience only */ }
   const save = () => { try { localStorage.setItem(LAB_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
   el.innerHTML = `
     <div class="lab-ctl">
+      <div class="lab-row"><span>METODE</span>${METHOD_BUTTONS}<span class="dim lab-method-note"></span></div>
       <div class="lab-row"><span>PASAR</span><div class="lab-set" data-set="markets">${LAB_MARKETS.map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}<button data-all="markets">SEMUA</button></div></div>
       <div class="lab-row"><span>ASET</span><select class="input lab-asset"></select><span class="dim lab-asset-note"></span></div>
       <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
@@ -582,6 +606,10 @@ function mountTrainingLab(el) {
     $('.lab-improve-row').classList.toggle('hidden', !single());
     $('.lab-improve').checked = prefs.improve;
     if (prefs.markets.length === 1) acct.market(prefs.markets[0]);  // balance currency & lot of the chosen market
+    el.querySelectorAll('.lab-ctl .tr-method button').forEach((b) => b.classList.toggle('active', b.dataset.method === prefs.method));
+    $('.lab-method-note').textContent = prefs.method === 'pattern'
+      ? 'chart pattern: double top/bottom, H&S, segitiga, rectangle, wedge, flag — target measured move (TP1 % Bulkowski, TP2 100% tinggi pola)'
+      : 'SMC: setiap BOS/CHoCH → area FVG, TP1 puncak, TP2 lanjutan, SL ATR band';
   };
 
   async function loadAssets() {
@@ -705,6 +733,7 @@ function mountTrainingLab(el) {
     const T = data.candles[i - 1].t;
     const trades = (sess?.trades || []);
     chart.until = T;
+    chart.setLayers(sess?.method === 'pattern' ? SMC_OFF : { ...SMC_ON, swing: true, internal: true });
     acct.market(sess?.instrument?.market);
     chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: moneyLabels(trades.map((t) => tradeAt(t, T)).filter(Boolean), labSpec(), acct.lot()) });
     const done = trades.filter((t) => t.closed_t != null && t.closed_t <= T && ['win', 'loss', 'timeout'].includes(t.status));
@@ -722,7 +751,8 @@ function mountTrainingLab(el) {
       <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
         <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
         <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span></div>
-      ${sess?.grades ? `<div class="rp-note">${gradeLine(sess.grades)}</div>` : ''}
+      ${sess?.method === 'pattern' ? `<div class="rp-note">${patternLine(sess.patternStats)}</div>`
+        : sess?.grades ? `<div class="rp-note">${gradeLine(sess.grades)}</div>` : ''}
       ${labSpec() ? `<div class="rp-note">${accountLine(accountStats(done, labSpec(), acct.balance(), acct.lot()), labSpec(), acct.lot())}</div>` : ''}
       ${sess?.improve && sess.rounds?.length ? `<div class="rp-note">Putaran ${sess.rounds[sess.rounds.length - 1].round} · terbaik putaran
         ${sess.rounds.find((r) => r.best)?.round ?? '–'} (${pct(sess.rounds.find((r) => r.best)?.winRate)})${sess.exam ? ` · <b>UJIAN AKHIR ${pct(sess.exam.stats.winRate)}</b> dari ${sess.exam.stats.trades} trade${thin(sess.exam.stats.trades)}` : ''}
@@ -759,6 +789,7 @@ function mountTrainingLab(el) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.speed) { prefs.speed = +b.dataset.speed; save(); syncPlay(); if (play) drawPlay(); return; }
+    if (b.dataset.method) { prefs.method = b.dataset.method; save(); renderSets(); return; }  // used by the next start
     if (b.classList.contains('lab-play')) { if (play) { play.playing = !play.playing; play.last = performance.now(); } syncPlay(); return; }
     if (b.classList.contains('lab-end')) {
       if (play) { const limit = Math.min(play.data.candles.length, sess?.computedTo || 0); while (play.i < limit) chart.appendCandle({ ...play.data.candles[play.i++] }); drawPlay(); }
@@ -782,7 +813,7 @@ function mountTrainingLab(el) {
         if (single()) {
           resetPlayer();
           showLive(true);
-          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars, improve: prefs.improve } });
+          sess = await api('/api/training/session/start', { json: { symbol: prefs.asset, tf: prefs.tfs[0] || '5m', bars: prefs.bars, improve: prefs.improve, method: prefs.method } });
         } else {
           showLive(false);
           status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } });

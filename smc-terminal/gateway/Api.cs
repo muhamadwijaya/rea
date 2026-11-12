@@ -259,7 +259,7 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/training/chart", async (string symbol, string? tf, int? bars, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/training/chart", async (string symbol, string? tf, int? bars, string? method, EngineClient engine, CancellationToken ct) =>
         {
             tf = string.IsNullOrWhiteSpace(tf) ? "1h" : tf.ToLowerInvariant();
             if (!Timeframes.Contains(tf))
@@ -267,7 +267,8 @@ public static class Api
                 return Results.BadRequest(new { error = "invalid_timeframe", message = $"Timeframe {tf} tidak dikenal" });
             }
             var window = bars is > 0 ? $"&bars={bars.Value}" : "";
-            var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}{window}", ct);
+            var mode = method == "pattern" ? "&method=pattern" : "";  // chart patterns instead of SMC
+            var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}{window}{mode}", ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -305,7 +306,7 @@ public static class Api
 
         api.MapPost("/training/session/start", async (SessionRequest body, EngineClient engine, CancellationToken ct) =>
         {
-            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars, improve = body.Improve }, ct);
+            var response = await engine.PostJsonAsync("training/session/start", new { symbol = body.Symbol, tf = body.Tf, bars = body.Bars, improve = body.Improve, method = body.Method == "pattern" ? "pattern" : "smc" }, ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -403,7 +404,7 @@ public static class Api
 
     public sealed record LabRequest(string[] Markets, string[] Tfs, int Bars);
 
-    public sealed record SessionRequest(string Symbol, string Tf, int Bars, bool Improve = false);
+    public sealed record SessionRequest(string Symbol, string Tf, int Bars, bool Improve = false, string? Method = null);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

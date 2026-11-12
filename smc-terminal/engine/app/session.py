@@ -70,6 +70,7 @@ def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int,
             "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "tp1": s.tp1, "status": s.status,
             "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
             "align": s.align, "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "version": version,
+            "pattern": training.pattern_json(s, b.time),
             "segment": segment, "live": False, "sample": "oos", "exam": exam}
 
 
@@ -114,7 +115,9 @@ def candles() -> dict:
             "ema": {"ema50": [], "ema200": []}, "plan": None}
 
 
-def start(symbol: str, tf: str, bars: int, improve: bool = False) -> dict:
+def start(symbol: str, tf: str, bars: int, improve: bool = False, method: str = "smc") -> dict:
+    if method not in ("smc", "pattern"):
+        raise training.LabInvalid("Metode harus smc atau pattern.")
     if tf not in training.CORE_TFS:
         raise training.LabInvalid(f"Timeframe {tf} tidak dilatih (pilih {', '.join(training.CORE_TFS)}).")
     try:
@@ -134,10 +137,11 @@ def start(symbol: str, tf: str, bars: int, improve: bool = False) -> dict:
         _s.update({"state": "loading", "symbol": inst.symbol, "tf": tf, "bars": n, "instrument": inst.to_json(),
                    "startedAt": int(time.time()), "finishedAt": None, "error": None, "segments": [], "trades": [],
                    "computedTo": 0, "total": n, "stats": _stats([]), "saved": None, "improve": bool(improve),
-                   "rounds": [], "exam": None, "goal": training.GOAL_WIN_RATE, "reached": False, "hint": None})
+                   "rounds": [], "exam": None, "goal": training.GOAL_WIN_RATE, "reached": False, "hint": None,
+                   "method": method})
         _bars = None
         _stop.clear()
-    threading.Thread(target=_run, args=(inst, tf, n, bool(improve)), daemon=True, name="training-session").start()
+    threading.Thread(target=_run, args=(inst, tf, n, bool(improve), method), daemon=True, name="training-session").start()
     return status()
 
 
@@ -151,10 +155,10 @@ def _set(**kw) -> None:
         _s.update(kw)
 
 
-def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], list[dict], training.Params, int] | None:
+def _forward(b: Bars, tf: str, align, level: int, publish, method: str = "smc") -> tuple[list[dict], list[dict], training.Params, int] | None:
     """Anchored walk-forward over `b`; `publish(trades, segments, upto)` after each stretch (None: stopped)."""
     tf_sec = training.TF_SECONDS.get(tf, 3600)
-    p, version = training.default_params(tf), 1
+    p, version = (training.pattern_params(tf) if method == "pattern" else training.default_params(tf)), 1
     raw: list = []
     trades: list[dict] = []
     segments: list[dict] = []
@@ -182,10 +186,10 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
 def _publish(trades, segments, upto) -> None:
     with _lock:
         _s.update(trades=trades[:], segments=segments[:], computedTo=upto, stats=_stats(trades),
-                  grades=training.grade_metrics(trades))
+                  grades=training.grade_metrics(trades), patternStats=training.pattern_metrics(trades))
 
 
-def _run(inst, tf: str, n: int, improve: bool) -> None:
+def _run(inst, tf: str, n: int, improve: bool, method: str = "smc") -> None:
     global _bars
     state = "done"
     try:
@@ -206,16 +210,18 @@ def _run(inst, tf: str, n: int, improve: bool) -> None:
         level = 0
         if not improve:
             _set(stage="training maju dari candle terlama")
-            if _forward(b, tf, align, 0, _publish) is None:
+            if _forward(b, tf, align, 0, _publish, method) is None:
                 state = "stopped"
         else:
-            level = _improve(b, tf, align)
+            level = _improve(b, tf, align, method)
             if level is None:
                 state = "stopped"
-        if state == "done":  # keep what was learned: the usual tuning on all candles + the trade dictionary
+        if state == "done" and method == "smc":  # keep what was learned: the usual tuning on all candles + the dictionary
             _set(stage="menyimpan hasil ke AI")
             upgrade = training.tune_pair(inst, tf, b, align, level)
             _set(saved={"upgrade": bool(upgrade), "version": training.active(inst.symbol, tf)[1], "level": level})
+        elif state == "done":  # chart patterns: the session's own result; the learned settings belong to the SMC mode
+            _set(saved={"upgrade": False, "version": 0, "level": level, "method": method})
     except Exception as exc:  # reported in the status
         log.exception("training session failed")
         state = "error"
@@ -224,7 +230,7 @@ def _run(inst, tf: str, n: int, improve: bool) -> None:
         _set(state=state, stage=None, finishedAt=int(time.time()))
 
 
-def _improve(b: Bars, tf: str, align) -> int | None:
+def _improve(b: Bars, tf: str, align, method: str = "smc") -> int | None:
     """Improvement rounds on the candles before the exam, each with a wider search; then the final exam. Returns the
     search level of the best round (None: stopped)."""
     cut = max(MIN_BARS, len(b) - max(MIN_EXAM, int(len(b) * EXAM_SHARE)))
@@ -233,10 +239,10 @@ def _improve(b: Bars, tf: str, align) -> int | None:
     best = None
     rounds: list[dict] = []
     for level in range(training.MAX_LEVEL + 1):
-        combos = training.grid_size(tf, level)
+        combos = training.grid_size(tf, level, method)
         _set(stage=f"putaran {level + 1}: belajar maju dengan {combos} kombinasi SMC")
         first = best is None
-        out = _forward(work, tf, work_align, level, _publish if first else None)
+        out = _forward(work, tf, work_align, level, _publish if first else None, method)
         if out is None:
             return None
         trades, segments, p, _ = out

@@ -210,6 +210,31 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   +0,028R. Sekitar separuh area tidak pernah disentuh harga lagi (tanpa entry). Aturan ini sendiri **tidak**
   menghasilkan 99%. Mode presisi dan EXPERT menilai aset/trade mana yang terbukti, tanpa menghapus area dari chart.
 
+- **Metode CHART PATTERN** (v3.17, pilih **METODE: SMC / CHART PATTERN** di LIVE CHART dan TRAINING LAB). Pola klasik
+  dibaca dari zigzag pivot yang sudah terkonfirmasi (tanpa look-ahead): **double top/bottom, head & shoulders (dan
+  inverse), segitiga ascending/descending/symmetrical, rectangle, rising/falling wedge, bull/bear flag**. Ukuran
+  minimal pola 2× ATR (tiang flag 3,5× ATR), toleransi "sama tinggi" dalam ATR. Trade dibuka pada **close candle yang
+  menembus garis pola** (neckline / batas); alternatif *retest* = limit di garis yang ditembus.
+  - **Target = measured move** (aturan ukur T. Bulkowski, thepatternsite.com): tinggi pola diproyeksikan dari breakout.
+    **TP2 = 100% tinggi pola** (target buku teks), **TP1 = porsi tinggi yang menurut data Bulkowski benar-benar
+    tercapai**, dari titik dasar yang ia pakai — 50% posisi ditutup di TP1 lalu SL ke entry. Porsi TP1: double top 43%
+    (dari valley), double bottom 65% (dari puncak tengah), H&S top 51%, inverse H&S 71%, segitiga ascending naik 70% /
+    turun 44%, descending naik 64% / turun 50%, symmetrical naik 58% / turun 36%, rectangle naik 78% / turun 54%,
+    falling wedge naik 62% / turun 29%, rising wedge naik 63% / turun 32%, flag 46% dari panjang tiang. Tinggi:
+    puncak − neckline (H&S), puncak − valley (double), lebar awal (segitiga, wedge, rectangle), panjang tiang (flag).
+  - **Stop loss** di titik invalidasi pola + 0,5 × ATR: di atas top kedua (double top), di atas bahu kanan (H&S), di
+    balik swing terakhir di dalam pola (segitiga, wedge, rectangle), di balik ujung flag.
+  - Satu posisi sekaligus, tanpa batas waktu, BALANCE & LOT, replay dan training live berlaku sama. Pola digambar di
+    chart (garis cyan = titik pola, oranye putus-putus = neckline/batas); pola yang tidak jadi trade tampil redup.
+    Statistik per pola tampil di bawah chart. Setting yang dipelajari AI dan jurnal live tetap milik mode SMC; hasil
+    training live mode pola tidak disimpan sebagai setting aset.
+  - **Terukur** (57 aset inti × 15M/1H/4H/1D, setting default): **16.999 trade, win 56,2%, +0,051R per trade** (SMC
+    v3.16: win 55,9%, +0,031R). Per pola, win (trade, R/trade): double top turun 80,1% (362, −0,009R), double bottom
+    naik 77,6% (392, +0,100R), falling wedge turun 80,6% (480, −0,032R), rising wedge naik 72,7% (644, +0,075R),
+    H&S 63,4% (642, −0,034R), inverse H&S 58,5% (655, +0,073R), rising wedge turun 61,3% (2.990, −0,040R), falling
+    wedge naik 47,3% (2.751, +0,127R), bull flag 62,7% (67, +0,216R). Varian: entry retest 42,1% (−0,009R); SL +0,25
+    ATR 55,0% (+0,065R); SL +1 ATR 58,8% (+0,036R); hanya TP 100% 38,0% (+0,054R); hanya TP % Bulkowski 57,3%
+    (+0,045R). Win rate tinggi beberapa pola datang dari TP1 yang dekat — lihat kolom R.
 - **Cara membaca BOS/CHoCH** (v3.15): **BOS** = close menembus high struktur tren naik (high tertinggi sejak break
   terakhir — lower high di dalam pullback tidak menggantikannya) / low struktur tren turun. **CHoCH** = close menembus
   **level yang dilindungi**: *strong low* (low asal leg yang menembus high terakhir) pada tren naik, *strong high* pada

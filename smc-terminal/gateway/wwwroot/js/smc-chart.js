@@ -247,6 +247,7 @@ export class SmcChart {
     const ts = this.chart.timeScale();
     const wide = (ts.logicalToCoordinate(1) ?? 0) - (ts.logicalToCoordinate(0) ?? 0) >= 4;  // room for area labels
     for (const s of tr.trades) {
+      if (s.pattern) this.drawPattern(s, X, Y, right, labels, free);  // chart-pattern mode: the pattern itself
       this.drawArea(s, X, Y, right, lastT, labels, free, wide);  // every BOS / CHoCH: its buy or sell area
       if (s.status === 'cancelled') continue;  // never filled: the area only
       const pending = s.status === 'pending';
@@ -262,7 +263,9 @@ export class SmcChart {
         ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
         const y1 = s.tp1 != null ? Y(s.tp1) : null;
         const lines = [[yE, C.blue, `${s.direction > 0 ? 'BUY' : 'SELL'} LIMIT${s.live ? ' · LIVE' : ''}`], [yS, C.bear, s.tp1 != null ? 'SL · ATR band' : 'SL'],
-          ...(y1 !== null ? [[y1, C.bull, 'TP1 puncak BOS/CHoCH'], [yT, C.bull, 'TP2']] : [[yT, C.bull, 'TP']])];
+          ...(y1 !== null ? (s.pattern
+            ? [[y1, C.bull, `TP1 · ${Math.round(s.pattern.pct * 100)}% tinggi pola`], [yT, C.bull, 'TP2 · 100% tinggi pola']]
+            : [[y1, C.bull, 'TP1 puncak BOS/CHoCH'], [yT, C.bull, 'TP2']]) : [[yT, C.bull, 'TP']])];
         for (const [y, c, tag] of lines) {
           ctx.strokeStyle = rgba(c, 0.9); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
           const fits = end + 6 + tag.length * 6.2 < right;
@@ -331,6 +334,35 @@ export class SmcChart {
       ctx.fillText(text, lx, ly);
       ctx.font = '10px "JetBrains Mono", monospace';
     }
+  }
+
+  /** A chart pattern: its swing points joined, its neckline / boundaries dashed, its name at the breakout. */
+  drawPattern(s, X, Y, right, labels, free) {
+    const pt = s.pattern;
+    const { ctx } = this;
+    const xy = ([t, p]) => { const x = X(t), y = Y(p); return x === null || y === null ? null : [x, y]; };
+    const pts = pt.points.map(xy);
+    if (pts.some((v) => v === null) || pts.every(([x]) => x < 0 || x > right)) return;
+    const a = s.status === 'cancelled' ? 0.3 : 1;  // not traded (another position was running): faint
+    ctx.strokeStyle = rgba(C.cyan, 0.9 * a); ctx.lineWidth = 1.4;
+    ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+    ctx.fillStyle = rgba(C.cyan, 0.95 * a);
+    for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.setLineDash([5, 3]); ctx.strokeStyle = rgba(C.orange, 0.85 * a); ctx.lineWidth = 1.2;
+    for (const [a, b] of pt.lines) {
+      const p1 = xy(a), p2 = xy(b);
+      if (p1 && p2) { ctx.beginPath(); ctx.moveTo(...p1); ctx.lineTo(...p2); ctx.stroke(); }
+    }
+    ctx.setLineDash([]);
+    if (a < 1) return;  // only traded patterns are named
+    const text = `${pt.name} ${s.direction > 0 ? '▲' : '▼'}`;
+    const [x0, y0] = pts[0];
+    const w = text.length * 6, y = y0 + (s.direction > 0 ? 12 : -12);
+    if (!free(x0, y, w)) return;
+    labels.push({ x: x0, y, w });
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left'; ctx.fillStyle = rgba(C.cyan, 1); ctx.fillText(text, x0, y);
+    ctx.font = '10px "JetBrains Mono", monospace';
   }
 
   /** The buy (green) or sell (red) area of a BOS / CHoCH — its FVG or order block — from the break until the entry

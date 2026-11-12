@@ -52,19 +52,21 @@ export function accountStats(trades, spec, balance, lot) {
     .sort((a, b) => a.closed_t - b.closed_t);
   let equity = balance, peak = balance, maxDD = 0, maxDDpct = 0, bust = null, worst = 0;
   const risks = [];
-  closed.forEach((t, i) => {
+  let counted = 0;
+  for (const t of closed) {  // a blown account trades no more: the run stops at the trade that emptied it
     const m = tradeMoney(t, spec, lot);
     equity += m;
+    counted += 1;
     worst = Math.min(worst, m);
     peak = Math.max(peak, equity);
     if (peak - equity > maxDD) { maxDD = peak - equity; maxDDpct = peak > 0 ? maxDD / peak : 0; }
-    if (bust == null && equity <= 0) bust = i + 1;
     const r = riskMoney(t, spec, lot);
     if (r != null) risks.push(r);
-  });
+    if (equity <= 0) { bust = counted; break; }
+  }
   return {
     start: balance, end: equity, pnl: equity - balance, pct: balance > 0 ? (equity - balance) / balance : null,
-    maxDD, maxDDpct, bust, trades: closed.length, worst,
+    maxDD, maxDDpct, bust, trades: counted, worst,
     risk: risks.length ? risks.reduce((a, b) => a + b, 0) / risks.length : null,
   };
 }
@@ -141,5 +143,5 @@ export function accountLine(stats, spec, lot) {
   return `<span class="acct-line">AKUN: <b>${fmtMoney(stats.start, cur)}</b> → <b class="${stats.pnl > 0 ? 'up' : stats.pnl < 0 ? 'down' : ''}">${fmtMoney(stats.end, cur)}</b>
     (${fmtMoney(stats.pnl, cur, true)}, ${pct(stats.pct)}) · max drawdown ${fmtMoney(-stats.maxDD, cur)} (${pct(-stats.maxDDpct)})
     · ${lot} lot = ${units.toLocaleString('id-ID', { maximumFractionDigits: 4 })} ${spec.unit}${stats.risk != null ? ` · risiko rata-rata ${fmtMoney(stats.risk, cur)}/trade` : ''}
-    ${stats.bust ? ` · <b class="down">AKUN HABIS di trade ke-${stats.bust}</b>` : ''}${spec.fallback ? ` <span class="dim">(dalam ${spec.quote}: kurs ke USD tidak tersedia)</span>` : ''}</span>`;
+    ${stats.bust ? ` · <b class="down">AKUN HABIS di trade ke-${stats.bust} — trade berikutnya tidak dihitung; kecilkan lot atau tambah balance</b>` : ''}${spec.fallback ? ` <span class="dim">(dalam ${spec.quote}: kurs ke USD tidak tersedia)</span>` : ''}</span>`;
 }

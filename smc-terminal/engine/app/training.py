@@ -62,7 +62,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from . import candles, fundamental, instruments, market_data, newsctx, paths, smc
+from . import candles, fundamental, instruments, market_data, newsctx, paths, patterns, smc
 from .errors import EngineError
 from .market_data import Bars
 
@@ -113,6 +113,8 @@ class Params:
     zone: str = "ob"  # entry zone: "ob" = order block of the leg, "fvg" = the fair value gap inside the leg that broke
     ext: float = 0.618  # target "tp12": TP2 = TP1 + ext × the leg that broke structure
     min_rr: float = MIN_RR  # reward filter: setups paying less (TP1/TP2 blended) are not traded; 0 = every break
+    method: str = "smc"  # "smc" (BOS / CHoCH areas) | "pattern" (chart patterns: `swing` = pivot length, `entry` =
+    # "close" of the breakout bar or "retest" = limit at the broken line, `sl_atr` = ATR buffer beyond the pattern)
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -140,6 +142,15 @@ def default_params(tf_key: str) -> Params:
 
 
 
+def pattern_params(tf_key: str) -> Params:
+    """Chart-pattern mode: pivots between the internal and the swing length, entry on the close of the breakout bar,
+    stop at the pattern's invalidation point plus 0.5 × ATR, TP1 = Bulkowski's share of the height, TP2 = the full
+    measured move, no time exit."""
+    tf = market_data.timeframe(tf_key)
+    return Params(swing=max(3, (tf.swing + tf.internal) // 2), internal=tf.internal, method="pattern", entry="close",
+                  sl_atr=0.5, target="tp12", hold=0, trend_filter=False, min_rr=0.0, scope="both", zone="fvg")
+
+
 @dataclass
 class Signal:
     direction: int
@@ -163,6 +174,8 @@ class Signal:
     origin: float | None = None  # target "tp12": start of the leg; while pending, TP1 follows the leg's new extreme
     ext: float | None = None  # and TP2 stays `ext` × the leg beyond TP1
     tp1_hit: int | None = None  # bar on which TP1 was reached (the stop sits at entry from the next bar)
+    fill: str = "limit"  # "limit" = waits for price to trade into `entry`; "close" = filled at the close of `created`
+    pattern: dict | None = None  # chart-pattern mode: its shape, height and measure-rule share (bar indices)
     zone_top: float | None = None  # the buy / sell area (FVG or order block) the entry sits in
     zone_bottom: float | None = None
     ict: dict = field(default_factory=dict)  # ICT checklist of the setup at its break (see ict_checks)
@@ -251,6 +264,10 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
     n = len(c)
     d = s.direction
     risk = abs(s.entry - s.stop)
+    if s.fill == "close":  # filled at the close of the signal bar: stop and targets count from the next bar
+        s.status, s.opened = "open", s.created
+        end = n if hold <= 0 else min(n, s.opened + 1 + hold)
+        return advance(bars, s, s.opened + 1, end)
     k = s.created + 1
     end_pending = min(n, s.created + 1 + expiry)
     while s.status == "pending" and k < end_pending:
@@ -424,8 +441,10 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
     area, stop and targets — with the rule (Params.follows_rule) none is skipped. The filters of earlier versions
     (one scale, CHoCH only, trend, premium/discount, minimum reward, confluence, higher timeframes) remain for
     research only. `align` (htf_alignment) is recorded on each signal. With `one_position` (default) a setup never
-    opens while another trade is running (see one_at_a_time)."""
+    opens while another trade is running (see one_at_a_time). Chart-pattern settings go to pattern_signals."""
     o, h, l, c = bars.open, bars.high, bars.low, bars.close
+    if p.method == "pattern":
+        return pattern_signals(bars, p, r, align, one_position)
     if r is None:
         r = smc.analyze(o, h, l, c, p.swing, p.internal)
     used = {"internal": ("internal",), "swing": ("swing",), "both": ("swing", "internal")}.get(p.scope, ("internal",))
@@ -530,6 +549,70 @@ def _gap_in_leg(gaps: list, start: int, t: int) -> bool:
     return k < len(gaps) and gaps[k][1] <= t
 
 
+def _patterns_for(bars: Bars, length: int, r: smc.SmcResult | None) -> tuple[list[patterns.Pattern], np.ndarray]:
+    """Patterns of one pivot length, cached on the analysis object a search shares between settings."""
+    if r is None:
+        r = smc.analyze(bars.open, bars.high, bars.low, bars.close, length, max(2, length // 2))
+    cache = r.__dict__.setdefault("_patterns", {})
+    if length not in cache:
+        cache[length] = patterns.detect(bars.high, bars.low, bars.close, r.atr, length)
+    return cache[length], r.atr
+
+
+def pattern_signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None,
+                    one_position: bool = True) -> list[Signal]:
+    """Chart-pattern mode: one trade per pattern breakout (patterns.detect), in the breakout's direction. Entry on the
+    breakout close ("close") or a limit on the broken line ("retest"); stop beyond the pattern's invalidation point by
+    `sl_atr` × ATR; TP1 = Bulkowski's share of the height (half closes, stop to entry), TP2 = the full measured move."""
+    found, atr = _patterns_for(bars, p.swing, r)
+    c = bars.close
+    out: list[Signal] = []
+    for pat in found:
+        t, d = pat.breakout, pat.direction
+        a = float(atr[t]) if np.isfinite(atr[t]) else 0.0
+        entry = float(c[t]) if p.entry != "retest" else pat.level
+        stop = pat.stop - d * p.sl_atr * a
+        if (entry - stop) * d <= 0:
+            stop = entry - d * max(p.sl_atr * a, 1e-9)
+        if (pat.tp2 - entry) * d <= 0:
+            continue  # the breakout bar already ran past the whole measured move: nothing left to trade
+        tp1 = pat.tp1 if (pat.tp1 - entry) * d > 0 else entry + d * 0.5 * (pat.tp2 - entry)
+        s = Signal(d, pat.name, "pattern", t, entry, float(stop), pat.tp2, manage="tp12", tp1=float(tp1),
+                   align=float(align[t]) * d if align is not None else None, level=pat.level, pivot=pat.start,
+                   fill="close" if p.entry != "retest" else "limit",
+                   pattern={"kind": pat.kind, "name": pat.name, "height": pat.height, "pct": pat.pct,
+                            "points": pat.points, "lines": pat.lines})
+        out.append(simulate(bars, s, set(), p.expiry, p.hold))
+    return one_at_a_time(out) if one_position else out
+
+
+def pattern_json(s: Signal, times: np.ndarray) -> dict | None:
+    """The pattern of a signal for the chart, bar indices → times."""
+    if not s.pattern:
+        return None
+    at = lambda i: int(times[min(max(int(i), 0), len(times) - 1)])  # noqa: E731
+    return {**{k: s.pattern[k] for k in ("kind", "name", "height", "pct")},
+            "points": [[at(i), float(v)] for i, v in s.pattern["points"]],
+            "lines": [[[at(i0), float(v0)], [at(i1), float(v1)]] for (i0, v0), (i1, v1) in s.pattern["lines"]]}
+
+
+def pattern_metrics(items: list) -> dict:
+    """Results per chart pattern (signals or chart rows)."""
+    groups: dict[str, list] = {}
+    for x in items:
+        pat = x.pattern if isinstance(x, Signal) else x.get("pattern")
+        if pat:
+            groups.setdefault(pat["name"], []).append(x)
+    out = {}
+    for name, xs in sorted(groups.items()):
+        rs = [(x.r if isinstance(x, Signal) else x["r"]) or 0.0 for x in xs
+              if (x.status if isinstance(x, Signal) else x["status"]) in ("win", "loss", "timeout")]
+        wins = sum(1 for v in rs if v > 0)
+        out[name] = {"trades": len(rs), "wins": wins, "winRate": round(wins / len(rs), 4) if rs else None,
+                     "expectancyR": round(float(np.mean(rs)), 3) if rs else None}
+    return out
+
+
 def metrics(sigs: list[Signal]) -> dict:
     closed = [s for s in sigs if s.status in ("win", "loss", "timeout")]
     wins = sum(1 for s in closed if (s.r or 0) > 0)
@@ -601,11 +684,14 @@ def _breathe() -> None:
 MAX_LEVEL = 2  # search levels: 0 = base grid; while a pair stays below its goal its next search widens
 
 
-def _grid(tf_key: str, level: int = 0):
+def _grid(tf_key: str, level: int = 0, method: str = "smc"):
     """Settings the tuner tries — all follow the rule (every BOS / CHoCH traded from its FVG area, stop on the ATR
     band, TP1 at the break's extreme, TP2 beyond, no time exit); only how is tuned: pivot lengths, entry in the
     area, ATR band multiple, TP2 distance, expiry. Level 1 adds more band multiples and TP2 distances and the area's
     edge; level 2 other pivot lengths and a shorter expiry (54 → 360 → 900 settings)."""
+    if method == "pattern":
+        yield from _pattern_grid(tf_key, level)
+        return
     base = default_params(tf_key)
     lengths = {(base.swing, base.internal), (max(4, base.swing - 4), base.internal), (base.swing + 4, base.internal + 1)}
     stops, exts, entries, expiries = (2.0, 3.0, 3.5), (0.382, 0.618, 1.0), ("mid",), (base.expiry, base.expiry * 2)
@@ -618,8 +704,24 @@ def _grid(tf_key: str, level: int = 0):
         yield replace(base, swing=swing, internal=internal, entry=entry, sl_atr=sl_atr, ext=ext, expiry=expiry)
 
 
-def grid_size(tf_key: str, level: int = 0) -> int:
-    return sum(1 for _ in _grid(tf_key, level))
+def _pattern_grid(tf_key: str, level: int = 0):
+    """Chart-pattern settings: pivot length (pattern size), entry on the breakout close or on a retest of the line,
+    ATR buffer beyond the pattern's invalidation point (18 → 40 → 120 settings). The targets stay the measure rule."""
+    base = pattern_params(tf_key)
+    lengths = {base.swing, max(3, base.swing - 3), base.swing + 4}
+    stops, expiries = (0.25, 0.5, 1.0), (base.expiry,)
+    if level >= 1:
+        stops = (0.1, 0.25, 0.5, 1.0, 1.5)
+        lengths |= {base.swing + 8}
+    if level >= 2:
+        lengths |= {max(3, base.swing - 5), base.swing + 12}
+        expiries = (max(5, base.expiry // 2), base.expiry, base.expiry * 2)
+    for length, entry, sl_atr, expiry in itertools.product(sorted(lengths), ("close", "retest"), stops, expiries):
+        yield replace(base, swing=length, entry=entry, sl_atr=sl_atr, expiry=expiry)
+
+
+def grid_size(tf_key: str, level: int = 0, method: str = "smc") -> int:
+    return sum(1 for _ in _grid(tf_key, level, method))
 
 
 def _score(m: dict, min_trades: int) -> float:
@@ -646,7 +748,7 @@ def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = No
         report = walk_forward(bars, p, analysis_for(p), align)
         return _score(report["inSample"], MIN_IS_TRADES), p, report
 
-    ranked = sorted((evaluate(p) for p in _grid(tf_key, level)), key=lambda x: x[0], reverse=True)
+    ranked = sorted((evaluate(p) for p in _grid(tf_key, level, current.method)), key=lambda x: x[0], reverse=True)
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -959,7 +1061,8 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
             "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason, "tp1_t": t(s.tp1_hit),
             "updated": int(time.time()), "manage": s.manage, "align": s.align, "tp1": s.tp1, "origin": s.origin, "ext": s.ext,
-            "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "fromT": t(s.pivot), "level": s.level}
+            "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "fromT": t(s.pivot), "level": s.level,
+            "pattern": pattern_json(s, bars.time)}
 
 
 def _save_params(symbol: str, tf: str, params: dict, report: dict, now: int) -> int:
@@ -1325,12 +1428,16 @@ def _rate(quote: str, account: str) -> float | None:
     return None
 
 
-def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
+def chart(symbol: str, tf: str, bars_wanted: int | None = None, method: str = "smc") -> dict:
     """Live training chart of one pair: the bars the tuner learns from (long history with a fresh tail), the
     structure the active setting sees, and its virtual trades — the journal's live rows replacing their
-    re-simulated twins. Times are bar opens (UTC seconds)."""
+    re-simulated twins. Times are bar opens (UTC seconds). method "pattern": the chart-pattern trades of
+    pattern_params on the same bars (the live journal and the learned settings belong to the SMC mode)."""
     inst = instruments.resolve(symbol)
-    source, version, p = active(inst.symbol, tf)
+    if method == "pattern":
+        source, version, p = "pattern", 0, pattern_params(tf)
+    else:
+        source, version, p = active(inst.symbol, tf)
     bars = history(inst, tf, max(200, min(MAX_TRAIN_BARS, bars_wanted)) if bars_wanted else None)
     if bars is None or len(bars) < 50:
         bars = market_data.load(inst, tf)
@@ -1339,7 +1446,7 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
     t0, t1 = int(t[0]), int(t[-1])
     split_t = int(t0 + (t1 - t0) * SPLIT)
     r = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
-    live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0))
+    live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0)) if method != "pattern" else []
     replaced = {(row["created_t"], row["direction"]) for row in live}
     sigs = signals(bars, p, r, htf_alignment(inst, tf, bars, download=True))
     trades = []
@@ -1353,10 +1460,11 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
     word = {1: "bullish", -1: "bearish"}
     return {
         "instrument": inst.to_json(), "tf": tf, "symbol": inst.symbol, "version": version, "source": source,
-        "params": asdict(p), "evidence": evidence(inst.symbol, tf),
+        "params": asdict(p), "evidence": evidence(inst.symbol, tf) if method != "pattern" else {}, "method": p.method,
         "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
         "split": split_t, "outOfSample": metrics([s for s in sigs if t[s.created] >= split_t]),
         "live": _live_metrics(live), "trades": trades, "grades": grade_metrics(sigs), "contract": contract(inst),
+        "patternStats": pattern_metrics(sigs),
         "candles": [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
                      "c": float(bars.close[i])} for i in range(len(bars))],
         "smc": {"breaks": [{"kind": b.kind, "direction": word[b.direction], "level": b.level, "scope": b.scope,

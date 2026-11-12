@@ -43,7 +43,7 @@ def fake_env(monkeypatch):
     monkeypatch.setattr(training, "tune", fake_tune)
     monkeypatch.setattr(training, "signals", fake_signals)
     monkeypatch.setattr(training, "tune_pair", lambda *a, **k: saved.append(a[1]) or None)
-    monkeypatch.setattr(training, "grid_size", lambda tf, level=0: 100 * (level + 1))
+    monkeypatch.setattr(training, "grid_size", lambda tf, level=0, method="smc": 100 * (level + 1))
     monkeypatch.setattr(training, "active", lambda s, tf: ("asset", 3, training.default_params(tf)))
     monkeypatch.setattr(training, "lab_status", lambda: {"state": "idle"})
     yield SimpleNamespace(bars=b, learned=learned, saved=saved)

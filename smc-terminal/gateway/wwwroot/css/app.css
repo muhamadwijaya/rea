@@ -875,3 +875,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .acct-line b { color: var(--text); }
 .acct-line b.up { color: var(--bull, #2fd28c); }
 .acct-line b.down { color: var(--bear, #ff4d5e); }
+/* method: SMC / chart pattern (v3.17) */
+.tr-method { display: inline-flex; border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+.tr-method button { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 4px 9px; cursor: pointer;
+  background: transparent; color: var(--muted); border: 0; border-right: 1px solid var(--line-2); }
+.tr-method button:last-child { border-right: 0; }
+.tr-method button.active { color: #002644; background: var(--go); }

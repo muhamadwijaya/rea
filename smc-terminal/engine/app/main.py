@@ -243,9 +243,9 @@ def training_asset(symbol: str, tf: str = "1h") -> dict:
 
 
 @app.get("/training/chart")
-def training_chart(symbol: str, tf: str = "1h", bars: int | None = None) -> dict:
+def training_chart(symbol: str, tf: str = "1h", bars: int | None = None, method: str = "smc") -> dict:
     market_data.timeframe(tf)  # validates the timeframe
-    return training.chart(symbol, tf, bars)
+    return training.chart(symbol, tf, bars, "pattern" if method == "pattern" else "smc")
 
 
 class LabRequest(BaseModel):
@@ -274,6 +274,7 @@ class SessionRequest(BaseModel):
     tf: str = "5m"
     bars: int = 5000
     improve: bool = False  # repeat with a wider search until the goal or no improvement, then a final exam
+    method: str = "smc"  # "smc" | "pattern" (chart patterns)
 
 
 @app.get("/training/session")
@@ -288,7 +289,7 @@ def training_session_candles() -> dict:
 
 @app.post("/training/session/start")
 def training_session_start(body: SessionRequest) -> dict:
-    return session.start(body.symbol, body.tf, body.bars, body.improve)
+    return session.start(body.symbol, body.tf, body.bars, body.improve, body.method)
 
 
 @app.post("/training/session/stop")
