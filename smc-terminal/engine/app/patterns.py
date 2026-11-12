@@ -9,6 +9,8 @@ Breakout (Bulkowski: price piercing the pattern's line; trading convention: on a
 the next close): the first close beyond the neckline / boundary by at least BREAK_ATR × ATR, confirmed when the next
 close is still beyond the line — a breakout undone by the next close is a false breakout and the pattern is dropped.
 A pattern whose line was already crossed before the pattern could be known is dropped too (it would be read late).
+A triangle or wedge must break out before three quarters of the way to its apex (APEX_SHARE); near the apex the lines
+meet and a close beyond one of them is noise, not a breakout.
 
 Targets follow the measure rule as T. Bulkowski documents it (thepatternsite.com/measure.html): the pattern's height
 projected from the breakout. TP2 is the full height (the textbook objective); TP1 is the share of the height that he
@@ -30,6 +32,13 @@ MIN_HEIGHT_ATR = 2.0  # a pattern smaller than 2 × ATR is noise
 POLE_ATR = 3.5  # a flagpole moves at least 3.5 × ATR
 BREAK_ATR = 0.25  # a breakout close is beyond the line by at least this much ATR
 MIN_BARS = 3  # bars between swing points of a pattern (and the scale of the flag / expiry limits)
+# Triangles and wedges must break out within this share of the way from their first point to the apex (Edwards &
+# Magee, Murphy: between half and three quarters of the way; Bulkowski's triangles break out at 64-74 % on average
+# and price tends to turn at the apex). Past it the pattern has lost its power and is dropped. Measured on 57 core
+# assets x 15m/1h/4h/1d (close entry, v3.19 reading): breakouts in the last quarter won 50.2 % (symmetrical triangle
+# up: 40.8 %) against 68.2 % before it; they paid more per trade (+0.060R vs +0.020R) because their targets, measured
+# from the pattern's wide end, are far from a breakout near the apex.
+APEX_SHARE = 0.75
 
 # Bulkowski's measure-rule shares (bull-market table): (base of the projection, share of the height) per direction.
 # base: "B" = breakout price, "H" / "L" = the pattern's flat top / bottom (or the valley / peak between two tops /
@@ -214,11 +223,13 @@ def _templates(zz: list[Pivot], atr: np.ndarray, length: int, t: int) -> list[_C
                 elif kind is None and converging and hi_dir == lo_dir == -1:
                     kind = "falling_wedge"
                 if kind is not None:
-                    expire = end + (end - start)
+                    expire = end + (end - start) + length
                     if converging and kind != "rectangle":
+                        # a triangle / wedge breaks out within the first three quarters of the way from its first
+                        # point to the apex; a later "breakout" is drift into the apex, not a breakout (see APEX_SHARE)
                         apex = start + height / (lower.slope - upper.slope)
-                        expire = int(min(expire, apex))
-                    out.append(_Candidate(kind, t, expire + length, pts, height, up=upper, down=lower,
+                        expire = min(expire, int(start + APEX_SHARE * (apex - start)))
+                    out.append(_Candidate(kind, t, expire, pts, height, up=upper, down=lower,
                                           bases={"H": max(h.price for h in highs), "L": min(x.price for x in lows)},
                                           stops={1: lows[-1].price, -1: highs[-1].price}, draw=[upper, lower]))
     return out

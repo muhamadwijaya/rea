@@ -634,20 +634,24 @@ def pattern_json(s: Signal, times: np.ndarray) -> dict | None:
             "lines": [[[at(i0), float(v0)], [at(i1), float(v1)]] for (i0, v0), (i1, v1) in s.pattern["lines"]]}
 
 
-def pattern_metrics(items: list) -> dict:
-    """Results per chart pattern (signals or chart rows)."""
-    groups: dict[str, list] = {}
+def pattern_metrics(items: list) -> list[dict]:
+    """Results per chart pattern and breakout direction (signals or chart rows). Every pattern and direction the
+    engine trades is listed, with 0 trades when it did not occur in the data, so the table is always complete."""
+    groups: dict[tuple[str, int], list] = {(kind, d): [] for kind, sides in patterns.MEASURE.items()
+                                           for d in (1, -1) if d in sides}
     for x in items:
-        pat = x.pattern if isinstance(x, Signal) else x.get("pattern")
+        sig = isinstance(x, Signal)
+        pat = x.pattern if sig else x.get("pattern")
         if pat:
-            groups.setdefault(pat["name"], []).append(x)
-    out = {}
-    for name, xs in sorted(groups.items()):
+            groups.setdefault((pat["kind"], x.direction if sig else x["direction"]), []).append(x)
+    out = []
+    for (kind, d), xs in groups.items():
         rs = [(x.r if isinstance(x, Signal) else x["r"]) or 0.0 for x in xs
               if (x.status if isinstance(x, Signal) else x["status"]) in ("win", "loss", "timeout")]
         wins = sum(1 for v in rs if v > 0)
-        out[name] = {"trades": len(rs), "wins": wins, "winRate": round(wins / len(rs), 4) if rs else None,
-                     "expectancyR": round(float(np.mean(rs)), 3) if rs else None}
+        out.append({"kind": kind, "name": patterns.NAMES.get(kind, kind), "direction": d, "trades": len(rs),
+                    "wins": wins, "winRate": round(wins / len(rs), 4) if rs else None,
+                    "expectancyR": round(float(np.mean(rs)), 3) if rs else None})
     return out
 
 

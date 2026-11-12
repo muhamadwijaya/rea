@@ -7,30 +7,42 @@ from app import indicators, patterns, training
 from app.market_data import Bars
 from test_engine import zigzag
 
-SHAPES = [
-    ("double_top", -1, [100, 110, 104, 110.2, 103, 96]),
-    ("double_bottom", 1, [110, 100, 106, 99.8, 107, 114]),
-    ("head_shoulders", -1, [96, 106, 100, 112, 100.4, 106.2, 99, 92]),
-    ("inverse_head_shoulders", 1, [114, 104, 110, 98, 109.6, 103.8, 111, 118]),
-    ("ascending_triangle", 1, [100, 110, 102, 110.1, 105, 113]),
-    ("descending_triangle", -1, [110, 100, 108, 99.9, 105, 96]),
-    ("symmetrical_triangle", 1, [100, 112, 102, 109, 105, 115]),
-    ("rectangle", 1, [104, 110, 104.2, 110.1, 104.3, 113]),
-    ("falling_wedge", 1, [112, 100, 107, 97, 102, 95.5, 104]),
-    ("rising_wedge", -1, [100, 104, 101, 109, 104, 111, 100]),
-    ("bull_flag", 1, [106, 100, 116, 111, 114, 111.5, 120]),
-    ("bear_flag", -1, [94, 100, 84, 89, 86, 88.5, 80]),
+SHAPES = [  # kind, breakout direction, zigzag points, bars per leg
+    ("double_top", -1, [100, 110, 104, 110.2, 103, 96], 6),
+    ("double_bottom", 1, [110, 100, 106, 99.8, 107, 114], 6),
+    ("head_shoulders", -1, [96, 106, 100, 112, 100.4, 106.2, 99, 92], 6),
+    ("inverse_head_shoulders", 1, [114, 104, 110, 98, 109.6, 103.8, 111, 118], 6),
+    ("ascending_triangle", 1, [100, 110, 102, 110.1, 105, 113], 6),
+    ("descending_triangle", -1, [110, 100, 108, 99.9, 105, 96], 6),
+    ("symmetrical_triangle", 1, [96, 114, 100, 111, 103, 120], 10),
+    ("symmetrical_triangle", -1, [114, 96, 110, 99, 107, 90], 10),
+    ("rectangle", 1, [104, 110, 104.2, 110.1, 104.3, 113], 6),
+    ("falling_wedge", 1, [112, 100, 107, 97, 102, 95.5, 104], 6),
+    ("rising_wedge", -1, [100, 104, 101, 109, 104, 111, 100], 6),
+    ("bull_flag", 1, [106, 100, 116, 111, 114, 111.5, 120], 6),
+    ("bear_flag", -1, [94, 100, 84, 89, 86, 88.5, 80], 6),
 ]
 
 
-def found(points):
-    o, h, l, c = zigzag(points)
+def found(points, steps=6):
+    o, h, l, c = zigzag(points, steps)
     return patterns.detect(h, l, c, indicators.atr(h, l, c, 14), 2.0), (o, h, l, c)
 
 
-@pytest.mark.parametrize("kind,direction,points", SHAPES, ids=[s[0] for s in SHAPES])
-def test_each_pattern_breaks_out_with_its_measure_rule_targets(kind, direction, points):
-    pats, (o, h, l, c) = found(points)
+def apex_share(pat):
+    """How far along the way from the pattern's first point to the apex of its two lines the breakout came."""
+    (u0, uv0), (u1, uv1) = pat.lines[0]
+    (w0, wv0), (w1, wv1) = pat.lines[1]
+    su, sl = (uv1 - uv0) / (u1 - u0), (wv1 - wv0) / (w1 - w0)
+    start = pat.points[0][0]
+    width = (uv0 + su * (start - u0)) - (wv0 + sl * (start - w0))
+    return (pat.breakout - start) / (width / (sl - su))
+
+
+@pytest.mark.parametrize("kind,direction,points,steps", SHAPES,
+                         ids=[f"{s[0]}-{'up' if s[1] > 0 else 'down'}" for s in SHAPES])
+def test_each_pattern_breaks_out_with_its_measure_rule_targets(kind, direction, points, steps):
+    pats, (o, h, l, c) = found(points, steps)
     pat = pats[0]
     assert (pat.kind, pat.direction) == (kind, direction)
     t, d = pat.breakout, pat.direction
@@ -57,6 +69,26 @@ def test_flag_targets_use_the_pole():
     assert flag.kind == "bull_flag" and flag.height == pytest.approx(116.05 - 99.95)  # the pole
     assert flag.tp1 == pytest.approx(110.95 + 0.46 * flag.height)  # Bulkowski: 46 % of the pole above the flag low
     assert flag.stop == pytest.approx(110.95)
+
+
+@pytest.mark.parametrize("kind", ["ascending_triangle", "descending_triangle", "symmetrical_triangle",
+                                  "rising_wedge", "falling_wedge"])
+def test_triangles_and_wedges_break_out_before_three_quarters_of_the_way_to_the_apex(kind):
+    shape = next(x for x in SHAPES if x[0] == kind)
+    [pat], _ = found(shape[2], shape[3])
+    assert apex_share(pat) <= patterns.APEX_SHARE
+
+
+def test_a_close_beyond_the_line_near_the_apex_is_not_a_breakout():
+    # lower highs 112 → 109, higher lows 102 → 105: the lines meet at bar 29, three quarters of the way is bar 23, and
+    # the first close above the upper line comes on bar 26 — in the last quarter, where a triangle has lost its power
+    # (Edwards & Magee, Murphy): no pattern, no trade
+    o, h, l, c = zigzag([100, 112, 102, 109, 105, 115])
+    upper = lambda k: 112.05 - 0.25 * (k - 6)  # noqa: E731 — through the highs at bars 6 and 18
+    assert c[25] < upper(25) and c[26] - upper(26) > 1.0  # it does close well above the upper line
+    pats, _ = found([100, 112, 102, 109, 105, 115])
+    assert pats == []
+    assert training.signals(_bars([100, 112, 102, 109, 105, 115]), training.pattern_params("1h")) == []
 
 
 def _upto(arrays, k):
@@ -92,8 +124,8 @@ def test_the_zigzag_knows_a_swing_once_price_turns_by_the_atr_multiple():
         assert away >= 2.0 * atr[k] and k > p.index
 
 
-def _bars(points):
-    o, h, l, c = zigzag(points)
+def _bars(points, steps=6):
+    o, h, l, c = zigzag(points, steps)
     return Bars(np.arange(len(c), dtype=np.int64) * 3600, o, h, l, c, np.zeros(len(c)), 0.0)
 
 
@@ -110,7 +142,9 @@ def test_pattern_mode_waits_for_the_retest_and_stops_on_the_breakout_candles_atr
     assert s.stop == pytest.approx(b.high[t] + 2.0 * atr[t])  # the ATR band above the breakout candle
     assert (s.tp1, s.target) == (pytest.approx(pat.tp1), pytest.approx(pat.tp2))
     assert s.status == "win" and s.reason.endswith("TP2")
-    assert training.pattern_metrics([s])["DOUBLE TOP"]["trades"] == 1
+    rows = training.pattern_metrics([s])  # every pattern and direction is listed, with 0 trades if absent
+    assert {(r["kind"], r["direction"]) for r in rows} == {(k, d) for k, sides in patterns.MEASURE.items() for d in sides}
+    assert [(r["name"], r["direction"], r["trades"]) for r in rows if r["trades"]] == [("DOUBLE TOP", -1, 1)]
 
 
 def test_no_retest_no_trade():
@@ -149,9 +183,10 @@ def test_entry_choice_breakout_close():
 
 
 def test_retest_of_a_sloped_line_meets_it_where_it_is():
-    b = _bars([100, 112, 102, 109, 105, 115, 107.5, 113, 118])  # symmetrical triangle, breakout up, pullback
+    b = _bars([96, 114, 100, 111, 103, 116, 106, 120, 126], steps=10)  # symmetrical triangle, breakout, pullback
     p = training.pattern_params("1h")
     s = next(x for x in training.signals(b, p) if x.kind == "SYMMETRICAL TRIANGLE")
     assert s.entry_slope < 0  # the upper line falls: the limit follows it
-    if s.opened is not None:
-        assert s.entry == pytest.approx(s.entry_line0 + s.entry_slope * (s.opened - s.created))
+    assert s.opened is not None and s.opened > s.created
+    assert s.entry == pytest.approx(s.entry_line0 + s.entry_slope * (s.opened - s.created))
+    assert s.status == "win"

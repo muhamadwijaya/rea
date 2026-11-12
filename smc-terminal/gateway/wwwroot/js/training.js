@@ -19,14 +19,19 @@ const ruleText = (p) => `pivot ${p.swing}/${p.internal} · semua BOS/CHoCH (tanp
 // settings of earlier versions still appear in the upgrade log
 const legacyText = (p) => `versi lama · pivot ${p.swing}/${p.internal} · ${SCOPE[p.scope] || p.scope} ${p.kinds === 'CHoCH' ? 'CHoCH saja' : 'BOS+CHoCH'} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
 const patternText = (p) => `CHART PATTERN · zigzag ${p.zz ?? 2}×ATR · breakout = close ≥ 0,25 ATR di luar garis + candle berikutnya tetap di luar
-  · entry ${p.entry === 'close' ? 'close candle konfirmasi' : 'retest garis'} · SL ATR band candle breakout ${p.sl_atr}×
+  · segitiga/wedge: breakout sebelum 3/4 jalan ke apex · entry ${p.entry === 'close' ? 'close candle konfirmasi' : 'retest garis'} · SL ATR band candle breakout ${p.sl_atr}×
   · TP1 % Bulkowski tinggi pola · TP2 100% measured move`;
 const paramText = (p) => (p.method === 'pattern' ? patternText(p) : p.target === 'tp12' && p.zone === 'fvg' ? ruleText(p) : legacyText(p));
-// results per chart pattern (pattern mode)
-const patternLine = (g) => {
-  const rows = Object.entries(g || {}).filter(([, v]) => v.trades).sort((a, b) => b[1].trades - a[1].trades);
-  return rows.length ? `<span class="tr-grades">POLA: ${rows.map(([k, v]) => `${esc(k)} <b>${pct(v.winRate)}</b>
-    <span class="dim">(${v.trades}, ${rr(v.expectancyR)})</span>`).join(' · ')}</span>` : '<span class="dim">POLA: belum ada trade selesai</span>';
+// results per chart pattern and breakout direction (pattern mode); the engine lists every pattern it reads, so the
+// ones that did not occur in this data are named too
+const patternLine = (rows) => {
+  const all = Array.isArray(rows) ? rows : [];
+  const arrow = (d) => (d > 0 ? '▲' : '▼');
+  const traded = all.filter((v) => v.trades).sort((a, b) => b.trades - a.trades);
+  const absent = all.filter((v) => !v.trades);
+  return `<span class="tr-grades">POLA: ${traded.length ? traded.map((v) => `${esc(v.name)} ${arrow(v.direction)} <b>${pct(v.winRate)}</b>
+    <span class="dim">(${v.trades}, ${rr(v.expectancyR)})</span>`).join(' · ') : '<span class="dim">belum ada trade selesai</span>'}${absent.length
+    ? ` <span class="dim">· belum muncul: ${absent.map((v) => `${esc(v.name)} ${arrow(v.direction)}`).join(', ')}</span>` : ''}</span>`;
 };
 const ENTRY_BUTTONS = '<span class="tr-entry" title="Chart pattern: setelah breakout terkonfirmasi tunggu RETEST ke garis yang ditembus (limit di garis), atau entry langsung di CLOSE candle konfirmasi"><button data-entry="retest">ENTRY RETEST</button><button data-entry="close">ENTRY CLOSE KONFIRMASI</button></span>';
 // The session / replay info box lives in the left panel (above the equity curve), not over the chart.

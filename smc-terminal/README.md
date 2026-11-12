@@ -266,6 +266,46 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
     wedge turun 85,4%, double top 80,9%, bull flag 77,4%, bear flag 78,3%, rising wedge turun 74,7%, double bottom
     72,5%, inverse H&S 61,6% (+0,103R), symmetrical triangle naik 39,0% (+0,185R). Win rate naik, profit per trade
     sedikit turun karena entry baru setelah konfirmasi.
+  - **Batas apex segitiga & wedge (v3.20)**: segitiga (ascending, descending, symmetrical) dan wedge harus breakout
+    **sebelum 3/4 jalan dari titik pertama pola ke apex** (titik temu kedua garis). Ini aturan klasik Edwards & Magee /
+    Murphy: breakout yang baik terjadi antara 1/2 dan 3/4 jalan, lewat dari itu pola kehilangan tenaga. Data Bulkowski
+    sejalan: rata-rata breakout segitiga di 64–74% jalan ke apex, dan harga cenderung berbalik saat sampai apex. Close
+    di luar garis pada 1/4 terakhir bukan breakout, dan polanya dibuang. Diagnosis (entry close, 57 aset × 4 TF, tanpa
+    satu-posisi): breakout di 1/4 terakhir win 50,2% (symmetrical triangle naik 40,8%) vs 68,2% sebelum 3/4. Dulu 90%
+    symmetrical triangle breakout di 1/4 terakhir, dan itulah asal win 39%. Breakout terlambat itu membayar lebih besar
+    saat menang (+0,060R vs +0,020R per trade) karena targetnya diukur dari ujung lebar pola yang jauh. Tinggi
+    Bulkowski (puncak tertinggi − lembah terendah) juga diuji untuk segitiga, tetapi tidak menaikkan win rate, jadi
+    tinggi pola tidak diubah.
+  - **Terukur v3.20** (57 aset × 15M/1H/4H/1D, satu posisi, SL band 2): **entry close konfirmasi 24.550 trade, win
+    68,1%, +0,029R/trade, total +717R** (v3.19: 64,1%, +0,039R, +938R); **entry retest 14.097 trade, win 44,7%,
+    +0,001R, total +16R** (v3.19: 42,0%, +0,011R, +165R). Win rate naik, total R turun karena breakout terlambat yang
+    jarang menang tetapi besar saat menang tidak lagi ditrading. Semua pola, per arah (statistik POLA di aplikasi juga
+    menampilkan semua pola per arah, termasuk yang belum muncul):
+
+    | Pola | Arah | Terdeteksi | Close: trade · win · R/trade | Retest: trade · win · R/trade |
+    |---|---|---:|---|---|
+    | Double top | turun | 4.077 | 1.895 · 82,0% · +0,014 | 1.364 · 60,6% · −0,024 |
+    | Double bottom | naik | 4.328 | 1.956 · 72,6% · +0,030 | 1.738 · 53,2% · +0,072 |
+    | Head & shoulders | turun | 1.942 | 1.367 · 68,2% · +0,019 | 867 · 45,2% · +0,022 |
+    | Inverse H&S | naik | 2.085 | 1.504 · 61,2% · +0,090 | 1.047 · 41,2% · +0,114 |
+    | Ascending triangle | naik | 1.097 | 678 · 63,3% · +0,088 | 513 · 43,1% · +0,012 |
+    | Ascending triangle | turun | 3.032 | 1.956 · 68,4% · +0,010 | 923 · 39,7% · −0,032 |
+    | Descending triangle | naik | 2.913 | 1.938 · 59,0% · +0,040 | 967 · 34,3% · +0,050 |
+    | Descending triangle | turun | 1.007 | 685 · 66,4% · −0,026 | 442 · 42,5% · −0,145 |
+    | Symmetrical triangle | naik | 42 | 36 · 58,3% · +0,030 | 18 · 33,3% · −0,145 |
+    | Symmetrical triangle | turun | 28 | 23 · 73,9% · +0,199 | 13 · 38,5% · +0,236 |
+    | Rectangle | naik | 4.083 | 2.156 · 60,0% · +0,067 | 1.550 · 40,3% · +0,001 |
+    | Rectangle | turun | 3.561 | 1.852 · 65,0% · −0,024 | 1.272 · 42,8% · −0,009 |
+    | Rising wedge | naik | 1.260 | 907 · 70,3% · +0,029 | 665 · 54,7% · +0,028 |
+    | Rising wedge | turun | 4.890 | 3.381 · 76,4% · +0,004 | 1.082 · 37,7% · −0,122 |
+    | Falling wedge | naik | 4.342 | 3.247 · 59,9% · +0,035 | 1.201 · 31,6% · −0,017 |
+    | Falling wedge | turun | 1.029 | 817 · 86,4% · +0,038 | 390 · 65,9% · −0,088 |
+    | Bull flag | naik | 98 | 71 · 77,5% · +0,326 | 22 · 68,2% · +0,400 |
+    | Bear flag | turun | 97 | 81 · 81,5% · +0,194 | 23 · 43,5% · −0,300 |
+
+    Double top/bottom, H&S dan flag hanya punya satu arah: double top yang tembus ke atas bukan double top lagi.
+    Selisih "terdeteksi" dan "trade": setup batal (posisi lain masih berjalan, tidak ada retest, TP1 lebih dulu) dan
+    trade yang belum selesai. Sampel kecil (< 30 trade) belum bisa dijadikan pegangan.
 - **Cara membaca BOS/CHoCH** (v3.15): **BOS** = close menembus high struktur tren naik (high tertinggi sejak break
   terakhir — lower high di dalam pullback tidak menggantikannya) / low struktur tren turun. **CHoCH** = close menembus
   **level yang dilindungi**: *strong low* (low asal leg yang menembus high terakhir) pada tren naik, *strong high* pada
