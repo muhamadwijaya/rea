@@ -323,8 +323,9 @@ export class SmcChart {
     if (x1 === null || x2 === null || y1 === null || y2 === null || x2 < 0 || x1 > right) return;
     x2 = Math.min(right, Math.max(x2, x1 + 6));
     const waiting = !s.opened_t;  // no entry (yet): the targets belong to the area
-    ctx.fillStyle = rgba(color, 0.18); ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    ctx.strokeStyle = rgba(color, 0.7); ctx.lineWidth = 1;
+    const ict = s.ict?.grade === 'A+' || s.ict?.grade === 'A';  // the full ICT model: drawn stronger, always labelled
+    ctx.fillStyle = rgba(color, ict ? 0.26 : 0.18); ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.strokeStyle = rgba(color, ict ? 1 : 0.7); ctx.lineWidth = ict ? 1.6 : 1;
     ctx.strokeRect(x1 + 0.5, y1 + 0.5, x2 - x1 - 1, y2 - y1 - 1);
     if (waiting && s.status !== 'pending') {  // a past area that never filled: where its targets were
       ctx.setLineDash([3, 3]); ctx.strokeStyle = rgba(C.bull, 0.55);
@@ -334,8 +335,8 @@ export class SmcChart {
       }
       ctx.setLineDash([]);
     }
-    if (!wide && s.status !== 'pending') return;
-    const text = buy ? 'BUY AREA' : 'SELL AREA';
+    if (!wide && !ict && s.status !== 'pending') return;
+    const text = `${buy ? 'BUY AREA' : 'SELL AREA'}${s.ict?.grade ? ` · ICT ${s.ict.grade}` : ''}`;
     const w = text.length * 5.6, y = buy ? Math.max(y1, y2) + 8 : Math.min(y1, y2) - 8;
     if (!free(x1, y, w)) return;
     labels.push({ x: x1, y, w });

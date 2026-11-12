@@ -860,3 +860,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .ai-signal.sm { font-size: 13px; padding: 1px 8px; }
 .va-speak { background: none; border: 1px solid var(--line-2); border-radius: 3px; color: var(--go); cursor: pointer; font-size: 11px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; }
 .va-speak:hover { background: var(--go); color: #002644; }
+/* ICT checklist (v3.13) */
+.tr-ict { margin: 4px 0 2px; }
+.tr-ict .chip.dim { opacity: .55; }
+.tr-grades { color: var(--muted); }
+.tr-grades b { color: var(--text); }

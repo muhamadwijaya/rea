@@ -78,12 +78,24 @@ function statBlock(title, m) {
     <span>${m?.trades ?? 0} trade · ${m?.wins ?? 0} menang${m?.expectancyR != null ? ` · ekspektasi ${rr(m.expectancyR)}` : ''}</span></div>`;
 }
 
+// ICT checklist of a setup (engine: training.ict_checks): what an ICT trader looks for before calling it a setup
+const ICT_CHECKS = [['sweep', 'sweep likuiditas'], ['displacement', 'displacement'], ['fvg', 'FVG'], ['zone', 'discount/premium'],
+  ['htf', 'searah TF besar'], ['killzone', 'killzone']];
+const ICT_GRADE = { 'A+': 'bull', A: 'bull', B: 'info', C: 'ghost' };
+const ictTag = (ict) => (ict?.grade ? `<span class="tag ${ICT_GRADE[ict.grade]}" title="Grade ICT: A+ = semua syarat, A = sweep + displacement + FVG + discount/premium">ICT ${esc(ict.grade)}</span>` : '');
+const ictChecks = (ict) => (ict?.grade ? `<div class="chips tr-ict">${ICT_CHECKS.filter(([k]) => ict[k] != null)
+  .map(([k, name]) => `<span class="chip ${ict[k] ? 'up' : 'dim'}">${ict[k] ? '✓' : '✗'} ${name}</span>`).join('')}</div>` : '');
+// results per ICT grade (all bars of the chart / the session): does following ICT more strictly win more often?
+const gradeLine = (g) => (g ? `<span class="tr-grades">ICT: ${['ICT', 'A+', 'A', 'B', 'C'].map((k) => `${k === 'ICT' ? 'A+/A' : k} <b>${pct(g[k]?.winRate)}</b>
+  <span class="dim">(${g[k]?.trades ?? 0}, ${rr(g[k]?.expectancyR)})</span>`).join(' · ')}</span>` : '');
+
 function signalCard(s, rules, decimals, modes) {
   const [label, cls] = STATUS[s.status] || [s.status, 'ghost'];
   const f = (v) => fmtPrice(v, decimals);
   const risk = Math.abs(s.entry - s.stop);
   return `<div class="tr-signal">
-    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${levelTag(modes, s.qualified, s.quality ?? 0.5)}${expertTag(s)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
+    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${levelTag(modes, s.qualified, s.quality ?? 0.5)}${expertTag(s)}` : ''} ${ictTag(s.ict)} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
+    ${ictChecks(s.ict)}
     <div class="tr-times">
       <div><span>SINYAL MUNCUL</span><b>${dt(s.created_t)}</b></div>
       <div><span>TERDETEKSI SISTEM</span><b>${s.first_seen ? dt(s.first_seen) : 'riwayat (backtest)'}</b></div>
@@ -390,7 +402,8 @@ function mountTrainingChart(el) {
       <span>DATA UJI (OOS): <b class="${oos.winRate >= 0.5 ? 'up' : oos.winRate != null ? 'down' : ''}">${pct(oos.winRate)}</b> dari ${oos.trades ?? 0} trade · ekspektasi ${rr(oos.expectancyR)}</span>
       <span>LIVE: <b>${pct(t.live?.winRate)}</b> dari ${t.live?.trades ?? 0} selesai · ${live.length} sinyal tercatat</span>
       <span>AKTIF: ${open.length}</span>
-      <span class="tr-legend"><i class="lg-tp"></i>zona TP <i class="lg-sl"></i>zona SL <i class="lg-1r"></i>TP1 +1R <i class="lg-live"></i>LIVE <i class="lg-is"></i>data latih (redup)</span>`;
+      ${gradeLine(t.grades)}
+      <span class="tr-legend"><i class="lg-tp"></i>zona TP <i class="lg-sl"></i>zona SL <i class="lg-1r"></i>TP1 puncak / TP2 <i class="lg-live"></i>LIVE <i class="lg-is"></i>data latih (redup)</span>`;
   }
 
   $('.tr-live-pick').addEventListener('change', (e) => {
@@ -678,6 +691,7 @@ function mountTrainingLab(el) {
       <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
         <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
         <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span></div>
+      ${sess?.grades ? `<div class="rp-note">${gradeLine(sess.grades)}</div>` : ''}
       ${sess?.improve && sess.rounds?.length ? `<div class="rp-note">Putaran ${sess.rounds[sess.rounds.length - 1].round} · terbaik putaran
         ${sess.rounds.find((r) => r.best)?.round ?? '–'} (${pct(sess.rounds.find((r) => r.best)?.winRate)})${sess.exam ? ` · <b>UJIAN AKHIR ${pct(sess.exam.stats.winRate)}</b> dari ${sess.exam.stats.trades} trade${thin(sess.exam.stats.trades)}` : ''}
         · target ${Math.round((sess.goal || 0.99) * 100)}% ${sess.reached ? '<span class="up">tercapai</span>' : '<span class="flat">belum tercapai</span>'}</div>` : ''}

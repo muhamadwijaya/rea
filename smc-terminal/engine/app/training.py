@@ -56,7 +56,9 @@ import math
 import sqlite3
 import threading
 import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -159,6 +161,7 @@ class Signal:
     ext: float | None = None  # and TP2 stays `ext` × the leg beyond TP1
     zone_top: float | None = None  # the buy / sell area (FVG or order block) the entry sits in
     zone_bottom: float | None = None
+    ict: dict = field(default_factory=dict)  # ICT checklist of the setup at its break (see ict_checks)
 
 
 # ------------------------------------------------------------------ bars
@@ -326,6 +329,38 @@ def _swept(d: int, ob, t: int, l, h, c, pivots_low, pivots_high) -> bool:
     return False
 
 
+# ------------------------------------------------------------------ ICT checklist
+
+DISPLACEMENT_ATR = 1.0  # a displacement candle: body in the break's direction of at least 1 × ATR
+NEW_YORK = ZoneInfo("America/New_York")
+KILLZONES = ((2 * 60, 5 * 60), (7 * 60, 10 * 60), (13 * 60 + 30, 16 * 60))  # London, NY AM, NY PM (New York minutes)
+ICT_CORE = ("sweep", "displacement", "fvg", "zone")  # without these an ICT trader sees no setup
+
+
+def _displaced(d: int, start: int, t: int, o, c, atr) -> bool:
+    """Displacement: the leg that broke structure holds a full-bodied candle in its direction (body ≥ 1 × ATR)."""
+    body = (c[start:t + 1] - o[start:t + 1]) * d
+    return bool(np.any(body >= DISPLACEMENT_ATR * np.nan_to_num(atr[start:t + 1], nan=np.inf)))
+
+
+def _in_killzone(t_open: int, step: int) -> bool | None:
+    """ICT killzones (New York time, daylight saving included) for intraday bars; None above 1 hour."""
+    if step > 3600:
+        return None
+    now = datetime.fromtimestamp(int(t_open) + step, NEW_YORK)  # the break is known when its bar closes
+    minute = now.hour * 60 + now.minute
+    return any(a < minute <= b for a, b in KILLZONES)
+
+
+def ict_grade(checks: dict) -> str:
+    """A+ = every ICT condition (core + higher-timeframe bias + killzone where they apply); A = the core model
+    (sweep → displacement → MSS with FVG, entry in discount / premium); B = 3 of the 4 core; C = the rest."""
+    core = sum(1 for k in ICT_CORE if checks.get(k))
+    if core == len(ICT_CORE):
+        return "A+" if checks.get("htf") is not False and checks.get("killzone") is not False else "A"
+    return "B" if core == len(ICT_CORE) - 1 else "C"
+
+
 def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None) -> list[Signal]:
     """Every BOS / CHoCH of the setting's structure becomes a buy (bullish break) or sell (bearish) setup with its
     area, stop and targets — with the rule (Params.follows_rule) none is skipped. The filters of earlier versions
@@ -349,10 +384,10 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
                 breaks.append(brk)
     breaks.sort(key=lambda x: x.index)
     hi, lo = _swing_range_at(r) if p.pd_filter else (None, None)
-    if p.confluence in ("sweep", "both"):
-        pivots = r.internal.pivots + r.swing.pivots
-        pivots_low = [q for q in pivots if q.kind == "low"]
-        pivots_high = [q for q in pivots if q.kind == "high"]
+    pivots = r.internal.pivots + r.swing.pivots  # liquidity a sweep can take
+    pivots_low = [q for q in pivots if q.kind == "low"]
+    pivots_high = [q for q in pivots if q.kind == "high"]
+    step = int(np.median(np.diff(bars.time[-60:]))) if len(bars) > 1 else 3600
     if p.confluence in ("fvg", "both"):
         gap_index = {1: sorted((g.index, g.created) for g in r.gaps if g.direction == 1),
                      -1: sorted((g.index, g.created) for g in r.gaps if g.direction == -1)}
@@ -380,6 +415,7 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
                 top, bottom = gap.top, gap.bottom
             stop = origin - p.sl_atr * atr_t if d > 0 else origin + p.sl_atr * atr_t
         else:
+            gap = None
             stop = bottom - p.sl_atr * atr_t if d > 0 else top + p.sl_atr * atr_t
         entry = (top + bottom) / 2 if p.entry == "mid" else (top if d > 0 else bottom)
         if (entry - stop) * d <= 0:
@@ -396,19 +432,26 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
         first = tp1 if tp1 is not None else target
         reward = (0.5 * (tp1 - entry) * d + 0.5 * (target - entry) * d) / risk if tp1 is not None else (target - entry) * d / risk
         aligned = float(align[t]) * d if align is not None else None
+        swept = _swept(d, ob, t, l, h, c, pivots_low, pivots_high)
+        retrace = (extreme - entry) * d / (leg_hi - leg_lo) if leg_hi > leg_lo else 0.0  # 0 = at TP1, 1 = leg start
+        ict = {"sweep": swept, "displacement": _displaced(d, ob.index, t, o, c, r.atr), "fvg": gap is not None,
+               "zone": retrace >= 0.5, "ote": 0.62 <= retrace <= 0.79, "retrace": round(float(retrace), 3),
+               "htf": None if aligned is None else aligned >= MTF_ALIGNED, "killzone": _in_killzone(bars.time[t], step)}
+        ict["grade"] = ict_grade(ict)
         skipped = (  # filters of earlier versions; the rule has none
             (p.kinds == "CHoCH" and b.kind != "CHoCH")
             or (p.trend_filter and b.scope == "internal" and r.swing.trend_history[t] != d)
             or (p.pd_filter and _outside_zone(hi[t], lo[t], entry, d))
             or reward < p.min_rr
             or (tp1 is None and (first - c[t]) * d <= 0)  # one fixed target already behind price
-            or (p.confluence in ("sweep", "both") and not _swept(d, ob, t, l, h, c, pivots_low, pivots_high))
+            or (p.confluence in ("sweep", "both") and not swept)
             or (p.confluence in ("fvg", "both") and not _gap_in_leg(gap_index[d], ob.index, t))
             or (p.mtf == "align" and (aligned is None or aligned < MTF_ALIGNED)))
         if skipped:
             continue
         s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage="tp12" if tp1 is not None else p.manage,
-                   align=aligned, level=float(b.level), pivot=b.pivot_index, zone_top=float(top), zone_bottom=float(bottom))
+                   align=aligned, level=float(b.level), pivot=b.pivot_index, zone_top=float(top), zone_bottom=float(bottom),
+                   ict=ict)
         if tp1 is not None:
             s.tp1, s.origin, s.ext = float(tp1), float(origin), float(p.ext)
         out.append(simulate(bars, s, against[(b.scope, d)], p.expiry, p.hold))
@@ -445,6 +488,26 @@ def metrics(sigs: list[Signal]) -> dict:
         "profitFactor": round(float(gross_win / gross_loss), 2) if gross_loss else (None if not gross_win else 99.0),
         "maxDrawdownR": round(drawdown, 2),
     }
+
+
+GRADES = ("A+", "A", "B", "C")
+
+
+def grade_metrics(items: list) -> dict:
+    """Results per ICT grade (signals or journal / chart rows), plus "ICT" = the full model (A+ and A)."""
+    def grade(x):
+        return (x.ict if isinstance(x, Signal) else x.get("ict") or {}).get("grade")
+
+    def closed(xs):
+        rs = [(x.r if isinstance(x, Signal) else x["r"]) or 0.0 for x in xs
+              if (x.status if isinstance(x, Signal) else x["status"]) in ("win", "loss", "timeout")]
+        wins = sum(1 for v in rs if v > 0)
+        return {"trades": len(rs), "wins": wins, "winRate": round(wins / len(rs), 4) if rs else None,
+                "expectancyR": round(float(np.mean(rs)), 3) if rs else None}
+
+    out = {g: closed([x for x in items if grade(x) == g]) for g in GRADES}
+    out["ICT"] = closed([x for x in items if grade(x) in ("A+", "A")])
+    return out
 
 
 def wilson_low(wins: int, n: int, z: float = 1.0) -> float:
@@ -644,7 +707,8 @@ def _db() -> sqlite3.Connection:
         if "qualified" not in _columns(_conn, "signals"):
             _conn.execute("ALTER TABLE signals ADD COLUMN qualified INTEGER")
         for column, kind in (("quality", "REAL"), ("manage", "TEXT"), ("align", "REAL"), ("news", "REAL"), ("tp1", "REAL"),
-                             ("origin", "REAL"), ("ext", "REAL"), ("zone_top", "REAL"), ("zone_bottom", "REAL")):
+                             ("origin", "REAL"), ("ext", "REAL"), ("zone_top", "REAL"), ("zone_bottom", "REAL"),
+                             ("ict", "TEXT")):
             if column not in _columns(_conn, "signals"):
                 _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
         if "level" not in _columns(_conn, "tracking"):
@@ -727,7 +791,7 @@ def _since(symbol: str, tf: str, now: int) -> int:
 
 SIGNAL_COLUMNS = ["id", "symbol", "market", "tf", "version", "direction", "kind", "scope", "created_t", "first_seen", "entry",
                   "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified",
-                  "quality", "manage", "align", "news", "tp1", "origin", "ext", "zone_top", "zone_bottom"]
+                  "quality", "manage", "align", "news", "tp1", "origin", "ext", "zone_top", "zone_bottom", "ict"]
 
 
 def _sid(symbol: str, tf: str, s: Signal, t: int) -> str:
@@ -776,7 +840,7 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
             # context stamped once, when the signal appears: higher-timeframe alignment and the news agreement
             row["align"] = old[12] if old and old[12] is not None else s.align
             row["news"] = old[13] if old and old[13] is not None else (round(news["score"] * s.direction, 3) if news else None)
-            db.execute(insert, {**row, "id": sid})
+            db.execute(insert, {**row, "id": sid, "ict": json.dumps(row["ict"])})
             written += 1
         # signals of an older parameter version keep their stored levels and are advanced on their own
         for (sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage, _a, _n,
@@ -801,7 +865,7 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
             "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason,
             "updated": int(time.time()), "manage": s.manage, "align": s.align, "tp1": s.tp1, "origin": s.origin, "ext": s.ext,
-            "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "fromT": t(s.pivot), "level": s.level}
+            "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "fromT": t(s.pivot), "level": s.level}
 
 
 def _save_params(symbol: str, tf: str, params: dict, report: dict, now: int) -> int:
@@ -929,7 +993,10 @@ def train_group(market: str, tf: str, pairs: list[tuple[str, Bars]]) -> dict | N
 def _live_rows(where: str = "", args: tuple = ()) -> list[dict]:
     with _db_lock:
         rows = _db().execute(f"SELECT {', '.join(SIGNAL_COLUMNS)} FROM signals {where}", args).fetchall()
-    return [dict(zip(SIGNAL_COLUMNS, r)) for r in rows]
+    out = [dict(zip(SIGNAL_COLUMNS, r)) for r in rows]
+    for row in out:
+        row["ict"] = json.loads(row["ict"]) if row["ict"] else {}
+    return out
 
 
 def _live_metrics(rows: list[dict]) -> dict:
@@ -1171,7 +1238,7 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
         "params": asdict(p), "evidence": evidence(inst.symbol, tf),
         "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
         "split": split_t, "outOfSample": metrics([s for s in sigs if t[s.created] >= split_t]),
-        "live": _live_metrics(live), "trades": trades,
+        "live": _live_metrics(live), "trades": trades, "grades": grade_metrics(sigs),
         "candles": [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
                      "c": float(bars.close[i])} for i in range(len(bars))],
         "smc": {"breaks": [{"kind": b.kind, "direction": word[b.direction], "level": b.level, "scope": b.scope,

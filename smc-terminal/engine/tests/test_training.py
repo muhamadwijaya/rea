@@ -410,3 +410,35 @@ def test_live_journal_keeps_tp1_of_a_setup_from_an_older_setting(store, monkeypa
     training.track(inst, "1h", b)
     status, r, reason = db.execute("SELECT status, r, reason FROM signals WHERE id='x'").fetchone()
     assert (status, r) == ("win", round(0.5 * 6 / 5.3, 3)) and reason.startswith("TP1 (50%)")  # TP1, then break-even
+
+
+# ------------------------------------------------------------------ ICT checklist
+
+def test_killzones_follow_new_york_time_with_daylight_saving():
+    from datetime import datetime, timezone
+    ts = lambda *a: int(datetime(*a, tzinfo=timezone.utc).timestamp())  # noqa: E731
+    assert training._in_killzone(ts(2026, 1, 15, 7, 45), 900) is True  # closes 08:00 UTC = 03:00 New York (winter)
+    assert training._in_killzone(ts(2026, 7, 15, 6, 45), 900) is True  # closes 07:00 UTC = 03:00 New York (summer)
+    assert training._in_killzone(ts(2026, 7, 15, 7, 45), 900) is True and training._in_killzone(ts(2026, 1, 15, 11, 45), 900) is False
+    assert training._in_killzone(ts(2026, 1, 15, 17, 0), 3600) is False  # 13:00 New York: between NY AM and NY PM
+    assert training._in_killzone(ts(2026, 1, 15, 8, 0), 14400) is None  # 4h and above: killzones do not apply
+
+
+def test_ict_grade_needs_the_whole_core_model():
+    core = {"sweep": True, "displacement": True, "fvg": True, "zone": True}
+    assert training.ict_grade({**core, "htf": True, "killzone": None}) == "A+"
+    assert training.ict_grade({**core, "htf": None, "killzone": True}) == "A+"  # unknown is not held against it
+    assert training.ict_grade({**core, "htf": False, "killzone": True}) == "A"
+    assert training.ict_grade({**core, "sweep": False}) == "B"
+    assert training.ict_grade({"fvg": True, "zone": True}) == "C"
+
+
+def test_every_setup_carries_its_ict_checklist():
+    from app import smc
+    b = _leg([(105, 105.5, 99.8, 100.5)])
+    [s] = training.signals(b, training.default_params("1h"), _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)]))
+    ict = s.ict
+    assert ict["fvg"] and ict["displacement"]  # bar 13: body 3.5 ≥ 1 ATR
+    assert ict["retrace"] == round((106 - 100) / 11, 3) and ict["zone"] and not ict["ote"]  # 54.5 %: discount, not OTE
+    assert ict["sweep"] is False and ict["htf"] is None and ict["grade"] == "B"  # no liquidity taken before the break
+    assert training.grade_metrics([s])["B"]["trades"] == 0 and training.grade_metrics([])["ICT"]["winRate"] is None

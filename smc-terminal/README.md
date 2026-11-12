@@ -191,6 +191,21 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   +0,028R. Sekitar separuh area tidak pernah disentuh harga lagi (tanpa entry). Aturan ini sendiri **tidak**
   menghasilkan 99%. Mode presisi dan EXPERT menilai aset/trade mana yang terbukti, tanpa menghapus area dari chart.
 
+- **Checklist ICT per setup** (grade di setiap area chart & kartu PLAN). Model ICT yang umum diajarkan: bias TF besar →
+  **sweep likuiditas** (harga mengambil stop di high/low sebelumnya) → **displacement** (candle body besar searah, di
+  sini body ≥ 1× ATR) yang membuat **MSS/CHoCH** dan meninggalkan **FVG** → entry saat retrace ke FVG di **discount**
+  (long, ≥ 50% retracement leg) / **premium** (short), idealnya **OTE** 62–79% → stop di balik sweep → TP1 high/low
+  leg (internal), TP2 −0,62 extension / likuiditas berikutnya; untuk TF intraday di dalam **killzone** (waktu New York:
+  London 02:00–05:00, NY AM 07:00–10:00, NY PM 13:30–16:00). Grade: **A+** = semua syarat (sweep, displacement, FVG,
+  discount/premium, searah TF besar, killzone bila berlaku), **A** = model inti (4 syarat pertama), **B** = 3 dari 4,
+  **C** = sisanya. Semua area tetap tergambar; grade hanya menunjukkan seberapa "ICT" setup itu.
+- **Hasil terukur checklist ICT** (57 aset inti × 15M/1H/4H/1D, 48.899 trade, aturan v3.12): semua setup win 41,4%
+  (+0,060R); model ICT lengkap (A+/A) win 40,2% dari 1.179 trade (+0,044R); A+ saja 40,2% dari 246 trade (+0,106R).
+  Per syarat: dengan sweep 46,2% vs tanpa 40,7%; displacement 42,1% vs 40,6%; searah TF besar 41,7% vs 41,3%;
+  killzone 40,9% vs 41,9%; entry di discount/premium 32,9% (+0,090R) vs tidak 57,8% (+0,002R) — entry lebih dalam
+  memperbesar reward tetapi menurunkan win rate. Mengikuti ICT lebih ketat **tidak** menaikkan win rate di data ini;
+  satu-satunya syarat yang jelas menaikkan win rate adalah sweep likuiditas (+5,5 poin). Sumber konsep: materi edukasi
+  ICT/SMC publik (tidak ada aturan resmi tertulis; definisi tiap pengajar berbeda).
 - **Timestamp**: waktu bar sinyal muncul, waktu sistem pertama mendeteksinya, waktu kedaluwarsa, waktu entry terpicu,
   waktu selesai.
 - **Manajemen posisi**: aturan TP1/TP2 — 50% di TP1 (puncak BOS/CHoCH), stop ke entry, sisa ke TP2; trade yang sempat

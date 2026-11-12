@@ -69,7 +69,7 @@ def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int,
             "expiry_t": int(b.time[s.created]) + tf_sec * p.expiry, "direction": s.direction, "kind": s.kind,
             "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "tp1": s.tp1, "status": s.status,
             "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
-            "align": s.align, "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "version": version,
+            "align": s.align, "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "version": version,
             "segment": segment, "live": False, "sample": "oos", "exam": exam}
 
 
@@ -171,7 +171,8 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
 
 def _publish(trades, segments, upto) -> None:
     with _lock:
-        _s.update(trades=trades[:], segments=segments[:], computedTo=upto, stats=_stats(trades))
+        _s.update(trades=trades[:], segments=segments[:], computedTo=upto, stats=_stats(trades),
+                  grades=training.grade_metrics(trades))
 
 
 def _run(inst, tf: str, n: int, improve: bool) -> None:
