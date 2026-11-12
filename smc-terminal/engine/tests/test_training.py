@@ -44,9 +44,9 @@ def test_structure_flip_cancels_before_entry_and_pending_stays_open_ended():
     assert s.status == "pending"  # not enough bars yet: still live
 
 
-def test_tuner_never_trades_below_one_to_one_and_needs_samples():
+def test_tuner_reward_filter_is_one_to_one_and_adoption_needs_samples():
     assert training.MIN_RR >= 1.0
-    assert all(p.rr >= 1.0 for p in training._grid("1h"))
+    assert all(p.rr >= 1.0 and p.min_rr in (0.0, training.MIN_RR) for p in training._grid("1h"))
     weak = {"trades": 3, "wins": 3, "expectancyR": 1.0}
     assert training._score(weak, training.MIN_OOS_TRADES) < 0  # 3/3 is not enough evidence
     losing = {"trades": 30, "wins": 25, "expectancyR": -0.1}
@@ -74,7 +74,7 @@ def store(tmp_path, monkeypatch):
 
 
 def custom(tf="1h", **kw):
-    return training.Params(**{**training.asdict(training.default_params(tf)), "target": "fixed", "rr": 1.0, **kw})
+    return training.Params(**{**training.asdict(training.default_params(tf)), "sl_atr": 0.5, "ext": 1.0, **kw})
 
 
 def test_group_split_is_by_time_not_by_count():
@@ -129,18 +129,21 @@ def test_journal_written_by_earlier_versions_is_migrated(store):
         CREATE TABLE tracking (symbol TEXT, tf TEXT, since INTEGER, last_tuned INTEGER, PRIMARY KEY (symbol, tf));
     """)
     dump = lambda p: json.dumps(training.asdict(p))  # noqa: E731
+    legacy = training.Params(swing=training.default_params("1h").swing, internal=training.default_params("1h").internal)
     rows = [
         ("PLACEHOLDER", dump(training.default_params("1h")), 1),  # earlier versions stored un-upgraded defaults
-        # … before v3.11 without the entry-zone fields: the old starting setting, still not an override
-        ("LEGACY", json.dumps({k: v for k, v in training.asdict(training.legacy_default("1h")).items() if k not in ("zone", "ext")}), 1),
+        # settings of earlier versions that skipped breaks or used other targets are not used any more
+        ("LEGACY", json.dumps({k: v for k, v in training.asdict(legacy).items() if k not in ("zone", "ext", "min_rr")}), 1),
+        ("V311", json.dumps({k: v for k, v in training.asdict(training.default_params("1h")).items() if k != "min_rr"}), 1),
+        ("FILTERED", dump(custom(swing=20, trend_filter=True)), 1),
         ("UPGRADED", dump(custom(swing=20)), 1),
         ("BACK", dump(custom(swing=20)), 1),
         ("BACK", json.dumps({"inherit": True}), 2),  # went back to the group's parameters
         ("@forex", dump(custom(swing=30)), 1),
     ]
     old.executemany("INSERT INTO params VALUES (?, '1h', ?, ?, '{}', 0)", [(s, v, p) for s, p, v in rows])
-    old.execute("INSERT INTO upgrades(symbol, tf, from_version, to_version, before, after, params, created) "
-                "VALUES ('UPGRADED', '1h', 0, 1, '{}', '{}', '{}', 0)")
+    old.executemany("INSERT INTO upgrades(symbol, tf, from_version, to_version, before, after, params, created) "
+                    "VALUES (?, '1h', 0, 1, '{}', '{}', '{}', 0)", [("UPGRADED",), ("FILTERED",)])
     old.execute("INSERT INTO signals(id, symbol, tf, status, r) VALUES ('s1', 'UPGRADED', '1h', 'win', 2.0)")
     old.commit()
     old.close()
@@ -150,6 +153,8 @@ def test_journal_written_by_earlier_versions_is_migrated(store):
     assert training._groups[("forex", "1h")][1].swing == 30
     assert training.active("PLACEHOLDER", "1h")[0] == "group"
     assert training.active("LEGACY", "1h")[0] == "group"
+    assert training.active("V311", "1h")[0] == "group"
+    assert training.active("FILTERED", "1h")[0] == "group"  # an upgrade that skipped breaks is replaced by the rule
     assert training.active("BACK", "1h")[0] == "group"
     row = training._live_rows()[0]
     assert row["id"] == "s1" and row["qualified"] is None  # kept, but not counted as a qualified AI trade
@@ -239,7 +244,7 @@ def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
     monkeypatch.setattr(training, "history", lambda i, tf, bars=None: b)
-    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None, diag=None: [early, late])
+    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None, areas=False: [early, late])
     monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)  # no network in tests
     db = training._db()
     db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
@@ -366,30 +371,28 @@ def test_fvg_rule_full_run_to_tp2_and_stop_before_tp1():
     assert (s.status, s.r) == ("loss", -1.0)
 
 
-def test_breaks_without_a_trade_are_explained():
+def test_every_break_gets_a_buy_or_sell_area_none_skipped():
     from app import smc
-    b = _leg([(105, 105.5, 103, 104)] * 5)
-    diag = []
-    assert training.signals(b, training.default_params("1h"), _bos(b, []), None, diag) == []
-    assert [d["reason"] for d in diag] == ["tanpa FVG di leg break"]  # BOS without a gap in its leg: no trade
-    filled = [smc.Gap(1, 101.0, 99.0, 13, 14, filled=14)]  # the gap was already traded through: not an entry
-    diag = []
-    assert training.signals(b, training.default_params("1h"), _bos(b, filled), None, diag) == []
-    out = training.skipped_json(diag, b.time)
-    assert out == [{"t": 15 * 3600, "fromT": 5 * 3600, "kind": "BOS", "scope": "internal", "direction": "bullish",
-                    "level": 104.0, "reason": "tanpa FVG di leg break"}]
-    diag = []
-    training.signals(b, training.replace(training.default_params("1h"), scope="swing"), _bos(b, []), None, diag)
-    assert diag[0]["reason"] == "skala internal tidak dipakai setting ini"
+    b = _leg([(105, 105.5, 96, 97.5), (97.5, 106.5, 97.4, 106), (106, 106.2, 96, 96.2)])
+    p = training.replace(training.default_params("1h"), sl_atr=0.3)
+    [s] = training.signals(b, p, _bos(b, []))  # no FVG in the leg: the order block of the leg is the buy area
+    assert (s.direction, s.zone_top, s.zone_bottom, s.entry) == (1, 98.0, 95.0, 96.5)
+    assert s.tp1 == 106.0 and (s.status, s.exit) == ("win", 96.5)  # TP1 at the BOS high, the rest at entry
+    filled = [smc.Gap(1, 101.0, 99.0, 13, 14, filled=14)]  # already traded through before the break: not the area
+    [s] = training.signals(b, p, _bos(b, filled))
+    assert s.zone_top == 98.0
+    weak = training.replace(p, ext=0.0, sl_atr=10.0)  # pays less than it risks: still a setup with this rule
+    [s] = training.signals(b, weak, _bos(b, []))
+    assert (s.tp1 - s.entry) / (s.entry - s.stop) < 1
 
 
-def test_old_settings_keep_order_block_entry_and_one_target():
-    from app import smc
-    b = _leg([(105, 105.5, 96, 97.5), (97.5, 106.5, 97.4, 106)])
-    old = training.legacy_default("1h")
-    assert (old.zone, old.target) == ("ob", "liq")
-    [s] = training.signals(b, training.replace(old, trend_filter=False), _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)]))
-    assert s.entry == 96.5 and s.tp1 is None and s.target == 106.0 and s.status == "win" and s.r == pytest.approx(round(9.5 / 1.8, 3))
+def test_the_tuner_only_tunes_how_never_which_breaks():
+    assert training.default_params("1h").follows_rule
+    assert all(p.follows_rule for level in range(training.MAX_LEVEL + 1) for p in training._grid("1h", level))
+    base = training.default_params("1h")
+    for skip in (dict(scope="swing"), dict(kinds="CHoCH"), dict(min_rr=1.0), dict(trend_filter=True), dict(pd_filter=True),
+                 dict(confluence="sweep"), dict(mtf="align"), dict(target="liq"), dict(zone="ob")):
+        assert not training.replace(base, **skip).follows_rule, skip
 
 
 def test_live_journal_keeps_tp1_of_a_setup_from_an_older_setting(store, monkeypatch):

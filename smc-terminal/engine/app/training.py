@@ -73,7 +73,7 @@ MIN_IS_TRADES = 8
 MIN_OOS_TRADES = 5
 ADOPT_Z = 1.64  # adoption compares one-sided 90 % lower bounds of the win rate
 MIN_IMPROVEMENT = 0.02
-MIN_RR = 1.0  # setups paying less than they risk are never taken (keeps the win rate honest)
+MIN_RR = 1.0  # settings with a reward filter (Params.min_rr) skip setups paying less than they risk
 CORE_TFS = ("5m", "15m", "1h", "4h", "1d", "1w")  # trained per asset, each with its own setting and evidence
 TF_ORDER = ("1m", "5m", "15m", "1h", "4h", "1d", "1w")
 # Bars the background tuner learns from per timeframe; the training lab can ask for up to MAX_TRAIN_BARS.
@@ -82,7 +82,7 @@ MAX_TRAIN_BARS = market_data.HISTORY_MAX_BARS
 MTF_ALIGNED = 0.5  # higher-timeframe alignment (−1…+1, relative to the trade) from which a trade counts as aligned
 UNIVERSE_TFS = ("1d",)
 TUNE_EVERY = 6 * 3600
-HISTORY_BASIS = 3  # evaluations made before the long history (1) or the BOS/CHoCH → FVG rule (2) are re-done first
+HISTORY_BASIS = 4  # evaluations made before the long history (1) or the BOS/CHoCH area rule (2, 3) are re-done first
 PREFETCH = 40  # long histories downloaded together for the next pairs due
 RETRY_AFTER = 30 * 60  # a group or pair whose tuning failed waits this long before the next attempt
 TF_SECONDS = {"1m": 60, "5m": 300, "10m": 600, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
@@ -109,23 +109,30 @@ class Params:
     # default_params() starts new learning from the FVG rule below.
     zone: str = "ob"  # entry zone: "ob" = order block of the leg, "fvg" = the fair value gap inside the leg that broke
     ext: float = 0.618  # target "tp12": TP2 = TP1 + ext × the leg that broke structure
+    min_rr: float = MIN_RR  # reward filter: setups paying less (TP1/TP2 blended) are not traded; 0 = every break
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
 
+    @property
+    def follows_rule(self) -> bool:
+        """The SMC rule: every BOS / CHoCH of both scales traded from its FVG area with TP1 at the break's extreme and
+        TP2 beyond. Settings of earlier versions skipped breaks (filters, one scale, minimum reward) or used other
+        targets; they are no longer used."""
+        return (self.scope == "both" and self.kinds == "all" and self.zone == "fvg" and self.target == "tp12"
+                and self.min_rr <= 0 and not self.pd_filter and not self.trend_filter and self.confluence == "none"
+                and self.mtf == "none")
+
 
 def default_params(tf_key: str) -> Params:
-    """Where learning starts — the SMC rule: every BOS / CHoCH (swing and internal, each in its own direction) is traded
-    from the FVG inside the leg that broke structure; TP1 at that leg's extreme (the BOS / CHoCH high or low), TP2
-    beyond it; half closes at TP1 and the stop moves to entry. The tuner may still prefer other settings it proves."""
+    """Where learning starts — the SMC rule: every BOS / CHoCH (swing and internal) is a buy (bullish break) or sell
+    (bearish) setup, none skipped: entry at the FVG inside the leg that broke structure (its order block when the leg
+    has no open FVG), TP1 at that leg's extreme (the BOS / CHoCH high or low), TP2 beyond it; half closes at TP1 and the
+    stop moves to entry. The tuner only tunes how (pivot lengths, entry in the area, stop, TP2, expiry)."""
     tf = market_data.timeframe(tf_key)
-    return Params(swing=tf.swing, internal=tf.internal, scope="both", zone="fvg", target="tp12", trend_filter=False)
+    return Params(swing=tf.swing, internal=tf.internal, scope="both", zone="fvg", target="tp12", trend_filter=False,
+                  min_rr=0.0)
 
-
-def legacy_default(tf_key: str) -> Params:
-    """The starting setting of earlier versions (order block, one target) — to recognise their placeholder rows."""
-    tf = market_data.timeframe(tf_key)
-    return Params(swing=tf.swing, internal=tf.internal)
 
 
 @dataclass
@@ -150,6 +157,8 @@ class Signal:
     pivot: int | None = None
     origin: float | None = None  # target "tp12": start of the leg; while pending, TP1 follows the leg's new extreme
     ext: float | None = None  # and TP2 stays `ext` × the leg beyond TP1
+    zone_top: float | None = None  # the buy / sell area (FVG or order block) the entry sits in
+    zone_bottom: float | None = None
 
 
 # ------------------------------------------------------------------ bars
@@ -317,131 +326,106 @@ def _swept(d: int, ob, t: int, l, h, c, pivots_low, pivots_high) -> bool:
     return False
 
 
-def _skip(diag: list, brk: smc.Break, reason: str) -> None:
-    diag.append({"index": brk.index, "kind": brk.kind, "scope": brk.scope, "direction": brk.direction,
-                 "level": float(brk.level), "pivot": brk.pivot_index, "reason": reason})
-
-
-def skipped_json(diag: list, times: np.ndarray, a: int = 0, z: int | None = None) -> list[dict]:
-    """Breaks that did not become a trade, for the chart (bar indices → times)."""
-    z = len(times) if z is None else z
-    return [{"t": int(times[x["index"]]), "fromT": int(times[x["pivot"]]), "kind": x["kind"], "scope": x["scope"],
-             "direction": "bullish" if x["direction"] > 0 else "bearish", "level": x["level"], "reason": x["reason"]}
-            for x in sorted(diag, key=lambda x: x["index"]) if a <= x["index"] < z]
-
-
-def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None,
-            diag: list | None = None) -> list[Signal]:
-    """Signals of setting `p`; `align` (htf_alignment) is recorded on each signal and, with p.mtf == "align", only
-    trades the higher timeframes agree with are taken (without alignment data such a setting takes none). With `diag`,
-    every break that does not become a signal is listed with the reason (for the chart)."""
+def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None) -> list[Signal]:
+    """Every BOS / CHoCH of the setting's structure becomes a buy (bullish break) or sell (bearish) setup with its
+    area, stop and targets — with the rule (Params.follows_rule) none is skipped. The filters of earlier versions
+    (one scale, CHoCH only, trend, premium/discount, minimum reward, confluence, higher timeframes) remain for
+    research only. `align` (htf_alignment) is recorded on each signal."""
     o, h, l, c = bars.open, bars.high, bars.low, bars.close
     if r is None:
         r = smc.analyze(o, h, l, c, p.swing, p.internal)
-    structures = {"internal": [r.internal], "swing": [r.swing], "both": [r.swing, r.internal]}.get(p.scope, [r.internal])
+    used = {"internal": ("internal",), "swing": ("swing",), "both": ("swing", "internal")}.get(p.scope, ("internal",))
+    structures = [st for st in (r.swing, r.internal) if st.scope in used]
     blocks = {(ob.created, ob.direction, st.scope): ob for st in structures for ob in st.order_blocks}
     # cancel rule: a pending setup is dropped when its own structure (swing or internal) breaks the other way
     against = {(st.scope, d): set() for st in structures for d in (1, -1)}
     seen: set[tuple[int, int]] = set()
     breaks = []
-    for st in structures:  # swing first: a bar broken on both scopes is traded once, as the swing break
+    for st in structures:  # swing first: a bar broken on both scales is one setup, the swing break's
         for brk in st.breaks:
             against[(st.scope, -brk.direction)].add(brk.index)
             if (brk.index, brk.direction) not in seen:
                 seen.add((brk.index, brk.direction))
                 breaks.append(brk)
-            elif diag is not None:
-                _skip(diag, brk, "sama dengan break swing di candle ini")
-    if diag is not None:
-        for st in (r.swing, r.internal):
-            if all(st is not x for x in structures):
-                for brk in st.breaks:
-                    _skip(diag, brk, f"skala {st.scope} tidak dipakai setting ini")
     breaks.sort(key=lambda x: x.index)
     hi, lo = _swing_range_at(r) if p.pd_filter else (None, None)
     if p.confluence in ("sweep", "both"):
         pivots = r.internal.pivots + r.swing.pivots
         pivots_low = [q for q in pivots if q.kind == "low"]
         pivots_high = [q for q in pivots if q.kind == "high"]
-    if p.confluence in ("fvg", "both") or p.zone == "fvg":
+    if p.confluence in ("fvg", "both"):
         gap_index = {1: sorted((g.index, g.created) for g in r.gaps if g.direction == 1),
                      -1: sorted((g.index, g.created) for g in r.gaps if g.direction == -1)}
+    if p.zone == "fvg":
         gaps_by = {d: sorted((g for g in r.gaps if g.direction == d), key=lambda g: g.index) for d in (1, -1)}
-
-    def skip(brk, reason):
-        if diag is not None:
-            _skip(diag, brk, reason)
 
     out: list[Signal] = []
     for b in breaks:
         t, d = b.index, b.direction
-        if p.kinds == "CHoCH" and b.kind != "CHoCH":
-            skip(b, "hanya CHoCH di setting ini")
-            continue
         ob = blocks.get((t, d, b.scope))
-        if ob is None:
-            skip(b, "leg break tidak jelas (tanpa order block)")
-            continue
-        if p.trend_filter and b.scope == "internal" and r.swing.trend_history[t] != d:
-            skip(b, "melawan tren swing")
-            continue
+        if ob is None:  # degenerate origin candle: the leg's extreme candle is the area
+            start = min(b.pivot_index, t)
+            k = start + int(np.argmin(l[start:t + 1]) if d > 0 else np.argmax(h[start:t + 1]))
+            ob = smc.OrderBlock(d, float(h[k]), float(l[k]), k, t, b.scope)
         leg_hi, leg_lo = float(h[ob.index:t + 1].max()), float(l[ob.index:t + 1].min())
         extreme, origin = (leg_hi, leg_lo) if d > 0 else (leg_lo, leg_hi)  # the BOS / CHoCH high (low) and its start
         atr_t = float(r.atr[t])
+        if not math.isfinite(atr_t) or atr_t <= 0:
+            atr_t = max(leg_hi - leg_lo, abs(float(c[t])) * 1e-4) * 0.1
+        top, bottom = ob.top, ob.bottom
         if p.zone == "fvg":  # the latest fair value gap of the leg that broke, not yet filled when the break happened
             gap = next((g for g in reversed(gaps_by[d]) if ob.index <= g.index <= t and g.created <= t
                         and (g.filled is None or g.filled > t)), None)
-            if gap is None:
-                skip(b, "tanpa FVG di leg break")
-                continue
-            entry = (gap.top + gap.bottom) / 2 if p.entry == "mid" else (gap.top if d > 0 else gap.bottom)
+            if gap is not None:
+                top, bottom = gap.top, gap.bottom
             stop = origin - p.sl_atr * atr_t if d > 0 else origin + p.sl_atr * atr_t
         else:
-            entry = (ob.top + ob.bottom) / 2 if p.entry == "mid" else (ob.top if d > 0 else ob.bottom)
-            stop = ob.bottom - p.sl_atr * atr_t if d > 0 else ob.top + p.sl_atr * atr_t
-        if p.pd_filter:
-            top, bottom = hi[t], lo[t]
-            if math.isnan(top) or math.isnan(bottom) or top <= bottom:
-                skip(b, "range premium/discount belum ada")
-                continue
-            mid = (top + bottom) / 2
-            if (d > 0 and entry > mid) or (d < 0 and entry < mid):
-                skip(b, "entry di luar discount/premium")
-                continue
+            stop = bottom - p.sl_atr * atr_t if d > 0 else top + p.sl_atr * atr_t
+        entry = (top + bottom) / 2 if p.entry == "mid" else (top if d > 0 else bottom)
+        if (entry - stop) * d <= 0:
+            stop = entry - d * p.sl_atr * atr_t
         risk = abs(entry - stop)
-        if risk <= 0 or not math.isfinite(risk):
-            skip(b, "risiko tidak valid")
-            continue
         tp1 = None
         if p.target == "liq":  # back to the extreme of the move that broke structure
             target = extreme
         elif p.target == "tp12":  # TP1 at the BOS / CHoCH extreme, TP2 beyond it
-            tp1, target = extreme, extreme + d * p.ext * (leg_hi - leg_lo)
+            tp1 = extreme if (extreme - entry) * d > 0 else entry + d * risk
+            target = tp1 + d * p.ext * (leg_hi - leg_lo)
         else:
             target = entry + d * p.rr * risk
         first = tp1 if tp1 is not None else target
         reward = (0.5 * (tp1 - entry) * d + 0.5 * (target - entry) * d) / risk if tp1 is not None else (target - entry) * d / risk
-        if (first - entry) * d <= 0 or reward < MIN_RR or (first - c[t]) * d <= 0:
-            skip(b, "target sudah terlewati" if (first - c[t]) * d <= 0 else f"reward kurang dari {MIN_RR:g}:1")
-            continue  # the target is behind price, or the trade pays less than it risks: no trade
-        if p.confluence in ("sweep", "both") and not _swept(d, ob, t, l, h, c, pivots_low, pivots_high):
-            skip(b, "tanpa sweep likuiditas")
-            continue
-        if p.confluence in ("fvg", "both"):
-            k = bisect.bisect_left(gap_index[d], (ob.index, -1))  # first gap of this direction from the block on
-            if k == len(gap_index[d]) or gap_index[d][k][1] > t:
-                skip(b, "tanpa FVG di leg break")
-                continue
         aligned = float(align[t]) * d if align is not None else None
-        if p.mtf == "align" and (aligned is None or aligned < MTF_ALIGNED):
-            skip(b, "TF lebih tinggi tidak searah")
+        skipped = (  # filters of earlier versions; the rule has none
+            (p.kinds == "CHoCH" and b.kind != "CHoCH")
+            or (p.trend_filter and b.scope == "internal" and r.swing.trend_history[t] != d)
+            or (p.pd_filter and _outside_zone(hi[t], lo[t], entry, d))
+            or reward < p.min_rr
+            or (tp1 is None and (first - c[t]) * d <= 0)  # one fixed target already behind price
+            or (p.confluence in ("sweep", "both") and not _swept(d, ob, t, l, h, c, pivots_low, pivots_high))
+            or (p.confluence in ("fvg", "both") and not _gap_in_leg(gap_index[d], ob.index, t))
+            or (p.mtf == "align" and (aligned is None or aligned < MTF_ALIGNED)))
+        if skipped:
             continue
         s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage="tp12" if tp1 is not None else p.manage,
-                   align=aligned, level=float(b.level), pivot=b.pivot_index)
+                   align=aligned, level=float(b.level), pivot=b.pivot_index, zone_top=float(top), zone_bottom=float(bottom))
         if tp1 is not None:
             s.tp1, s.origin, s.ext = float(tp1), float(origin), float(p.ext)
         out.append(simulate(bars, s, against[(b.scope, d)], p.expiry, p.hold))
     return out
+
+
+def _outside_zone(top: float, bottom: float, entry: float, d: int) -> bool:
+    """Premium/discount filter: a buy must sit in discount, a sell in premium (no range yet: outside)."""
+    if math.isnan(top) or math.isnan(bottom) or top <= bottom:
+        return True
+    mid = (top + bottom) / 2
+    return entry > mid if d > 0 else entry < mid
+
+
+def _gap_in_leg(gaps: list, start: int, t: int) -> bool:
+    k = bisect.bisect_left(gaps, (start, -1))  # first gap of this direction from the leg's start on
+    return k < len(gaps) and gaps[k][1] <= t
 
 
 def metrics(sigs: list[Signal]) -> dict:
@@ -493,54 +477,27 @@ def _breathe() -> None:
 
 
 MAX_LEVEL = 2  # search levels: 0 = base grid; while a pair stays below its goal its next search widens
-REFINE_TOPS = (6, 10, 15)
 
 
 def _grid(tf_key: str, level: int = 0):
-    """Settings the tuner tries: entry zone (FVG of the breaking leg / order block) × structure (swing + internal, one
-    of them) × entry, stop, target (TP1 at the BOS / CHoCH extreme + TP2, the extreme only, fixed RR) and filters.
-    Level 1 adds wider stops, a TP2 one leg beyond and 1:3; level 2 also CHoCH-only and wider / tighter pivot lengths
-    (960 → 2880 → 9600 settings)."""
+    """Settings the tuner tries — all follow the rule (every BOS / CHoCH traded from its FVG area, TP1 at the break's
+    extreme, TP2 beyond); only how is tuned: pivot lengths, entry in the area, stop distance, TP2 distance, expiry.
+    Level 1 adds more stops and TP2 distances and the area's edge; level 2 other pivot lengths and a shorter expiry
+    (54 → 360 → 900 settings)."""
     base = default_params(tf_key)
     lengths = {(base.swing, base.internal), (max(4, base.swing - 4), base.internal), (base.swing + 4, base.internal + 1)}
-    targets = (("tp12", base.rr, 0.618), ("liq", base.rr, base.ext), ("rr", 1.5, base.ext), ("rr", 2.0, base.ext))
-    stops = (0.25, 0.5)
-    kinds = ("all",)
+    stops, exts, entries, expiries = (0.25, 0.5, 1.0), (0.382, 0.618, 1.0), ("mid",), (base.expiry, base.expiry * 2)
     if level >= 1:
-        stops += (0.75, 1.0)
-        targets += (("tp12", base.rr, 1.0), ("rr", 3.0, base.ext))
+        stops, exts, entries = (0.1, 0.25, 0.5, 0.75, 1.0, 1.5), (0.272, 0.382, 0.618, 1.0, 1.618), ("mid", "edge")
     if level >= 2:
-        kinds += ("CHoCH",)
         lengths |= {(max(3, base.swing - 7), max(2, base.internal - 1)), (base.swing + 8, base.internal + 2)}
-    for (swing, internal), zone, scope, kind, entry, sl_atr, (target, rr, ext), pd, trend in itertools.product(
-            sorted(lengths), ("fvg", "ob"), ("both", "internal", "swing"), kinds, ("mid", "edge"), stops, targets,
-            (False, True), (False, True)):
-        if scope == "swing" and trend:
-            continue  # the trend filter only applies to internal breaks
-        yield replace(base, swing=swing, internal=internal, zone=zone, scope=scope, kinds=kind, entry=entry, sl_atr=sl_atr,
-                      target=target, rr=rr, ext=ext, pd_filter=pd, trend_filter=trend)
-
-
-VARIANTS = tuple((c, m) for c in ("none", "sweep", "fvg", "both") for m in ("none", "partial"))
-REFINE_TOP = 6
+        expiries += (max(5, base.expiry // 2),)
+    for (swing, internal), entry, sl_atr, ext, expiry in itertools.product(sorted(lengths), entries, stops, exts, expiries):
+        yield replace(base, swing=swing, internal=internal, entry=entry, sl_atr=sl_atr, ext=ext, expiry=expiry)
 
 
 def grid_size(tf_key: str, level: int = 0) -> int:
     return sum(1 for _ in _grid(tf_key, level))
-
-
-def _refine(ranked: list, evaluate, mtf: tuple[str, ...] = ("none",), top: int = REFINE_TOP) -> list:
-    """Second search stage: the best base settings with every confluence filter, trade-management variant and (with
-    higher-timeframe data) the higher-timeframe alignment filter."""
-    seen = {p for _, p, _ in ranked}
-    extra = []
-    for _, p, _ in ranked[:top]:
-        for (confluence, manage), m in itertools.product(VARIANTS, mtf):
-            q = replace(p, confluence=confluence, manage=manage, mtf=m)
-            if q not in seen:
-                seen.add(q)
-                extra.append(evaluate(q))
-    return sorted(ranked + extra, key=lambda x: x[0], reverse=True)
 
 
 def _score(m: dict, min_trades: int) -> float:
@@ -568,7 +525,6 @@ def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = No
         return _score(report["inSample"], MIN_IS_TRADES), p, report
 
     ranked = sorted((evaluate(p) for p in _grid(tf_key, level)), key=lambda x: x[0], reverse=True)
-    ranked = _refine(ranked, evaluate, ("none", "align") if align is not None else ("none",), REFINE_TOPS[level])
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -626,7 +582,7 @@ def tune_group(pairs: list[tuple[str, Bars]], tf_key: str, current: Params) -> t
 
     current_report = pooled(current)
     current_report["basis"] = HISTORY_BASIS
-    ranked = _refine(sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True), evaluate)
+    ranked = sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True)
     best, best_report = current, current_report
     best_valid = _score(current_report["valid"], GROUP_MIN_VALID)
     for train_score, p, report in ranked[:10]:
@@ -688,7 +644,7 @@ def _db() -> sqlite3.Connection:
         if "qualified" not in _columns(_conn, "signals"):
             _conn.execute("ALTER TABLE signals ADD COLUMN qualified INTEGER")
         for column, kind in (("quality", "REAL"), ("manage", "TEXT"), ("align", "REAL"), ("news", "REAL"), ("tp1", "REAL"),
-                             ("origin", "REAL"), ("ext", "REAL")):
+                             ("origin", "REAL"), ("ext", "REAL"), ("zone_top", "REAL"), ("zone_bottom", "REAL")):
             if column not in _columns(_conn, "signals"):
                 _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
         if "level" not in _columns(_conn, "tracking"):
@@ -703,9 +659,11 @@ def _db() -> sqlite3.Connection:
             if raw.get("inherit"):
                 continue  # the asset went back to its group's parameters
             entry = (version, Params(**raw), json.loads(report or "{}"))
+            if not entry[1].follows_rule:
+                continue  # an earlier version's setting (skipped breaks / other targets): the rule replaces it
             if symbol.startswith("@"):
                 _groups[(symbol[1:], tf)] = entry
-            elif (symbol, tf) in upgraded or entry[1] not in (default_params(tf), legacy_default(tf)):
+            elif (symbol, tf) in upgraded or entry[1] != default_params(tf):
                 _params[(symbol, tf)] = entry  # earlier versions also stored un-upgraded defaults: not overrides
         for symbol, tf, report in _conn.execute("SELECT symbol, tf, report FROM tracking WHERE report IS NOT NULL"):
             _evals[(symbol, tf)] = json.loads(report)
@@ -769,7 +727,7 @@ def _since(symbol: str, tf: str, now: int) -> int:
 
 SIGNAL_COLUMNS = ["id", "symbol", "market", "tf", "version", "direction", "kind", "scope", "created_t", "first_seen", "entry",
                   "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified",
-                  "quality", "manage", "align", "news", "tp1", "origin", "ext"]
+                  "quality", "manage", "align", "news", "tp1", "origin", "ext", "zone_top", "zone_bottom"]
 
 
 def _sid(symbol: str, tf: str, s: Signal, t: int) -> str:
@@ -843,7 +801,7 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
             "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason,
             "updated": int(time.time()), "manage": s.manage, "align": s.align, "tp1": s.tp1, "origin": s.origin, "ext": s.ext,
-            "fromT": t(s.pivot), "level": s.level}
+            "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "fromT": t(s.pivot), "level": s.level}
 
 
 def _save_params(symbol: str, tf: str, params: dict, report: dict, now: int) -> int:
@@ -1198,8 +1156,7 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
     r = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
     live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0))
     replaced = {(row["created_t"], row["direction"]) for row in live}
-    diag: list[dict] = []
-    sigs = signals(bars, p, r, htf_alignment(inst, tf, bars, download=True), diag)
+    sigs = signals(bars, p, r, htf_alignment(inst, tf, bars, download=True))
     trades = []
     for s in sigs:
         created_t = int(t[s.created])
@@ -1214,7 +1171,7 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
         "params": asdict(p), "evidence": evidence(inst.symbol, tf),
         "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
         "split": split_t, "outOfSample": metrics([s for s in sigs if t[s.created] >= split_t]),
-        "live": _live_metrics(live), "trades": trades, "skipped": skipped_json(diag, t),
+        "live": _live_metrics(live), "trades": trades,
         "candles": [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
                      "c": float(bars.close[i])} for i in range(len(bars))],
         "smc": {"breaks": [{"kind": b.kind, "direction": word[b.direction], "level": b.level, "scope": b.scope,

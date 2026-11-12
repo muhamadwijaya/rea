@@ -173,33 +173,31 @@ di pengaturan suara melewati tautan Google News.
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
 Setiap aset inti (TF 15M/1H/4H/1D) dan seluruh universe (TF 1D) dipantau. Strategi (kausal — hanya memakai bar
-sampai saat itu) — **aturan SMC BOS/CHoCH → FVG**: setiap BOS atau CHoCH, baik **swing (besar)** maupun **internal
-(kecil)** dan masing-masing ke arah break-nya (bullish = beli, bearish = jual), langsung dicari **FVG** di leg yang
-mematahkan struktur. Entry limit di FVG itu (tengah atau tepi; FVG yang sudah tertutup sebelum break tidak dipakai),
-stop di balik awal leg ± ATR, **TP1 = puncak BOS/CHoCH** (high tertinggi leg bullish / low terendah leg bearish) dan
-**TP2 = lanjutan** di luar puncak (0,618 atau 1× panjang leg). Di TP1 50% ditutup dan stop pindah ke entry; sisanya ke
-TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup tidak dibatalkan). Reward gabungan minimal
-**1:1**. Setting lama (entry di order block, satu target) tetap dicoba tuner dan dipakai bila terbukti lebih baik.
+sampai saat itu) — **aturan SMC BOS/CHoCH → area BUY/SELL, tanpa skip**: setiap BOS atau CHoCH, baik **swing
+(besar)** maupun **internal (kecil)**, langsung menjadi setup ke arah break-nya — bullish = **AREA BUY**, bearish =
+**AREA SELL**. Area = **FVG** di leg yang mematahkan struktur (FVG yang sudah tertutup sebelum break tidak dipakai);
+bila leg tidak punya FVG terbuka, area = order block leg itu. Entry limit di area (tengah), stop di balik awal leg ±
+ATR, **TP1 = puncak BOS/CHoCH** (high tertinggi leg bullish / low terendah leg bearish) dan **TP2 = lanjutan** di luar
+puncak (0,618 atau 1× panjang leg). Di TP1 50% ditutup dan stop pindah ke entry; sisanya ke TP2. Selama belum entry,
+TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati — reward kecil pun tetap diambil.
 
-- **BOS/CHoCH tanpa trade selalu dijelaskan**: di chart training setiap break yang tidak menjadi trade diberi tanda ✕
-  dan (saat chart diperbesar) alasannya — *tanpa FVG di leg break*, *reward kurang dari 1:1*, *target sudah terlewati*,
-  *melawan tren swing*, *skala swing/internal tidak dipakai setting ini*, dll. Setup yang tidak pernah entry tampil
-  redup dengan alasan batalnya (*kedaluwarsa tanpa entry*, *struktur berbalik sebelum entry*).
-- **Hasil terukur aturan ini** (57 aset inti × 15M/1H/4H/1D, 1,33 juta candle, tanpa tuning): aturan lama 5.255 trade,
-  win 30,4%, +0,039R/trade (sebagian besar setup batal karena harga lebih dulu ke target); aturan BOS/CHoCH → FVG
-  17.035 trade, win 42,9% (TP1 lalu BE dihitung menang), +0,007R/trade; TP2 = 1× leg: 21.513 trade, win 46,3%,
-  +0,011R. Aturan ini sendiri **tidak** menghasilkan 99% — tuner, mode presisi dan EXPERT tetap menyaring per aset.
+- **Aturan dikunci**: AI/tuner hanya menyetel *cara* (panjang pivot, entry di tengah/tepi area, jarak stop, jarak TP2,
+  kedaluwarsa), tidak pernah *memilih* break — tidak ada filter yang melewati BOS/CHoCH. Setting versi lama yang
+  melewati break (filter tren, premium/discount, reward minimal, satu skala saja, konfluensi, TF tinggi) atau memakai
+  target lain tidak dipakai lagi; aset itu kembali ke aturan ini lalu dilatih ulang.
+- **Hasil terukur aturan ini** (57 aset inti × 15M/1H/4H/1D, 1,33 juta candle, tanpa tuning): aturan lama (order
+  block, 1 target) 5.264 trade, win 30,5%, +0,043R/trade; v3.11 (FVG wajib, reward ≥ 1:1) 17.035 trade, win 42,9%,
+  +0,007R; **v3.12 semua BOS/CHoCH tanpa skip 48.895 trade, win 41,4%, +0,060R**; dengan stop 1,0 ATR win 50,0%,
+  +0,028R. Sekitar separuh area tidak pernah disentuh harga lagi (tanpa entry). Aturan ini sendiri **tidak**
+  menghasilkan 99%. Mode presisi dan EXPERT menilai aset/trade mana yang terbukti, tanpa menghapus area dari chart.
 
 - **Timestamp**: waktu bar sinyal muncul, waktu sistem pertama mendeteksinya, waktu kedaluwarsa, waktu entry terpicu,
   waktu selesai.
-- **Konfluensi SMC (opsional, dipilih tuner)**: sinyal hanya diambil bila sebelum break ada **sweep likuiditas** (ujung
-  leg menembus low/high yang sudah diketahui dan belum tersentuh, lalu close kembali ke dalam) dan/atau ada **FVG** di
-  leg yang mematahkan struktur.
 - **Manajemen posisi**: aturan TP1/TP2 — 50% di TP1 (puncak BOS/CHoCH), stop ke entry, sisa ke TP2; trade yang sempat
-  TP1 lalu kembali ke entry tercatat PROFIT (½ × R TP1). Untuk setting target tunggal tuner juga mencoba 50% di +1R.
-  Bila TP1 dan stop tersentuh di bar yang sama tetap dihitung LOSS.
-- **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan di skala yang sama), harga close
-  menembus stop, atau kedaluwarsa (mis. 30 bar); pada setting target tunggal juga bila harga mencapai target lebih dulu.
+  TP1 lalu kembali ke entry tercatat PROFIT (½ × R TP1). Bila TP1 dan stop tersentuh di bar yang sama tetap dihitung
+  LOSS.
+- **Batal otomatis** sebelum entry bila: struktur berbalik (CHoCH/BOS berlawanan di skala yang sama — break baru itu
+  langsung punya area sendiri), harga close menembus stop, atau kedaluwarsa (mis. 30 bar). Area tetap tergambar.
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
 - **Timeframe 5M sampai mingguan**: setiap aset dilatih terpisah di 5M, 15M, 1H, 4H, 1D dan 1W — tiap timeframe punya
@@ -222,7 +220,7 @@ TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup ti
   disimpan di kamus trade. "SEMUA ASET" tetap menjalankan training batch tanpa chart.
 - **SMC terus diperbaiki**: setting SMC tidak pernah final. Selama aset inti masih di bawah tujuan dan putaran tuning tidak
   menemukan yang lebih baik, pencarian berikutnya diperluas otomatis (level 0 → 2: stop lebih lebar, target sampai 1:3,
-  CHoCH saja, panjang pivot lain; 960 → 2.880 → 9.600 kombinasi). Setting yang lebih baik tetap harus lulus uji
+  entry di tepi area, panjang pivot lain; 54 → 360 → 900 kombinasi, semuanya aturan tanpa skip). Setting yang lebih baik tetap harus lulus uji
   out-of-sample yang sama, jadi pencarian lebih luas tidak bisa "membeli" win rate dengan mencocokkan noise.
 - **TERUS PERBAIKI SAMPAI TARGET** (training live 1 aset): 20% candle terakhir dikunci untuk ujian akhir. Di sisanya,
   training maju diulang putaran demi putaran dengan pencarian makin luas, hasil terbaik disimpan, dan berhenti bila target
@@ -237,8 +235,7 @@ TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup ti
   5M lebih lama dari 60 hari Yahoo).
 - **Multi-timeframe**: untuk setiap trade dicatat tren swing dua timeframe di atasnya *saat itu* (hanya candle TF tinggi
   yang sudah tutup — tanpa melihat masa depan). Tabel MULTI TIMEFRAME menunjukkan win rate data uji saat TF tinggi searah,
-  campuran atau berlawanan — itulah persentase gabungan multi-timeframe yang terukur. Tuner juga mencoba filter "hanya
-  searah TF tinggi". Kartu PLAN menunjukkan arah tiap timeframe saat ini (▲/▼ per TF dan persentase naik vs turun);
+  campuran atau berlawanan — itulah persentase gabungan multi-timeframe yang terukur. Kartu PLAN menunjukkan arah tiap timeframe saat ini (▲/▼ per TF dan persentase naik vs turun);
   sinyal tetap per timeframe.
 - **Mode EXPERT** (di samping SANGAT KETAT): hanya trade dari setting yang sudah terbukti **dan** searah dengan dua
   timeframe di atasnya — eksekusi difokuskan ke arah yang dominan di multi-timeframe.
@@ -258,8 +255,9 @@ TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup ti
   aset jadi beberapa kali lebih banyak (uji 474 pasangan: 922 → 2.545 trade uji). Riwayat ini disimpan di cache terbatas
   (240 aset × timeframe) dan diunduh bertahap; tuning memakai CPU ±4× lebih banyak daripada versi sebelumnya.
 - **Belajar per grup pasar**: riwayat hingga 150 aset satu pasar & timeframe (mis. SAHAM IDX 1D) digabung dan dibagi
-  menurut waktu: 60% awal untuk mengurutkan ±960 kombinasi parameter SMC (panjang pivot, zona entry FVG/OB, skala
-  swing+internal/swing/internal, entry, stop, target TP1/TP2, filter premium/discount & tren), 20% berikutnya (validasi) untuk memilih, dan 20% terakhir
+  menurut waktu: 60% awal untuk mengurutkan 54 kombinasi aturan SMC (panjang pivot, entry di area, jarak stop,
+  jarak TP2, kedaluwarsa), 20%
+  berikutnya (validasi) untuk memilih, dan 20% terakhir
   (data uji yang tidak ikut memilih) untuk melaporkan hasil. Aset yang datanya sedikit memakai parameter grupnya.
 - **Upgrade per aset**: kombinasi yang sama diuji pada 70% riwayat aset lalu diverifikasi pada 30% terakhir. Parameter
   aset dipakai hanya bila **lower bound win rate (90%) out-of-sample lebih tinggi** daripada parameter yang diwarisi,
@@ -268,8 +266,9 @@ TP2. Selama belum entry, TP1 ikut puncak baru bila leg masih berlanjut (setup ti
   dipakai juga dipakai chart & screener aset itu. Setiap upgrade diberi versi dan dicatat.
 - **Live chart training** (tab LIVE CHART): candle aset yang dilatih (diperbarui tiap 3 detik dari bar 1 menit) dengan
   setiap trade virtual sebagai kotak posisi — zona TP hijau, zona SL merah, garis TP1 (puncak BOS/CHoCH) dan TP2, hasil
-  dalam R; trade live diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis LIMIT · FVG / SL /
-  TP1 / TP2. BOS/CHoCH swing dan internal sama-sama digaris; yang tidak menjadi trade diberi ✕ dan alasannya. Area sebelum garis
+  dalam R; trade live diberi bingkai hijau terang, sinyal yang menunggu entry tampil sebagai garis BUY/SELL LIMIT / SL /
+  TP1 / TP2. BOS/CHoCH swing dan internal sama-sama digaris, dan setiap break punya kotak AREA BUY (hijau) / AREA SELL
+  (merah) dari candle break sampai entry terisi atau setup berakhir. Area sebelum garis
   "DATA UJI" adalah data latih (redup); tombol DATA UJI memperbesar ke seluruh periode out-of-sample. IKUTI AKTIVITAS
   memindahkan chart otomatis ke aset dengan aktivitas trade virtual terbaru.
 - **Replay dipercepat ×1–×7** (tab LIVE CHART): memutar ulang data uji (periode yang tidak dipakai melatih) candle demi

@@ -6,7 +6,6 @@ const C = {
   bull: '#2fd28c', bear: '#ff4d5e', neu: '#f2c94c', blue: '#6b9bff', cyan: '#38d3f5', orange: '#ff9f43',
   text: '#c9d6e6', dim: '#5d7896', grid: 'rgba(21, 76, 124, .35)', bg: '#001b33',
 };
-const MUTED = '#8592a8';  // hints: setups that were skipped or never filled
 
 const rgba = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
@@ -239,10 +238,10 @@ export class SmcChart {
     const labels = [];  // result labels already drawn: skip one that would overlap
     const free = (x, y, w) => !labels.some((b) => x < b.x + b.w && b.x < x + w && Math.abs(y - b.y) < 11);
     const ts = this.chart.timeScale();
-    const wide = (ts.logicalToCoordinate(1) ?? 0) - (ts.logicalToCoordinate(0) ?? 0) >= 5;  // room for reason texts
-    this.drawSkipped(tr.skipped || [], X, Y, right, labels, free, wide);
+    const wide = (ts.logicalToCoordinate(1) ?? 0) - (ts.logicalToCoordinate(0) ?? 0) >= 4;  // room for area labels
     for (const s of tr.trades) {
-      if (s.status === 'cancelled') { if (wide) this.drawCancelled(s, X, Y, right, labels, free); continue; }
+      this.drawArea(s, X, Y, right, lastT, labels, free, wide);  // every BOS / CHoCH: its buy or sell area
+      if (s.status === 'cancelled') continue;  // never filled: the area only
       const pending = s.status === 'pending';
       const x1 = X(pending ? s.created_t : s.opened_t);
       let x2 = pending ? X(Math.min(s.expiry_t, lastT)) : s.closed_t ? X(s.closed_t) : X(lastT);
@@ -255,9 +254,8 @@ export class SmcChart {
         const end = Math.min(right, Math.max(x2, x1 + 60));  // a signal of the last candle still shows its levels
         ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
         const y1 = s.tp1 != null ? Y(s.tp1) : null;
-        const lines = [[yE, C.blue, `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'} · FVG${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'],
+        const lines = [[yE, C.blue, `${s.direction > 0 ? 'BUY' : 'SELL'} LIMIT${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'],
           ...(y1 !== null ? [[y1, C.bull, 'TP1 puncak BOS/CHoCH'], [yT, C.bull, 'TP2']] : [[yT, C.bull, 'TP']])];
-        if (s.tp1 == null) lines[0][2] = `LIMIT ${s.direction > 0 ? 'BUY' : 'SELL'}${s.live ? ' · LIVE' : ''}`;
         for (const [y, c, tag] of lines) {
           ctx.strokeStyle = rgba(c, 0.9); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
           const fits = end + 6 + tag.length * 6.2 < right;
@@ -312,49 +310,37 @@ export class SmcChart {
     }
   }
 
-  /** A setup that never filled: faint dashed levels until it was dropped, with the reason. */
-  drawCancelled(s, X, Y, right, labels, free) {
+  /** The buy (green) or sell (red) area of a BOS / CHoCH — its FVG or order block — from the break until the entry
+   *  fills or the setup ends, with TP1 / TP2 while it waits. */
+  drawArea(s, X, Y, right, lastT, labels, free, wide) {
+    if (s.zone_top == null || s.zone_bottom == null) return;
     const { ctx } = this;
-    const x1 = X(s.created_t), x2 = X(s.closed_t ?? s.expiry_t);
-    const yE = Y(s.entry), yS = Y(s.stop), yT = Y(s.tp1 ?? s.target);
-    if (x1 === null || x2 === null || x2 < 0 || x1 > right || [yE, yS, yT].some((v) => v === null)) return;
-    const end = Math.max(x2, x1 + 6);
-    ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
-    for (const [y, c] of [[yE, MUTED], [yS, C.bear], [yT, C.bull]]) {
-      ctx.strokeStyle = rgba(c, 0.35); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
+    const buy = s.direction > 0, color = buy ? C.bull : C.bear;
+    const end = s.opened_t ?? s.closed_t ?? Math.min(s.expiry_t, lastT);
+    const x1 = X(s.created_t);
+    let x2 = X(end);
+    const y1 = Y(s.zone_top), y2 = Y(s.zone_bottom);
+    if (x1 === null || x2 === null || y1 === null || y2 === null || x2 < 0 || x1 > right) return;
+    x2 = Math.min(right, Math.max(x2, x1 + 6));
+    const waiting = !s.opened_t;  // no entry (yet): the targets belong to the area
+    ctx.fillStyle = rgba(color, 0.18); ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.strokeStyle = rgba(color, 0.7); ctx.lineWidth = 1;
+    ctx.strokeRect(x1 + 0.5, y1 + 0.5, x2 - x1 - 1, y2 - y1 - 1);
+    if (waiting && s.status !== 'pending') {  // a past area that never filled: where its targets were
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = rgba(C.bull, 0.55);
+      for (const v of [s.tp1, s.target]) {
+        const y = v == null ? null : Y(v);
+        if (y !== null) { ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke(); }
+      }
+      ctx.setLineDash([]);
     }
-    ctx.setLineDash([]);
-    const text = `BATAL: ${s.reason || 'tanpa entry'}`;
-    const w = text.length * 5.6, y = yE + (s.direction > 0 ? 9 : -9);
-    const x = end + 3 + w < right ? end + 3 : Math.max(0, x1 - 3 - w);
-    if (!free(x, y, w)) return;
-    labels.push({ x, y, w });
-    ctx.font = '9px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left'; ctx.fillStyle = rgba(MUTED, 0.9); ctx.fillText(text, x, y);
-    ctx.font = '10px "JetBrains Mono", monospace';
-  }
-
-  /** BOS / CHoCH that did not become a trade, marked ✕ at the break with the reason (training chart). */
-  drawSkipped(list, X, Y, right, labels, free, wide) {
-    const { ctx } = this;
-    ctx.font = '9px "JetBrains Mono", monospace';
-    for (const b of list) {
-      if (this.until != null && b.t > this.until) continue;
-      if (!((b.scope === 'swing' && this.layers.swing) || (b.scope === 'internal' && this.layers.internal))) continue;
-      if (b.reason.startsWith('sama dengan')) continue;  // the swing break on the same candle carries the trade
-      const x = X(b.t), y = Y(b.level);
-      if (x === null || y === null || x < 0 || x > right) continue;
-      const up = b.direction === 'bullish';
-      const yy = y + (up ? 10 : -10);
-      ctx.textAlign = 'center'; ctx.fillStyle = rgba(MUTED, 0.95); ctx.fillText('✕', x, yy);
-      if (!wide) continue;  // zoomed out: the mark only, zoom in to read why
-      const text = `${b.scope === 'swing' ? '' : 'i'}${b.kind}: ${b.reason}`;
-      const w = text.length * 5.6;
-      const tx = x + 7 + w < right ? x + 7 : Math.max(0, x - 7 - w);
-      if (!free(tx, yy, w)) continue;
-      labels.push({ x: tx, y: yy, w });
-      ctx.textAlign = 'left'; ctx.fillStyle = rgba(MUTED, 0.85); ctx.fillText(text, tx, yy);
-    }
+    if (!wide && s.status !== 'pending') return;
+    const text = buy ? 'BUY AREA' : 'SELL AREA';
+    const w = text.length * 5.6, y = buy ? Math.max(y1, y2) + 8 : Math.min(y1, y2) - 8;
+    if (!free(x1, y, w)) return;
+    labels.push({ x: x1, y, w });
+    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left'; ctx.fillStyle = rgba(color, 0.95); ctx.fillText(text, x1, y);
     ctx.font = '10px "JetBrains Mono", monospace';
   }
 

@@ -69,7 +69,8 @@ def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int,
             "expiry_t": int(b.time[s.created]) + tf_sec * p.expiry, "direction": s.direction, "kind": s.kind,
             "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "tp1": s.tp1, "status": s.status,
             "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
-            "align": s.align, "version": version, "segment": segment, "live": False, "sample": "oos", "exam": exam}
+            "align": s.align, "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "version": version,
+            "segment": segment, "live": False, "sample": "oos", "exam": exam}
 
 
 def _stats(trades: list[dict]) -> dict:
@@ -159,12 +160,10 @@ def _forward(b: Bars, tf: str, align, level: int, publish) -> tuple[list[dict], 
                      "after": report["outOfSample"], "params": asdict(best)}
             if best != p:
                 p, version = best, version + 1
-        diag: list[dict] = []
-        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align, diag) if a <= s.created < z]
+        seg = [_trade(b, s, version, k, tf_sec, p) for s in training.signals(b, p, None, align) if a <= s.created < z]
         trades += seg
         segments.append({"index": k, "from": a, "to": z, "fromT": int(b.time[a]), "toT": int(b.time[z - 1]),
-                         "version": version, "learn": event, "stats": _stats(seg),
-                         "skipped": training.skipped_json(diag, b.time, a, z)})
+                         "version": version, "learn": event, "stats": _stats(seg)})
         if publish:
             publish(trades, segments, z)
     return trades, segments, p, version
@@ -242,7 +241,7 @@ def _improve(b: Bars, tf: str, align) -> int | None:
         _set(rounds=[dict(r) for r in rounds], reached=reached)
         if reached or (not better and level > 0):
             break  # goal reached, or a wider search no longer helps
-    learned_from = len(best["trades"])
+    learned_from = _stats(best["trades"])["trades"]
     if learned_from < GOAL_TRADES:
         _set(hint=f"Bagian belajar hanya menghasilkan {learned_from} trade — terlalu sedikit untuk membuktikan setting yang lebih baik. "
                   "Tambah jumlah candle atau pilih timeframe lebih kecil.")
