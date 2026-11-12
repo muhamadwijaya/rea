@@ -31,10 +31,22 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
                 {
                     continue;
                 }
-                // The same headline syndicated by several feeds is kept once.
+                // The same headline syndicated by several feeds is kept once. A Google News copy only links to a redirect
+                // that opens in a browser; when the publisher's own feed brings the story, its direct link (which the
+                // article reader and the AI can open) replaces the redirect, under the same id.
                 var titleKey = TitleKey(item.Title);
-                if (_titleKeys.ContainsKey(titleKey))
+                if (_titleKeys.TryGetValue(titleKey, out var heldId))
                 {
+                    if (_byId.TryGetValue(heldId, out var held) && IsRedirect(held.Link) && !IsRedirect(item.Link))
+                    {
+                        _byId[heldId] = held with
+                        {
+                            Link = item.Link, Source = item.Source, Feed = item.Feed,
+                            Summary = string.IsNullOrEmpty(held.Summary) ? item.Summary : held.Summary,
+                            Image = held.Image ?? item.Image,
+                        };
+                        _sorted = _sorted.Select(i => i.Id == heldId ? _byId[heldId] : i).ToList();
+                    }
                     continue;
                 }
                 var classified = item with { Markets = Markets.Classify(item.Category, item.Assets) };
@@ -188,6 +200,10 @@ public sealed class NewsStore(IOptions<TerminalOptions> options)
         }
         _sorted = keep;
     }
+
+    /// <summary>Links that only redirect inside a browser (Google News article links).</summary>
+    public static bool IsRedirect(string link) =>
+        Uri.TryCreate(link, UriKind.Absolute, out var uri) && uri.Host.Equals("news.google.com", StringComparison.OrdinalIgnoreCase);
 
     private static string TitleKey(string title) =>
         new string(title.ToLowerInvariant().Where(char.IsLetterOrDigit).Take(90).ToArray());

@@ -77,7 +77,7 @@ termasuk ticker bernomor seperti `SUI20947-USD`; versi wrapped/staked/bridged da
 karena duplikat; kategori dari CoinGecko), 44 pair forex mayor/cross/eksotis
 dan komoditas. Seluruh universe dipindai SMC **1D tiap 20 menit dan 4H tiap 40 menit** (±1,5–2 menit per sapuan),
 dan harga open/last-nya diperbarui bergiliran tiap ±2 menit. Perbarui daftar dengan `python engine/tools/build_universe.py` (butuh `engine/tools/requirements.txt`).
-Berita dari 28 sumber RSS dibagi per pasar dan ditautkan ke aset (ticker, nama perusahaan/koin, alias mata uang).
+Berita dari 40 sumber RSS dibagi per pasar dan ditautkan ke aset (ticker, nama perusahaan/koin, alias mata uang).
 
 **Analisa AI (opsional)**: buka FUNDAMENTAL & AI › Pengaturan AI, pilih provider dan masukkan API key-nya
 (disimpan lokal, terenkripsi DPAPI di Windows, tidak pernah dikirim ke browser):
@@ -155,9 +155,20 @@ model diunduh sekali dari pengaturan suara (UNDUH YANG DIPERLUKAN), disimpan di 
 dan `\stt`; setelah itu tidak perlu internet untuk suara. Paket Python-nya (`engine/requirements-voice.txt`) dipasang
 `setup.bat`.
 
-**Isi berita lengkap** diambil dari halaman artikel seperti pembaca biasa (trafilatura). Situs yang menolak pembaca
-otomatis (HTTP 403/429, verifikasi bot, paywall) dan tautan Google News tidak diakali: asisten mengatakannya lalu
-membacakan ringkasan dari feed; tombol BUKA BERITA membuka artikel di browser.
+**Isi berita lengkap** diambil oleh engine dari link berita, seperti pembaca biasa (trafilatura), lalu diberikan ke
+AI. Model AI sendiri tidak membuka website — ia hanya membaca teks yang dikirim kepadanya — jadi engine yang membuka
+link atas nama AI. Yang bisa dibaca utuh adalah link langsung penerbit yang mengizinkan pembaca otomatis (uji
+12 Nov 2026: 74% berita bertag dari link langsung terbaca utuh, mis. CNBC Indonesia, Kontan, detikFinance, CNN
+Indonesia, Liputan6, IDX Channel, Bloomberg, CryptoSlate). Yang tidak bisa:
+- **tautan Google News** (berita dari pencarian Google News): link-nya hanya pengalihan yang berjalan di browser, jadi
+  pembaca otomatis — termasuk AI mana pun — hanya mendapat judul dan ringkasan. Bila penerbitnya juga punya feed
+  langsung di aplikasi, berita yang sama otomatis memakai link langsung itu;
+- situs yang menolak pembaca otomatis (HTTP 401/403/429: Investing.com, MarketWatch, Nasdaq, Seeking Alpha, The
+  Block, …), paywall dan verifikasi bot.
+
+Pembatasan ini tidak diakali (tidak menyamar sebagai browser manusia). Asisten menyebutkan alasannya, AI menilai dari
+judul dan ringkasan, dan tombol BUKA BERITA membuka artikel di browser. Opsi *Hanya berita yang isinya bisa dibaca AI*
+di pengaturan suara melewati tautan Google News.
 
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
@@ -223,7 +234,7 @@ SharxInvest.exe — aplikasi desktop C# (WinForms + WebView2, desktop/)
    ▼
 Gateway C# — ASP.NET Core 8 (gateway/)
    • UI & REST API (/api/*), push realtime SignalR (/hub/market)
-   • 28 feed RSS (ETag/If-Modified-Since, dedup), klasifikasi berita per pasar, kalender ForexFactory
+   • 40 feed RSS (ETag/If-Modified-Since, dedup; tautan langsung penerbit menggantikan tautan Google News untuk berita yang sama), klasifikasi berita per pasar, kalender ForexFactory
    • refresh screener & arah market berkala, alert (CHoCH/BOS baru, bias berubah, berita kuat, event ≤ 30 mnt)
    • EngineSupervisor: menjalankan engine Python tersembunyi, cek /health, restart otomatis bila crash,
      proses anak terikat job object Windows sehingga tidak pernah tertinggal

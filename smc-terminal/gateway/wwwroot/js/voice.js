@@ -12,7 +12,7 @@ import { aiResultHtml } from './ai-panel.js';
 
 const KEY = 'sharx.voice';
 const SETTINGS_VERSION = 2;  // v2: the natural Supertonic voice became the default
-const DEFAULTS = { enabled: false, scope: 'all', listen: true, engine: 'supertonic', voice: 'M1', persona: 'natural', mixed: true, browserVoice: '', rate: 1.0, volume: 1.0, version: SETTINGS_VERSION };
+const DEFAULTS = { enabled: false, scope: 'all', fullOnly: false, listen: true, engine: 'supertonic', voice: 'M1', persona: 'natural', mixed: true, browserVoice: '', rate: 1.0, volume: 1.0, version: SETTINGS_VERSION };
 const ENGINE_MODELS = { supertonic: () => ['st3', 'stt'], piper: (persona) => (persona === 'jarvis' ? ['id', 'engb', 'stt'] : ['id', 'en', 'stt']) };
 const NATURAL_VOICES = [['M1', 'Pria 1'], ['M2', 'Pria 2'], ['M3', 'Pria 3'], ['M4', 'Pria 4'], ['M5', 'Pria 5'], ['F1', 'Wanita 1'], ['F2', 'Wanita 2'], ['F3', 'Wanita 3'], ['F4', 'Wanita 4'], ['F5', 'Wanita 5']];
 const TF_NAME = { '5m': '5 menit', '15m': '15 menit', '1h': '1 jam', '4h': '4 jam', '1d': 'harian' };
@@ -283,6 +283,7 @@ export class VoiceAssistant {
       <h5>ASISTEN SUARA BERITA</h5>
       <label class="check"><input type="checkbox" data-k="enabled" ${s.enabled ? 'checked' : ''}> Bacakan berita baru yang terkait aset</label>
       <select class="input" data-k="scope">${SCOPES.map(([k, l]) => `<option value="${k}" ${s.scope === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <label class="check" title="Berita dari Google News hanya berisi judul untuk pembaca otomatis; sumber langsung (CNBC Indonesia, Kontan, detik, Bloomberg, …) bisa dibaca utuh"><input type="checkbox" data-k="fullOnly" ${s.fullOnly ? 'checked' : ''}> Hanya berita yang isinya bisa dibaca AI (lewati tautan Google News)</label>
       <label class="check"><input type="checkbox" data-k="listen" ${s.listen ? 'checked' : ''}> Jawab dengan suara ("ya" / "tidak") lewat mikrofon</label>
       <h5>SUARA</h5>
       <select class="input" data-k="engine">
@@ -410,6 +411,8 @@ export class VoiceAssistant {
   wanted(item) {
     const tags = (item.symbols || []).filter((t) => this.store.quotes?.has(t.symbol));
     if (!tags.length) return false;
+    // Google News links only redirect inside a browser: the reader (and so the AI) gets the headline, not the article
+    if (this.settings.fullOnly && /^https?:\/\/news\.google\.com\//i.test(item.link || '')) return false;
     if (this.settings.scope === 'core') return tags.some((t) => this.store.quotes.get(t.symbol)?.core);
     if (this.settings.scope === 'strong') return Math.abs(item.sentiment ?? 0) >= 0.5;
     return true;
