@@ -865,3 +865,13 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .tr-ict .chip.dim { opacity: .55; }
 .tr-grades { color: var(--muted); }
 .tr-grades b { color: var(--text); }
+/* virtual account: balance & lot (v3.16) */
+.acct { display: inline-flex; gap: 10px; align-items: center; font-size: 11px; color: var(--muted); }
+.acct label { display: inline-flex; gap: 5px; align-items: center; letter-spacing: .06em; }
+.acct input.input { min-width: 0; width: 92px; padding: 3px 6px; font-size: 11px; }
+.acct input.acct-lot { width: 62px; }
+.acct-cur { color: var(--text); font-weight: 600; }
+.acct-line { color: var(--muted); }
+.acct-line b { color: var(--text); }
+.acct-line b.up { color: var(--bull, #2fd28c); }
+.acct-line b.down { color: var(--bear, #ff4d5e); }

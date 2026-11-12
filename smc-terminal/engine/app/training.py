@@ -1,19 +1,19 @@
 """SMC virtual trading ("AI training"): signal journal, paper trades, measured accuracy and self-tuning.
 
-Strategy (causal — every decision uses only bars up to that moment):
-  a structure break (CHoCH, optionally BOS) of the chosen scope creates a signal from the order block that
-  produced it: limit entry at the block (edge or middle), stop beyond the block ± k·ATR, target = entry +
-  RR × risk. Optional filters: entry in discount/premium of the dealing range known at that bar, an
-  internal break only when it agrees with the swing trend, and SMC confluence — a liquidity sweep (the leg's
-  extreme wicked through a known, untouched pivot and closed back) and/or a fair value gap in the leg that
-  broke structure. Optional management: half the position is closed at +1R and the stop moves to entry.
+Strategy (causal — every decision uses only bars up to that moment), see default_params / signals:
+  every BOS / CHoCH (swing and internal, read at protected levels in smc.detect_structure) is a buy or sell
+  setup: limit entry in its area (the FVG of the leg that broke structure, else the leg's order block), stop on
+  the ATR band beyond the area (area edge ∓ k × ATR), TP1 at the break's extreme, TP2 beyond it. Half closes at
+  TP1 and the stop moves to entry. One position at a time per asset and timeframe.
 
 Lifecycle of every signal (bar by bar, with timestamps):
   PENDING → OPEN when price trades into the entry, or CANCELLED when, before entry: the structure breaks the
-  other way, price reaches the target first, price closes beyond the stop, or the signal expires.
-  OPEN → WIN (target) / LOSS (stop; if a bar touches both, it is counted as a loss) / TIMEOUT (max holding,
-  closed at the bar's close). With partial management, a trade that reached +1R and then returned to entry is
-  a WIN of +0.5R; the moved stop applies from the bar after +1R. Result in R (risk units).
+  other way, price closes beyond the stop, another position is still running, or the signal expires (with a
+  single target also when price reaches it first; with TP1/TP2, TP1 follows the leg's new extreme instead).
+  OPEN → WIN (TP2, or TP1 then back to entry) / LOSS (the stop itself — a bar touching the stop and a target
+  is counted as a loss). The rule has no time exit: a trade ends only at its stop or targets (settings of
+  earlier versions closed at market after `hold` bars: TIMEOUT). The moved stop applies from the bar after TP1.
+  Result in R (risk units).
 
 Live journal: signals created after an asset/timeframe starts being tracked are stored (SQLite, in the app
 data folder) with the moment the system first saw them, and advanced as new bars arrive; closed rows are
@@ -84,7 +84,8 @@ MAX_TRAIN_BARS = market_data.HISTORY_MAX_BARS
 MTF_ALIGNED = 0.5  # higher-timeframe alignment (−1…+1, relative to the trade) from which a trade counts as aligned
 UNIVERSE_TFS = ("1d",)
 TUNE_EVERY = 6 * 3600
-HISTORY_BASIS = 5  # older evaluations are re-done first: short history (1), area rule (2, 3), latest-pivot CHoCH (4)
+HISTORY_BASIS = 6  # older evaluations are re-done first: short history (1), area rule (2, 3), latest-pivot CHoCH (4),
+# leg-origin stop with a time exit (5)
 PREFETCH = 40  # long histories downloaded together for the next pairs due
 RETRY_AFTER = 30 * 60  # a group or pair whose tuning failed waits this long before the next attempt
 TF_SECONDS = {"1m": 60, "5m": 300, "10m": 600, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
@@ -103,7 +104,7 @@ class Params:
     pd_filter: bool = False
     trend_filter: bool = True
     expiry: int = 30  # bars a pending signal stays valid
-    hold: int = 60  # bars an open trade may run before it is closed at market
+    hold: int = 60  # bars an open trade may run before it is closed at market; 0 = no time exit (the rule)
     confluence: str = "none"  # extra SMC confirmation: "none" | "sweep" | "fvg" | "both"
     manage: str = "none"  # "none" | "partial" = close half at +1R and move the stop to entry
     mtf: str = "none"  # "none" | "align" = only trades the two higher timeframes' swing trends agree with
@@ -123,17 +124,19 @@ class Params:
         targets; they are no longer used."""
         return (self.scope == "both" and self.kinds == "all" and self.zone == "fvg" and self.target == "tp12"
                 and self.min_rr <= 0 and not self.pd_filter and not self.trend_filter and self.confluence == "none"
-                and self.mtf == "none")
+                and self.mtf == "none" and self.hold <= 0)
 
 
 def default_params(tf_key: str) -> Params:
     """Where learning starts — the SMC rule: every BOS / CHoCH (swing and internal) is a buy (bullish break) or sell
     (bearish) setup, none skipped: entry at the FVG inside the leg that broke structure (its order block when the leg
-    has no open FVG), TP1 at that leg's extreme (the BOS / CHoCH high or low), TP2 beyond it; half closes at TP1 and the
-    stop moves to entry. The tuner only tunes how (pivot lengths, entry in the area, stop, TP2, expiry)."""
+    has no open FVG), stop on the ATR band beyond the area (area low − 3 × ATR for a buy, area high + 3 × ATR for a
+    sell — measured on 57 core assets × 15m–1d: 3 × ATR had the best expectancy of 1–3.5 ×), TP1 at that leg's
+    extreme (the BOS / CHoCH high or low), TP2 beyond it; half closes at TP1 and the stop moves to entry; no time
+    exit. The tuner only tunes how (pivot lengths, entry in the area, ATR band multiple, TP2, expiry)."""
     tf = market_data.timeframe(tf_key)
     return Params(swing=tf.swing, internal=tf.internal, scope="both", zone="fvg", target="tp12", trend_filter=False,
-                  min_rr=0.0)
+                  min_rr=0.0, sl_atr=3.0, hold=0)
 
 
 
@@ -159,6 +162,7 @@ class Signal:
     pivot: int | None = None
     origin: float | None = None  # target "tp12": start of the leg; while pending, TP1 follows the leg's new extreme
     ext: float | None = None  # and TP2 stays `ext` × the leg beyond TP1
+    tp1_hit: int | None = None  # bar on which TP1 was reached (the stop sits at entry from the next bar)
     zone_top: float | None = None  # the buy / sell area (FVG or order block) the entry sits in
     zone_bottom: float | None = None
     ict: dict = field(default_factory=dict)  # ICT checklist of the setup at its break (see ict_checks)
@@ -273,38 +277,76 @@ def simulate(bars: Bars, s: Signal, against: set[int], expiry: int, hold: int) -
         s.status, s.closed, s.reason = "cancelled", s.created + expiry, "kedaluwarsa tanpa entry"
     if s.status != "open":
         return s
-    k = s.opened
-    end_hold = min(n, s.opened + 1 + hold)
+    end = n if hold <= 0 else min(n, s.opened + 1 + hold)
+    advance(bars, s, s.opened, end)
+    if s.status == "open" and hold > 0 and n > s.opened + hold:
+        k = s.opened + hold
+        risk = abs(s.entry - s.stop)
+        rest = float((c[k] - s.entry) * d / risk)  # plain floats: results are serialised as JSON
+        half = abs(_first_target(s) - s.entry) / risk
+        s.status, s.closed, s.exit = "timeout", k, float(c[k])
+        s.r, s.reason = round(0.5 * half + 0.5 * rest if s.tp1_hit is not None else rest, 3), "batas waktu, ditutup di harga pasar"
+    return s
+
+
+def _first_target(s: Signal) -> float:
+    """Where half the position closes: TP1, else +1R ("partial")."""
+    return s.tp1 if s.tp1 is not None else s.entry + s.direction * abs(s.entry - s.stop)
+
+
+def _first(mask: np.ndarray) -> int | None:
+    i = int(np.argmax(mask)) if len(mask) else 0
+    return i if len(mask) and mask[i] else None
+
+
+def advance(bars: Bars, s: Signal, start: int, end: int) -> Signal:
+    """Run an open trade over bars [start, end): until TP1 the stop is the original one (the end of the red zone);
+    a bar that touches the stop and a target counts as the stop. After TP1, half is closed and the stop sits at
+    entry from the next bar. Targets count from the bar after the fill (start == s.opened); a trade resumed later
+    (live journal) counts them from `start`. Vectorised: an open trade has no time limit with the rule."""
+    h, l = bars.high, bars.low
+    d = s.direction
+    risk = abs(s.entry - s.stop)
     reward = abs(s.target - s.entry) / risk
-    # half closes at TP1 (target "tp12") or at +1R ("partial"), then the stop moves to entry
-    level = s.tp1 if s.tp1 is not None else s.entry + d * risk
+    level = _first_target(s)
     partial = s.tp1 is not None or (s.manage == "partial" and reward > 1.0 + 1e-9)
     half = abs(level - s.entry) / risk
     tp_name = "TP1" if s.tp1 is not None else "TP1 +1R"
-    taken = False
-    while k < end_hold:
-        stop = s.entry if taken else s.stop
-        hit_stop = l[k] <= stop if d > 0 else h[k] >= stop
-        hit_target = (h[k] >= s.target if d > 0 else l[k] <= s.target) and k > s.opened
-        if hit_stop:  # also when the target is touched in the same bar: conservative
-            if taken:
-                s.status, s.closed, s.exit, s.r, s.reason = "win", k, s.entry, round(0.5 * half, 3), f"{tp_name} (50%), sisa ditutup di entry"
-            else:
-                s.status, s.closed, s.exit, s.r, s.reason = "loss", k, s.stop, -1.0, "stop loss"
+    hit = (lambda lo, hi, x: lo <= x) if d > 0 else (lambda lo, hi, x: hi >= x)  # price reached x against us
+    reach = (lambda lo, hi, x: hi >= x) if d > 0 else (lambda lo, hi, x: lo <= x)  # ... in our favour
+    k = start
+    if s.tp1_hit is None:
+        lo, hi = l[k:end], h[k:end]
+        stop_m, tgt_m = hit(lo, hi, s.stop), reach(lo, hi, s.target)
+        lvl_m = reach(lo, hi, level) if partial else np.zeros(len(lo), dtype=bool)
+        if k == s.opened and len(lo):
+            tgt_m[0] = lvl_m[0] = False  # targets count from the bar after the fill (order inside the bar unknown)
+        never = len(lo)
+        i_stop, i_tgt, i_lvl = (x if x is not None else never for x in (_first(stop_m), _first(tgt_m), _first(lvl_m)))
+        if i_stop < never and i_stop <= i_tgt and i_stop <= i_lvl:
+            s.status, s.closed, s.exit, s.r, s.reason = "loss", k + i_stop, s.stop, -1.0, "stop loss"
             return s
-        if hit_target:
-            r = 0.5 * half + 0.5 * reward if partial else reward
-            s.status, s.closed, s.exit, s.r = "win", k, s.target, round(float(r), 3)
+        if i_tgt < never and i_tgt <= i_lvl:
+            s.status, s.closed, s.exit = "win", k + i_tgt, s.target
+            s.r = round(float(0.5 * half + 0.5 * reward if partial else reward), 3)
             s.reason = (f"{tp_name} (50%) lalu TP2" if s.tp1 is not None else f"{tp_name} (50%) lalu target") if partial else "target"
+            if partial:
+                s.tp1_hit = k + i_tgt
             return s
-        if partial and not taken and k > s.opened and (h[k] >= level if d > 0 else l[k] <= level):
-            taken = True  # the stop at entry applies from the next bar (order inside this bar is unknown)
-        k += 1
-    if n > s.opened + hold:
-        k = s.opened + hold
-        rest = float((c[k] - s.entry) * d / risk)  # plain floats: results are serialised as JSON
-        s.status, s.closed, s.exit = "timeout", k, float(c[k])
-        s.r, s.reason = round(0.5 * half + 0.5 * rest if taken else rest, 3), "batas waktu, ditutup di harga pasar"
+        if i_lvl >= never:
+            return s  # still open
+        s.tp1_hit = k + i_lvl
+        k = s.tp1_hit + 1
+    else:
+        k = max(k, s.tp1_hit + 1)
+    lo, hi = l[k:end], h[k:end]
+    i_be, i_tgt = _first(hit(lo, hi, s.entry)), _first(reach(lo, hi, s.target))
+    if i_be is not None and (i_tgt is None or i_be <= i_tgt):
+        s.status, s.closed, s.exit, s.r = "win", k + i_be, s.entry, round(float(0.5 * half), 3)
+        s.reason = f"{tp_name} (50%), sisa ditutup di entry (BE)"
+    elif i_tgt is not None:
+        s.status, s.closed, s.exit, s.r = "win", k + i_tgt, s.target, round(float(0.5 * half + 0.5 * reward), 3)
+        s.reason = f"{tp_name} (50%) lalu TP2" if s.tp1 is not None else f"{tp_name} (50%) lalu target"
     return s
 
 
@@ -430,10 +472,10 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.nda
                         and (g.filled is None or g.filled > t)), None)
             if gap is not None:
                 top, bottom = gap.top, gap.bottom
-            stop = origin - p.sl_atr * atr_t if d > 0 else origin + p.sl_atr * atr_t
         else:
             gap = None
-            stop = bottom - p.sl_atr * atr_t if d > 0 else top + p.sl_atr * atr_t
+        # the stop sits on the ATR band beyond the area: its low − k × ATR (buy) / its high + k × ATR (sell)
+        stop = bottom - p.sl_atr * atr_t if d > 0 else top + p.sl_atr * atr_t
         entry = (top + bottom) / 2 if p.entry == "mid" else (top if d > 0 else bottom)
         if (entry - stop) * d <= 0:
             stop = entry - d * p.sl_atr * atr_t
@@ -560,15 +602,15 @@ MAX_LEVEL = 2  # search levels: 0 = base grid; while a pair stays below its goal
 
 
 def _grid(tf_key: str, level: int = 0):
-    """Settings the tuner tries — all follow the rule (every BOS / CHoCH traded from its FVG area, TP1 at the break's
-    extreme, TP2 beyond); only how is tuned: pivot lengths, entry in the area, stop distance, TP2 distance, expiry.
-    Level 1 adds more stops and TP2 distances and the area's edge; level 2 other pivot lengths and a shorter expiry
-    (54 → 360 → 900 settings)."""
+    """Settings the tuner tries — all follow the rule (every BOS / CHoCH traded from its FVG area, stop on the ATR
+    band, TP1 at the break's extreme, TP2 beyond, no time exit); only how is tuned: pivot lengths, entry in the
+    area, ATR band multiple, TP2 distance, expiry. Level 1 adds more band multiples and TP2 distances and the area's
+    edge; level 2 other pivot lengths and a shorter expiry (54 → 360 → 900 settings)."""
     base = default_params(tf_key)
     lengths = {(base.swing, base.internal), (max(4, base.swing - 4), base.internal), (base.swing + 4, base.internal + 1)}
-    stops, exts, entries, expiries = (0.25, 0.5, 1.0), (0.382, 0.618, 1.0), ("mid",), (base.expiry, base.expiry * 2)
-    if level >= 1:
-        stops, exts, entries = (0.1, 0.25, 0.5, 0.75, 1.0, 1.5), (0.272, 0.382, 0.618, 1.0, 1.618), ("mid", "edge")
+    stops, exts, entries, expiries = (2.0, 3.0, 3.5), (0.382, 0.618, 1.0), ("mid",), (base.expiry, base.expiry * 2)
+    if level >= 1:  # ATR band multiples and TP2 distances
+        stops, exts, entries = (1.5, 2.0, 2.5, 3.0, 3.5, 4.0), (0.272, 0.382, 0.618, 1.0, 1.618), ("mid", "edge")
     if level >= 2:
         lengths |= {(max(3, base.swing - 7), max(2, base.internal - 1)), (base.swing + 8, base.internal + 2)}
         expiries += (max(5, base.expiry // 2),)
@@ -725,7 +767,7 @@ def _db() -> sqlite3.Connection:
             _conn.execute("ALTER TABLE signals ADD COLUMN qualified INTEGER")
         for column, kind in (("quality", "REAL"), ("manage", "TEXT"), ("align", "REAL"), ("news", "REAL"), ("tp1", "REAL"),
                              ("origin", "REAL"), ("ext", "REAL"), ("zone_top", "REAL"), ("zone_bottom", "REAL"),
-                             ("ict", "TEXT")):
+                             ("ict", "TEXT"), ("tp1_t", "INTEGER")):
             if column not in _columns(_conn, "signals"):
                 _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
         if "level" not in _columns(_conn, "tracking"):
@@ -808,7 +850,7 @@ def _since(symbol: str, tf: str, now: int) -> int:
 
 SIGNAL_COLUMNS = ["id", "symbol", "market", "tf", "version", "direction", "kind", "scope", "created_t", "first_seen", "entry",
                   "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified",
-                  "quality", "manage", "align", "news", "tp1", "origin", "ext", "zone_top", "zone_bottom", "ict"]
+                  "quality", "manage", "align", "news", "tp1", "origin", "ext", "zone_top", "zone_bottom", "ict", "tp1_t"]
 
 
 def _sid(symbol: str, tf: str, s: Signal, t: int) -> str:
@@ -836,24 +878,41 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
     with _db_lock:
         db = _db()
         since = _since(inst.symbol, tf, now)
+        # recent rows, every row still waiting or running (the rule has no time exit, a trade can outlive the bars
+        # at hand) and every position that was still held when these bars begin
         existing = {row[0]: row for row in db.execute(
             "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified, quality, manage, align, news, "
-            "tp1, origin, ext, opened_t, closed_t "
+            "tp1, origin, ext, opened_t, closed_t, tp1_t "
             "FROM signals "
-            "WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, since - tf_sec * (p.expiry + p.hold)))}
-        # signals of an older parameter version keep their stored levels and are advanced on their own; with the
-        # positions they already took (closed rows are facts) they share the one-position rule with the new setting
-        olds, held = [], []
+            "WHERE symbol=? AND tf=? AND (created_t >= ? OR status IN ('pending', 'open') OR closed_t >= ?)",
+            (inst.symbol, tf, since - tf_sec * (p.expiry + max(p.hold, 0)), int(bars.time[0])))}
+        regenerated = {_sid(inst.symbol, tf, x, int(bars.time[x.created])) for x in sigs}
+        # Rows the active setting does not regenerate keep their stored levels and are advanced on their own:
+        # signals of an older setting version from their bar, running trades whose bar has left the window from
+        # where they stand (resumed). With the positions already taken (closed rows are facts) they share the
+        # one-position rule with the active setting.
+        olds, resumed, held = [], [], []
         bar = lambda t: int(np.searchsorted(bars.time, t))  # noqa: E731
         for (sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage, _a, _n,
-             tp1, origin, ext, opened_t, closed_t) in existing.values():
-            if ver == version:
+             tp1, origin, ext, opened_t, closed_t, tp1_t) in existing.values():
+            if ver == version and sid in regenerated:
                 continue
             if status in ("pending", "open") and created_t in index_of:
                 olds.append((sid, status, first_seen, ver, created_t, simulate(bars, Signal(
                     direction, "", "", index_of[created_t], entry, stop, target, manage=manage or "none", tp1=tp1,
                     origin=origin if tp1 is not None else None, ext=ext if tp1 is not None and origin is not None else None),
                     set(), p.expiry, p.hold)))
+            elif status == "open" and opened_t is not None:
+                start = bar(max(opened_t, tp1_t or 0) + 1)  # first bar after the fill / TP1 already processed
+                run = Signal(direction, "", "", -1, entry, stop, target, status="open", manage=manage or "none", tp1=tp1,
+                             opened=-1, tp1_hit=start - 1 if tp1_t is not None else None)
+                advance(bars, run, start, len(bars))
+                resumed.append((sid, status, run))
+                held.append((-1, run.closed if run.closed is not None else math.inf))
+            elif status == "pending" and int(bars.time[-1]) > created_t + tf_sec * p.expiry:
+                db.execute("UPDATE signals SET status='cancelled', closed_t=?, reason=?, updated=? WHERE id=?",
+                           (created_t + tf_sec * p.expiry, "kedaluwarsa tanpa entry", now, sid))
+                written += 1
             elif opened_t is not None and status in ("win", "loss", "timeout"):
                 held.append((bar(opened_t), bar(closed_t) if closed_t is not None else math.inf))
         one_at_a_time(sigs + [o[-1] for o in olds], held)
@@ -876,10 +935,18 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
             db.execute(insert, {**row, "id": sid, "ict": json.dumps(row["ict"])})
             written += 1
         for sid, status, first_seen, ver, created_t, s in olds:
-            if s.status != status:
+            if s.status != status or s.tp1_hit is not None:
                 row = _row(inst, tf, ver, s, bars, created_t, first_seen, p, tf_sec)
-                db.execute("UPDATE signals SET status=?, opened_t=?, closed_t=?, exit=?, r=?, reason=?, updated=? WHERE id=?",
-                           (row["status"], row["opened_t"], row["closed_t"], row["exit"], row["r"], row["reason"], now, sid))
+                db.execute("UPDATE signals SET status=?, opened_t=?, closed_t=?, exit=?, r=?, reason=?, tp1_t=?, updated=? "
+                           "WHERE id=?", (row["status"], row["opened_t"], row["closed_t"], row["exit"], row["r"], row["reason"],
+                                          row["tp1_t"], now, sid))
+                written += 1
+        at = lambda i: int(bars.time[i]) if i is not None and 0 <= i < len(bars) else None  # noqa: E731
+        for sid, status, run in resumed:  # only what happened after the bars it was last advanced on
+            if run.status != status or run.tp1_hit is not None:
+                db.execute("UPDATE signals SET status=?, closed_t=?, exit=?, r=?, reason=?, tp1_t=COALESCE(?, tp1_t), updated=? "
+                           "WHERE id=?", (run.status, at(run.closed), run.exit, run.r, run.reason or "",
+                                          at(run.tp1_hit), now, sid))
                 written += 1
         db.commit()
     return written
@@ -890,7 +957,7 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
     return {"symbol": inst.symbol, "market": inst.market, "tf": tf, "version": version, "direction": s.direction,
             "kind": s.kind, "scope": s.scope, "created_t": created_t, "first_seen": first_seen, "entry": s.entry,
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
-            "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason,
+            "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason, "tp1_t": t(s.tp1_hit),
             "updated": int(time.time()), "manage": s.manage, "align": s.align, "tp1": s.tp1, "origin": s.origin, "ext": s.ext,
             "zone_top": s.zone_top, "zone_bottom": s.zone_bottom, "ict": s.ict, "fromT": t(s.pivot), "level": s.level}
 
@@ -1234,6 +1301,30 @@ def _safe(fn):
         return None
 
 
+def contract(inst: instruments.Instrument) -> dict:
+    """instruments.contract_spec with, for a cross, the latest rate from the quote to the account currency (from
+    daily bars; None when unavailable — the app then shows money in the quote currency)."""
+    spec = instruments.contract_spec(inst)
+    if spec["convert"] == "cross":
+        spec["rate"] = _rate(spec["quote"], spec["account"])
+    return spec
+
+
+def _rate(quote: str, account: str) -> float | None:
+    for pair, invert in ((f"{quote}{account}", False), (f"{account}{quote}", True)):
+        found = instruments.find(pair)
+        if found is None:
+            continue
+        try:
+            b = market_data.cached(found, "1d") or market_data.load(found, "1d")
+        except Exception:  # noqa: BLE001 — no rate: money stays in the quote currency
+            continue
+        if b is not None and len(b) and float(b.close[-1]) > 0:
+            last = float(b.close[-1])
+            return 1.0 / last if invert else last
+    return None
+
+
 def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
     """Live training chart of one pair: the bars the tuner learns from (long history with a fresh tail), the
     structure the active setting sees, and its virtual trades — the journal's live rows replacing their
@@ -1265,7 +1356,7 @@ def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
         "params": asdict(p), "evidence": evidence(inst.symbol, tf),
         "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES],
         "split": split_t, "outOfSample": metrics([s for s in sigs if t[s.created] >= split_t]),
-        "live": _live_metrics(live), "trades": trades, "grades": grade_metrics(sigs),
+        "live": _live_metrics(live), "trades": trades, "grades": grade_metrics(sigs), "contract": contract(inst),
         "candles": [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]),
                      "c": float(bars.close[i])} for i in range(len(bars))],
         "smc": {"breaks": [{"kind": b.kind, "direction": word[b.direction], "level": b.level, "scope": b.scope,

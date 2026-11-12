@@ -238,7 +238,7 @@ def test_precision_modes_count_quality_stamped_when_the_signal_appeared(store):
 def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch):
     from types import SimpleNamespace
 
-    inst = SimpleNamespace(symbol="EURUSD", market="forex", yahoo="EURUSD=X", to_json=lambda: {"symbol": "EURUSD", "decimals": 5})
+    inst = SimpleNamespace(symbol="EURUSD", market="forex", asset_class="forex", yahoo="EURUSD=X", to_json=lambda: {"symbol": "EURUSD", "decimals": 5})
     b = bars([(1.0, 1.1, 0.9, 1.0)] * 100)
     early = training.simulate(b, sig(created=10, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
@@ -351,10 +351,10 @@ def test_fvg_rule_enters_at_the_gap_of_the_leg_tp1_follows_the_peak_then_break_e
     assert (p.zone, p.scope, p.target) == ("fvg", "both", "tp12")
     r = _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)])
     [s] = training.signals(b, training.replace(p, sl_atr=0.3), r)
-    assert s.entry == 100.0 and s.stop == pytest.approx(94.7)  # stop beyond the leg's origin, not beyond the gap
+    assert s.entry == 100.0 and s.stop == pytest.approx(98.7)  # the ATR band below the area: 99 − 0.3 × ATR (1)
     assert s.opened == 17 and s.tp1 == 107.0 and s.target == pytest.approx(107 + 0.618 * 12)
-    assert (s.status, s.closed, s.exit) == ("win", 19, 100.0)
-    assert s.r == pytest.approx(round(0.5 * 7 / 5.3, 3)) and s.reason.startswith("TP1 (50%)")
+    assert (s.status, s.closed, s.exit, s.tp1_hit) == ("win", 19, 100.0, 18)  # TP1 on bar 18, back to entry on 19
+    assert s.r == pytest.approx(round(0.5 * 7 / 1.3, 3)) and s.reason.startswith("TP1 (50%)")
 
 
 def test_fvg_rule_full_run_to_tp2_and_stop_before_tp1():
@@ -365,7 +365,7 @@ def test_fvg_rule_full_run_to_tp2_and_stop_before_tp1():
     [s] = training.signals(b, p, _bos(b, gaps))
     tp2 = 106 + 0.618 * 11
     assert (s.status, s.exit) == ("win", pytest.approx(tp2))
-    assert s.r == pytest.approx(round(0.5 * 6 / 5.3 + 0.5 * (tp2 - 100) / 5.3, 3)) and s.reason.endswith("TP2")
+    assert s.r == pytest.approx(round(0.5 * 6 / 1.3 + 0.5 * (tp2 - 100) / 1.3, 3)) and s.reason.endswith("TP2")
     b = _leg([(105, 105.5, 99.8, 100.5), (100.5, 101, 94, 94.5)])
     [s] = training.signals(b, p, _bos(b, gaps))
     assert (s.status, s.r) == ("loss", -1.0)
@@ -486,3 +486,77 @@ def test_live_journal_does_not_open_beside_a_position_of_an_older_setting(store,
     training.track(inst, "1h", b)
     status, reason = db.execute("SELECT status, reason FROM signals WHERE version=2").fetchone()
     assert (status, reason) == ("cancelled", "posisi lain masih berjalan")
+
+
+# ------------------------------------------------------------------ stop at the red mark, ATR band, no time exit
+
+def test_a_trade_ends_only_at_its_stop_or_targets():
+    # long 100, stop 95, TP1 105, TP2 110: drifts for 200 bars without touching either, then the stop
+    rows = [(100, 101, 99.5, 100)] + [(100.5, 101.5, 99.5, 100.5)] * 200 + [(99, 99.5, 94.9, 95.2)]
+    s = training.simulate(bars(rows), sig(created=-1, tp1=105.0), set(), expiry=5, hold=0)
+    assert (s.status, s.closed, s.exit, s.r) == ("loss", 201, 95.0, -1.0)  # no close at market after N bars
+    s = training.simulate(bars(rows[:150]), sig(created=-1, tp1=105.0), set(), expiry=5, hold=0)
+    assert s.status == "open" and s.closed is None
+    old = training.simulate(bars(rows), sig(created=-1, tp1=105.0), set(), expiry=5, hold=60)
+    assert old.status == "timeout"  # settings of earlier versions closed at market after `hold` bars
+
+
+def test_stop_only_when_price_reaches_it_and_break_even_after_tp1():
+    rows = [(100, 101, 99.5, 100), (100, 101, 95.01, 96), (96, 105.5, 96, 105), (105, 105.2, 99.9, 100.2)]
+    s = training.simulate(bars(rows), sig(created=-1, tp1=105.0), set(), expiry=5, hold=0)
+    # 95.01 is not the stop (95.00); TP1 on bar 2, back to entry on bar 3: break-even with half the TP1 profit
+    assert (s.status, s.tp1_hit, s.closed, s.exit, s.r) == ("win", 2, 3, 100.0, 0.5)
+    assert s.reason.endswith("(BE)")
+
+
+def test_stop_sits_on_the_atr_band_beyond_the_area():
+    from app import smc
+    b = _leg([(105, 105.5, 99.8, 100.5)])
+    p = training.default_params("1h")
+    assert (p.sl_atr, p.hold) == (3.0, 0) and p.follows_rule
+    [s] = training.signals(b, p, _bos(b, [smc.Gap(1, 101.0, 99.0, 13, 14)]))
+    assert s.stop == pytest.approx(99.0 - 3.0 * 1.0)  # FVG low − 3 × ATR (ATR is 1 in this fixture)
+    assert not training.replace(p, hold=60).follows_rule
+
+
+def test_live_journal_resumes_a_trade_older_than_its_bars(store, monkeypatch):
+    from types import SimpleNamespace
+    inst = SimpleNamespace(symbol="EURUSD", market="forex")
+    b = Bars(np.arange(100, 110, dtype=np.int64) * 3600, *(np.full(10, v) for v in (100.0, 101.0, 99.0, 100.0)),
+             np.zeros(10), 0.0)
+    b.low[6] = 94.0  # the stop is reached on bar 6 (time 106 h)
+    monkeypatch.setattr(training, "active", lambda s, tf: ("asset", 2, training.default_params(tf)))
+    monkeypatch.setattr(training, "signals", lambda *a, **k: [])
+    monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)
+    db = training._db()
+    training._since("EURUSD", "1h", 0)
+    db.execute("INSERT INTO signals(id, symbol, market, tf, version, direction, created_t, opened_t, entry, stop, target, "
+               "tp1, status, manage) VALUES ('run', 'EURUSD', 'forex', '1h', 2, 1, ?, ?, 100, 95, 110, 105, 'open', 'tp12')",
+               (10 * 3600, 20 * 3600))  # filled long before the bars at hand
+    training.track(inst, "1h", b)
+    assert db.execute("SELECT status, closed_t, exit, r FROM signals WHERE id='run'").fetchone() == ("loss", 106 * 3600, 95.0, -1.0)
+
+
+# ------------------------------------------------------------------ contract per lot (balance & lot inputs)
+
+@pytest.mark.parametrize("symbol,size,quote,account,convert", [
+    ("EURUSD", 100_000, "USD", "USD", "same"),
+    ("USDJPY", 100_000, "JPY", "USD", "per_price"),  # profit in yen, divided by the price
+    ("EURGBP", 100_000, "GBP", "USD", "cross"),
+    ("XAUUSD", 100, "USD", "USD", "same"),
+    ("BTCUSD", 1, "USD", "USD", "same"),
+    ("AAPL", 100, "USD", "USD", "same"),
+    ("BBCA", 100, "IDR", "IDR", "same"),  # 1 lot BEI = 100 lembar, account in rupiah
+])
+def test_contract_per_lot(symbol, size, quote, account, convert):
+    from app import instruments
+    spec = instruments.contract_spec(instruments.resolve(symbol))
+    assert (spec["size"], spec["quote"], spec["account"], spec["convert"]) == (size, quote, account, convert)
+
+
+def test_cross_rate_comes_from_the_pair_of_the_quote_currency(monkeypatch):
+    from app import instruments
+    closes = {"GBPUSD": 1.25, "USDJPY": 150.0}
+    monkeypatch.setattr(training.market_data, "cached", lambda inst, tf: bars([(1, 1, 1, closes[inst.symbol])]))
+    assert training.contract(instruments.resolve("EURGBP"))["rate"] == 1.25  # GBP → USD
+    assert training.contract(instruments.resolve("EURJPY"))["rate"] == pytest.approx(1 / 150.0)  # JPY → USD

@@ -3,6 +3,7 @@
 // journal, upgrade log, live chart of virtual trades). Data: /api/training/asset, /summary and /chart.
 import { api, esc, fmtPrice } from './util.js';
 import { SmcChart } from './smc-chart.js';
+import { accountInputs, accountLine, accountStats, effectiveSpec, fmtMoney, tradeMoney } from './account.js';
 
 const STATUS = {
   pending: ['MENUNGGU ENTRY', 'neu'], open: ['POSISI TERBUKA', 'bull'], win: ['PROFIT ✔', 'bull'], loss: ['LOSS ✘', 'bear'],
@@ -13,7 +14,8 @@ const SOURCE = { asset: ['UPGRADE ASET', 'bull'], group: ['PARAMETER GRUP', 'inf
 const CONFLUENCE = { sweep: 'wajib sweep likuiditas', fvg: 'wajib FVG', both: 'wajib sweep + FVG' };
 const SCOPE = { both: 'swing + internal', swing: 'swing', internal: 'internal' };
 const ruleText = (p) => `pivot ${p.swing}/${p.internal} · semua BOS/CHoCH (tanpa skip) · area FVG (tanpa FVG: order block) entry ${p.entry}
-  · SL ${p.sl_atr}×ATR · TP1 puncak BOS/CHoCH (50%, lalu SL ke entry) · TP2 +${p.ext}× leg · kedaluwarsa ${p.expiry} bar`;
+  · SL ATR band ${p.sl_atr}× · TP1 puncak BOS/CHoCH (50%, lalu SL ke entry) · TP2 +${p.ext}× leg${p.hold > 0 ? ` · tutup paksa ${p.hold} bar` : ' · tanpa batas waktu'}
+  · order kedaluwarsa ${p.expiry} bar`;
 // settings of earlier versions still appear in the upgrade log
 const legacyText = (p) => `versi lama · pivot ${p.swing}/${p.internal} · ${SCOPE[p.scope] || p.scope} ${p.kinds === 'CHoCH' ? 'CHoCH saja' : 'BOS+CHoCH'} · entry ${p.entry} · SL ${p.sl_atr}×ATR · ${p.target === 'liq' ? 'TP likuiditas' : `TP ${p.rr}R`}${p.manage === 'partial' ? ' · TP1 50% di +1R lalu SL ke entry' : ''}${CONFLUENCE[p.confluence] ? ` · ${CONFLUENCE[p.confluence]}` : ''}${p.pd_filter ? ' · premium/discount' : ''}${p.trend_filter ? ' · searah tren' : ''}`;
 const paramText = (p) => (p.target === 'tp12' && p.zone === 'fvg' ? ruleText(p) : legacyText(p));
@@ -190,11 +192,20 @@ const dateText = (t, tf) => new Date(t * 1000).toLocaleString('id-ID', TF_SECOND
   ? { day: '2-digit', month: 'short', year: 'numeric' } : { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // A trade as it looked at time T of a replay (null = its signal has not appeared yet).
+/** Closed trades get their money label for the chart (`spec` from account.effectiveSpec). */
+function moneyLabels(trades, spec, lot) {
+  if (!spec) return trades;
+  return trades.map((t) => {
+    const m = tradeMoney(t, spec, lot);
+    return m == null ? t : { ...t, money: fmtMoney(m, spec.account, true) };
+  });
+}
+
 function tradeAt(s, T) {
   if (s.created_t > T) return null;
   if (s.closed_t != null && s.closed_t <= T) return s;
-  if (s.status === 'cancelled' || !s.opened_t || s.opened_t > T) return { ...s, status: 'pending', opened_t: null, closed_t: null, r: null };
-  return { ...s, status: 'open', closed_t: null, r: null };
+  if (s.status === 'cancelled' || !s.opened_t || s.opened_t > T) return { ...s, status: 'pending', opened_t: null, closed_t: null, r: null, exit: null, tp1_t: null, money: null };
+  return { ...s, status: 'open', closed_t: null, r: null, exit: null, money: null, tp1_t: s.tp1_t != null && s.tp1_t <= T ? s.tp1_t : null };
 }
 const clock = (d) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\./g, ':');
 
@@ -212,6 +223,7 @@ function mountTrainingChart(el) {
         <button class="tr-end hidden" title="Langsung ke akhir replay">⏭</button>
         <button class="tr-stop hidden" title="Hentikan replay, kembali ke chart live">■ LIVE</button>
       </span>
+      <span class="tr-acct-host"></span>
       <span class="tr-live-info"></span>
     </div>
     <div class="chart-shell tr-live-chart"><div class="chart-host"></div><div class="chart-live"></div><div class="chart-replay hidden"></div></div>
@@ -222,6 +234,15 @@ function mountTrainingChart(el) {
   let replay = null;  // { full, i, start, playing, acc, last, raf }
   const visible = () => el.offsetParent !== null && !document.hidden;
   const save = () => saveChartPrefs({ ...prefs, symbol: current?.symbol, tf: current?.tf });
+  // virtual account: balance & lot → money per trade (the trades themselves do not change)
+  const acct = accountInputs(() => refreshMoney());
+  $('.tr-acct-host').append(acct.el);
+  const spec = () => effectiveSpec(chartData?.contract);
+  const withMoney = (trades) => moneyLabels(trades, spec(), acct.lot());
+  const refreshMoney = () => {
+    if (replay) showReplay();
+    else if (chartData && chart) { chart.setTrades({ ...chartData, trades: withMoney(chartData.trades) }); render(); }
+  };
   const syncButtons = () => {
     $('.tr-follow').classList.toggle('active', prefs.follow);
     $('.tr-smc').classList.toggle('active', prefs.smc);
@@ -279,7 +300,7 @@ function mountTrainingChart(el) {
     const { full, i, start } = replay;
     const T = full.candles[i - 1].t;
     chart.until = T;
-    chart.setTrades({ ...full, trades: full.trades.map((s) => tradeAt(s, T)).filter(Boolean) });
+    chart.setTrades({ ...full, trades: withMoney(full.trades.map((s) => tradeAt(s, T)).filter(Boolean)) });
     const from = full.candles[start].t;
     const done = full.trades.filter((s) => s.created_t >= from && s.closed_t != null && s.closed_t <= T && ['win', 'loss', 'timeout'].includes(s.status));
     const wins = done.filter((s) => s.r > 0).length;
@@ -292,6 +313,7 @@ function mountTrainingChart(el) {
       <div class="rp-stats"><span>selesai <b>${done.length}</b></span><span class="up">✔ ${wins}</span><span class="down">✘ ${done.length - wins}</span>
         <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
         <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span><span class="dim">aktif ${active}</span></div>
+      ${spec() ? `<div class="rp-note">${accountLine(accountStats(done, spec(), acct.balance(), acct.lot()), spec(), acct.lot())}</div>` : ''}
       <div class="dim rp-note">data uji: tidak dipakai saat melatih · hasil = backtest yang diputar ulang, bukan trade live</div>`;
   }
 
@@ -350,7 +372,8 @@ function mountTrainingChart(el) {
       if (my !== seq || replay) return;
       chartData = t;
       chart.setData({ ...t, candles: t.candles.map((c) => ({ ...c })) }, { keepRange });
-      chart.setTrades(t);
+      acct.market(t.instrument?.market);
+      chart.setTrades({ ...t, trades: withMoney(t.trades) });
       if (!keepRange) liveState = null;
       render();
       pollLive();
@@ -403,6 +426,7 @@ function mountTrainingChart(el) {
       <span>LIVE: <b>${pct(t.live?.winRate)}</b> dari ${t.live?.trades ?? 0} selesai · ${live.length} sinyal tercatat</span>
       <span>AKTIF: ${open.length}</span>
       ${gradeLine(t.grades)}
+      ${spec() ? accountLine(accountStats(t.trades, spec(), acct.balance(), acct.lot()), spec(), acct.lot()) : ''}
       <span class="tr-legend"><i class="lg-tp"></i>zona TP <i class="lg-sl"></i>zona SL <i class="lg-1r"></i>TP1 puncak / TP2 <i class="lg-live"></i>LIVE <i class="lg-is"></i>data latih (redup)</span>`;
   }
 
@@ -512,6 +536,7 @@ function mountTrainingLab(el) {
         <span class="dim lab-hint"></span></div>
       <div class="lab-row lab-improve-row"><span></span><label class="check" title="Selama belum mencapai target, training maju diulang dengan pencarian SMC yang makin luas (54 → 900 kombinasi) dan hasil terbaik dipakai; berhenti bila target tercapai atau pencarian lebih luas tidak membantu lagi. 20% candle terakhir dikunci untuk ujian akhir.">
         <input type="checkbox" class="lab-improve"> TERUS PERBAIKI SAMPAI TARGET 99% — ulang dengan pencarian SMC makin luas, lalu ujian akhir di 20% candle terakhir</label></div>
+      <div class="lab-row"><span>AKUN</span><span class="lab-acct-host"></span><span class="dim">uang per trade = R × jarak stop × lot × ukuran kontrak</span></div>
       <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
       <div class="tr-progress lab-progress"><i></i><span></span></div>
       <div class="lab-current"></div>
@@ -536,6 +561,10 @@ function mountTrainingLab(el) {
       </div>
     </div>`;
   const $ = (q) => el.querySelector(q);
+  // virtual account of the live training chart (shared with LIVE CHART through account.js)
+  const acct = accountInputs(() => { if (play) drawPlay(); });
+  $('.lab-acct-host').append(acct.el);
+  const labSpec = () => effectiveSpec(sess?.contract);
   let status = null, summary = null, timer = null, assets = new Map();
   // live session player
   let sess = null, chart = null, play = null;
@@ -552,6 +581,7 @@ function mountTrainingLab(el) {
     $('.lab-asset-note').textContent = single() ? 'training live 1 aset × 1 timeframe, tampil di chart' : 'semua aset pasar terpilih (batch, tanpa chart)';
     $('.lab-improve-row').classList.toggle('hidden', !single());
     $('.lab-improve').checked = prefs.improve;
+    if (prefs.markets.length === 1) acct.market(prefs.markets[0]);  // balance currency & lot of the chosen market
   };
 
   async function loadAssets() {
@@ -675,7 +705,8 @@ function mountTrainingLab(el) {
     const T = data.candles[i - 1].t;
     const trades = (sess?.trades || []);
     chart.until = T;
-    chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: trades.map((t) => tradeAt(t, T)).filter(Boolean) });
+    acct.market(sess?.instrument?.market);
+    chart.setTrades({ split: sess?.exam?.fromT ?? null, trades: moneyLabels(trades.map((t) => tradeAt(t, T)).filter(Boolean), labSpec(), acct.lot()) });
     const done = trades.filter((t) => t.closed_t != null && t.closed_t <= T && ['win', 'loss', 'timeout'].includes(t.status));
     const wins = done.filter((t) => t.r > 0).length;
     const total = done.reduce((a, t) => a + (t.r || 0), 0);
@@ -692,6 +723,7 @@ function mountTrainingLab(el) {
         <span>win <b class="${done.length ? (wins / done.length >= 0.5 ? 'up' : 'down') : ''}">${done.length ? pct(wins / done.length) : '–'}</b></span>
         <span class="${total > 0 ? 'up' : total < 0 ? 'down' : ''}">${total > 0 ? '+' : ''}${total.toFixed(2)}R</span></div>
       ${sess?.grades ? `<div class="rp-note">${gradeLine(sess.grades)}</div>` : ''}
+      ${labSpec() ? `<div class="rp-note">${accountLine(accountStats(done, labSpec(), acct.balance(), acct.lot()), labSpec(), acct.lot())}</div>` : ''}
       ${sess?.improve && sess.rounds?.length ? `<div class="rp-note">Putaran ${sess.rounds[sess.rounds.length - 1].round} · terbaik putaran
         ${sess.rounds.find((r) => r.best)?.round ?? '–'} (${pct(sess.rounds.find((r) => r.best)?.winRate)})${sess.exam ? ` · <b>UJIAN AKHIR ${pct(sess.exam.stats.winRate)}</b> dari ${sess.exam.stats.trades} trade${thin(sess.exam.stats.trades)}` : ''}
         · target ${Math.round((sess.goal || 0.99) * 100)}% ${sess.reached ? '<span class="up">tercapai</span>' : '<span class="flat">belum tercapai</span>'}</div>` : ''}

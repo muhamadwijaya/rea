@@ -65,7 +65,7 @@ def bounds(n: int, segments: int = SEGMENTS) -> list[tuple[int, int]]:
 
 def _trade(b: Bars, s: training.Signal, version: int, segment: int, tf_sec: int, p: training.Params, exam: bool = False) -> dict:
     t = lambda i: int(b.time[i]) if i is not None and i < len(b) else None  # noqa: E731
-    return {"created_t": t(s.created), "opened_t": t(s.opened), "closed_t": t(s.closed),
+    return {"created_t": t(s.created), "opened_t": t(s.opened), "closed_t": t(s.closed), "tp1_t": t(s.tp1_hit),
             "expiry_t": int(b.time[s.created]) + tf_sec * p.expiry, "direction": s.direction, "kind": s.kind,
             "scope": s.scope, "entry": s.entry, "stop": s.stop, "target": s.target, "tp1": s.tp1, "status": s.status,
             "r": s.r, "exit": s.exit, "reason": s.reason, "fromT": t(s.pivot), "level": s.level, "manage": s.manage,
@@ -199,9 +199,10 @@ def _run(inst, tf: str, n: int, improve: bool) -> None:
         if len(b) < MIN_BARS:
             raise training.LabInvalid(f"Riwayat {inst.symbol} {tf} terlalu pendek ({0 if b is None else len(b)} candle).")
         align = training.htf_alignment(inst, tf, b, download=True)
+        spec = training.contract(inst)  # what one lot is, for the balance / lot inputs
         with _lock:
             _bars = b
-            _s.update(state="running", total=len(b))
+            _s.update(state="running", total=len(b), contract=spec)
         level = 0
         if not improve:
             _set(stage="training maju dari candle terlama")

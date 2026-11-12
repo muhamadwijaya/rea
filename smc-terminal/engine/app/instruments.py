@@ -213,3 +213,43 @@ def resolve(query: str) -> Instrument:
 
     tv = f"{exchange}:{ticker}" if exchange else ticker
     return Instrument(ticker, ticker, ticker.replace(".", "-"), tv, "us")
+
+
+# ------------------------------------------------------------------ contract per lot (virtual account)
+
+# Units per lot of the usual CFD / exchange conventions; prices of grains, coffee and sugar futures are in US cents.
+LOT_UNITS = {"XAUUSD": (100, "oz"), "XAGUSD": (5000, "oz"), "XPTUSD": (100, "oz"), "XPDUSD": (100, "oz"),
+             "USOIL": (1000, "barel"), "UKOIL": (1000, "barel"), "NATGAS": (10000, "MMBtu"), "COPPER": (25000, "lb"),
+             "CORN": (5000, "bushel"), "WHEAT": (5000, "bushel"), "SOYBEAN": (5000, "bushel"), "COFFEE": (37500, "lb"),
+             "SUGAR": (112000, "lb"), "COCOA": (10, "ton")}
+PRICED_IN_CENTS = {"CORN", "WHEAT", "SOYBEAN", "COFFEE", "SUGAR"}
+
+
+def contract_spec(inst: Instrument) -> dict:
+    """What one lot is and how its profit reaches the account currency: `size` units of `unit`, prices in `quote`,
+    account in USD (IDR for Indonesian stocks). `convert`: "same" (quote is the account currency), "cents" (× 0.01),
+    "per_price" (a USD-based pair: divide by the price), "cross" (needs a rate quote → account)."""
+    symbol, cls = inst.symbol.upper(), inst.asset_class
+    base = None
+    if cls == "forex" and len(symbol) == 6:
+        base, quote, size, unit = symbol[:3], symbol[3:], 100_000, symbol[:3]
+    elif symbol in LOT_UNITS:
+        (size, unit), quote = LOT_UNITS[symbol], ("USX" if symbol in PRICED_IN_CENTS else "USD")
+    elif cls == "crypto":
+        size, unit, quote = 1, symbol[:-3] if symbol.endswith("USD") else symbol, "USD"
+    elif cls == "idx":
+        size, unit, quote = 100, "lembar", "IDR"  # 1 lot BEI = 100 lembar
+    elif cls == "us":
+        size, unit, quote = 100, "lembar", "USD"
+    else:  # indices: one currency unit per point per lot
+        size, unit, quote = 1, "poin", "IDR" if inst.market == "saham-idx" else "USD"
+    account = "IDR" if inst.market == "saham-idx" else "USD"
+    if quote == account:
+        convert = "same"
+    elif quote == "USX" and account == "USD":
+        convert = "cents"
+    elif base == account:
+        convert = "per_price"
+    else:
+        convert = "cross"
+    return {"size": size, "unit": unit, "quote": quote, "account": account, "convert": convert}

@@ -176,10 +176,29 @@ Setiap aset inti (TF 15M/1H/4H/1D) dan seluruh universe (TF 1D) dipantau. Strate
 sampai saat itu) — **aturan SMC BOS/CHoCH → area BUY/SELL, tanpa skip**: setiap BOS atau CHoCH, baik **swing
 (besar)** maupun **internal (kecil)**, langsung menjadi setup ke arah break-nya — bullish = **AREA BUY**, bearish =
 **AREA SELL**. Area = **FVG** di leg yang mematahkan struktur (FVG yang sudah tertutup sebelum break tidak dipakai);
-bila leg tidak punya FVG terbuka, area = order block leg itu. Entry limit di area (tengah), stop di balik awal leg ±
-ATR, **TP1 = puncak BOS/CHoCH** (high tertinggi leg bullish / low terendah leg bearish) dan **TP2 = lanjutan** di luar
+bila leg tidak punya FVG terbuka, area = order block leg itu. Entry limit di area (tengah), **stop di ATR band**:
+low area − k × ATR(14) untuk BUY, high area + k × ATR untuk SELL (k default 3), **TP1 = puncak BOS/CHoCH** (high tertinggi leg bullish / low terendah leg bearish) dan **TP2 = lanjutan** di luar
 puncak (0,618 atau 1× panjang leg). Di TP1 50% ditutup dan stop pindah ke entry; sisanya ke TP2. Selama belum entry,
 TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati — reward kecil pun tetap diambil.
+
+- **Stop loss = ujung tanda merah** (v3.16): trade hanya selesai di **SL** (harga menyentuh garis stop), **TP2**, atau
+  **BE** (setelah TP1, sisa posisi kembali ke entry). Tidak ada lagi penutupan paksa setelah 60 candle — itu yang dulu
+  membuat trade "selesai merah" padahal harga belum sampai ujung zona merah (2.653 dari 16.371 trade v3.15). Di chart,
+  zona merah berakhir saat TP1 kena, lalu garis putus-putus merah di entry menunjukkan SL yang sudah pindah ke BE;
+  titik di ujung kotak menandai harga keluar sebenarnya (merah = SL, putih = BE, hijau = TP). Trade live yang lebih
+  lama dari jendela candle analisa dilanjutkan dari posisinya terakhir (termasuk status TP1).
+- **Stop ATR band** (konvensi indikator "ATR Stop Loss Finder": low − k × ATR / high + k × ATR, dihitung dari tepi
+  area entry). Terukur (57 aset × 15M/1H/4H/1D, tanpa batas waktu): k = 1 → win 35,4% (+0,008R); 1,5 → 42,4%
+  (+0,021R); 2 → 47,8% (+0,029R); 2,5 → 51,8% (+0,025R); **3 → 55,9% (+0,031R, default)**; 3,5 → 59,0% (+0,030R).
+  Pembanding v3.15 (stop di asal leg, tutup paksa 60 candle): 46,5% (+0,044R). Stop lebih lebar menaikkan win rate
+  tetapi risiko per trade dalam uang juga lebih besar. AI menyetel k per aset (1,5–4).
+- **BALANCE & LOT** (LIVE CHART dan TRAINING LAB): isi saldo awal dan lot per trade → setiap trade menampilkan hasil
+  dalam uang (mis. *TP +1,65R ✔ +$365,59*) dan ringkasan AKUN: saldo awal → akhir, profit, max drawdown, risiko
+  rata-rata per trade, dan peringatan bila akun habis. Uang = R × jarak stop × lot × ukuran kontrak × kurs. Ukuran 1
+  lot: forex 100.000 unit mata uang dasar, XAUUSD 100 oz, XAGUSD 5.000 oz, minyak 1.000 barel, saham AS & IDX 100
+  lembar, kripto 1 koin, indeks 1 per poin; komoditas pertanian dikutip dalam sen. Akun dalam USD (saham IDX: Rupiah);
+  pasangan dengan USD di depan (USDJPY) dikonversi dengan harga keluar, pasangan silang (EURGBP, EURJPY) dengan kurs
+  harian terbaru — perkiraan. Saldo & lot tersimpan per pengguna (per pasar) dan sama di kedua tab.
 
 - **Aturan dikunci**: AI/tuner hanya menyetel *cara* (panjang pivot, entry di tengah/tepi area, jarak stop, jarak TP2,
   kedaluwarsa), tidak pernah *memilih* break — tidak ada filter yang melewati BOS/CHoCH. Setting versi lama yang
@@ -227,8 +246,9 @@ TP1 ikut puncak baru bila leg masih berlanjut. Tidak ada break yang dilewati —
   dalam satu candle tidak diketahui). Berlaku di backtest, tuning, training live (lintas setting) dan jurnal live.
   Terukur (57 aset × 15M–1D): 16.850 entry tumpang tindih diblok; 32.070 trade, win 41,8%, +0,078R/trade (sebelumnya
   48.901 trade tumpang tindih, win 41,4%, +0,060R).
-- **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
-  dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
+- **Eksekusi virtual** saat harga menyentuh entry → PROFIT (TP2, atau TP1 lalu BE) / LOSS (harga menyentuh stop; bila
+  satu bar menyentuh stop dan target dihitung LOSS). Tanpa batas waktu (setting versi lama: ditutup waktu). Hasil
+  dalam R; dicatat di `training.db` (SQLite) di folder data.
 - **Timeframe 5M sampai mingguan**: setiap aset dilatih terpisah di 5M, 15M, 1H, 4H, 1D dan 1W — tiap timeframe punya
   parameter, bukti dan sinyalnya sendiri.
 - **TRAINING LAB** (tab di halaman AI Training): pilih pasar (FOREX / SAHAM AS / SAHAM IDX / KRIPTO, satu, beberapa atau

@@ -7,6 +7,13 @@ const C = {
   text: '#c9d6e6', dim: '#5d7896', grid: 'rgba(21, 76, 124, .35)', bg: '#001b33',
 };
 
+/** How a closed trade ended: SL (the stop itself), BE (TP1, then back to entry), TP (TP2 / target), WAKTU (time). */
+const exitKind = (s) => {
+  if (s.status === 'loss') return 'SL';
+  if (s.status === 'timeout') return 'WAKTU';
+  if (s.status === 'win' && s.exit != null && Math.abs(s.exit - s.entry) <= Math.abs(s.entry) * 1e-12) return 'BE';
+  return s.status === 'win' ? 'TP' : '';
+};
 const rgba = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
@@ -254,7 +261,7 @@ export class SmcChart {
         const end = Math.min(right, Math.max(x2, x1 + 60));  // a signal of the last candle still shows its levels
         ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
         const y1 = s.tp1 != null ? Y(s.tp1) : null;
-        const lines = [[yE, C.blue, `${s.direction > 0 ? 'BUY' : 'SELL'} LIMIT${s.live ? ' · LIVE' : ''}`], [yS, C.bear, 'SL'],
+        const lines = [[yE, C.blue, `${s.direction > 0 ? 'BUY' : 'SELL'} LIMIT${s.live ? ' · LIVE' : ''}`], [yS, C.bear, s.tp1 != null ? 'SL · ATR band' : 'SL'],
           ...(y1 !== null ? [[y1, C.bull, 'TP1 puncak BOS/CHoCH'], [yT, C.bull, 'TP2']] : [[yT, C.bull, 'TP']])];
         for (const [y, c, tag] of lines) {
           ctx.strokeStyle = rgba(c, 0.9); ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(end, y); ctx.stroke();
@@ -265,15 +272,25 @@ export class SmcChart {
         ctx.setLineDash([]);
         continue;
       }
+      // the red zone runs to the stop until TP1; from TP1 on the stop sits at entry (break-even), drawn as a line
+      const xt = s.tp1_t != null ? X(s.tp1_t) : null;
+      const xb = xt !== null ? Math.min(x2, Math.max(x1 + 1, xt)) : x2;
       ctx.fillStyle = rgba(C.bull, 0.16 * faint); ctx.fillRect(x1, Math.min(yE, yT), x2 - x1, Math.abs(yT - yE));
-      ctx.fillStyle = rgba(C.bear, 0.16 * faint); ctx.fillRect(x1, Math.min(yE, yS), x2 - x1, Math.abs(yS - yE));
+      ctx.fillStyle = rgba(C.bear, 0.16 * faint); ctx.fillRect(x1, Math.min(yE, yS), xb - x1, Math.abs(yS - yE));
       const color = s.status === 'open' ? C.blue : s.r > 0 ? C.bull : s.r < 0 ? C.bear : C.neu;
       const top = Math.min(yE, yS, yT), bottom = Math.max(yE, yS, yT);
       ctx.strokeStyle = s.live ? '#99ff00' : rgba(color, 0.75 * faint);
       ctx.lineWidth = s.live ? 1.6 : 1;
-      ctx.strokeRect(x1 + 0.5, top + 0.5, x2 - x1 - 1, bottom - top - 1);
+      ctx.strokeRect(x1 + 0.5, Math.min(yE, yT) + 0.5, x2 - x1 - 1, Math.abs(yT - yE) - 1);
+      ctx.strokeRect(x1 + 0.5, Math.min(yE, yS) + 0.5, xb - x1 - 1, Math.abs(yS - yE) - 1);
+      ctx.strokeStyle = rgba(C.bear, 0.95 * faint); ctx.lineWidth = 1.4;  // the stop itself: a loss only here
+      ctx.beginPath(); ctx.moveTo(x1, yS); ctx.lineTo(xb, yS); ctx.stroke();
       ctx.strokeStyle = rgba(C.text, 0.55 * faint); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x1, yE); ctx.lineTo(x2, yE); ctx.stroke();
+      if (xb < x2) {  // stop moved to entry after TP1
+        ctx.setLineDash([3, 3]); ctx.strokeStyle = rgba(C.bear, 0.9 * faint); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(xb, yE); ctx.lineTo(x2, yE); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+      }
       if (s.tp1 != null) {  // TP1 at the BOS / CHoCH extreme: half closes here, the rest runs to TP2
         const y1 = Y(s.tp1);
         if (y1 !== null) {
@@ -297,7 +314,13 @@ export class SmcChart {
       if (s.direction > 0) { ctx.moveTo(x1, yE + 1); ctx.lineTo(x1 - 4, yE + 8); ctx.lineTo(x1 + 4, yE + 8); }
       else { ctx.moveTo(x1, yE - 1); ctx.lineTo(x1 - 4, yE - 8); ctx.lineTo(x1 + 4, yE - 8); }
       ctx.fill();
-      const label = s.status === 'open' ? 'OPEN' : `${s.r > 0 ? '+' : ''}${(s.r ?? 0).toFixed(2)}R ${s.r > 0 ? '✔' : '✘'}`;
+      const how = exitKind(s);
+      const dot = (x, y, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fill(); };
+      if (xt !== null && s.tp1 != null && Y(s.tp1) !== null) dot(xb, Y(s.tp1), rgba(C.bull, faint));  // TP1 reached
+      const yX = s.exit != null && s.closed_t ? Y(s.exit) : null;  // where it really closed: SL on the red line
+      if (yX !== null) dot(x2, yX, rgba(how === 'SL' ? C.bear : how === 'BE' ? C.text : how === 'WAKTU' ? C.neu : C.bull, faint));
+      const label = s.status === 'open' ? (s.tp1_t ? 'OPEN · BE' : 'OPEN')
+        : `${how} ${s.r > 0 ? '+' : ''}${(s.r ?? 0).toFixed(2)}R ${s.r > 0 ? '✔' : '✘'}${s.money != null ? ` ${s.money}` : ''}`;
       const text = s.live ? `${label} LIVE` : label;
       const lw = text.length * 6.2, ly = top - 7 < 8 ? bottom + 8 : top - 7;
       const lx = x2 + 3 + lw < right ? x2 + 3 : Math.max(0, x1 - 3 - lw);  // keep clear of the price axis

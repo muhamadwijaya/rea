@@ -25,7 +25,7 @@ def fake_env(monkeypatch):
     c = np.ones(n)
     b = Bars(t, c, c + 0.1, c - 0.1, c, np.zeros(n), 0.0)
     learned, saved = [], []
-    inst = SimpleNamespace(symbol="EURUSD", market="forex", to_json=lambda: {"symbol": "EURUSD", "decimals": 5})
+    inst = SimpleNamespace(symbol="EURUSD", market="forex", asset_class="forex", to_json=lambda: {"symbol": "EURUSD", "decimals": 5})
     monkeypatch.setattr(session.instruments, "resolve", lambda s: inst)
     monkeypatch.setattr(training, "history", lambda i, tf, bars=None: b)
     monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)
