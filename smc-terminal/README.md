@@ -187,6 +187,35 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   harga close menembus stop, atau kedaluwarsa (mis. 30 bar).
 - **Eksekusi virtual** saat harga menyentuh entry → PROFIT (target) / LOSS (stop; bila satu bar menyentuh keduanya
   dihitung LOSS) / ditutup waktu. Hasil dalam R; dicatat di `training.db` (SQLite) di folder data.
+- **Timeframe 5M sampai mingguan**: setiap aset dilatih terpisah di 5M, 15M, 1H, 4H, 1D dan 1W — tiap timeframe punya
+  parameter, bukti dan sinyalnya sendiri.
+- **TRAINING LAB** (tab di halaman AI Training): pilih pasar (FOREX / SAHAM AS / SAHAM IDX / KRIPTO, satu, beberapa atau
+  semua), timeframe (5M–1W, satu, beberapa atau semua) dan jumlah candle (200–20.000; dibatasi riwayat Yahoo: 5M/15M
+  ±60 hari, 1H/4H ±730 hari, 1D/1W seluruh riwayat), lalu MULAI. Training berjalan di engine secepat CPU — tidak menunggu
+  waktu pasar (contoh: FOREX × 5M, 17 aset × 3.000 candle selesai 57 detik) — dengan progres, aset yang sedang dilatih,
+  hasil per pasar × timeframe, dan tombol STOP. Training otomatis di latar berhenti sementara selama lab berjalan. Di LIVE
+  CHART, IKUTI TRAINING menampilkan aset yang sedang dilatih (dengan jumlah candle lab) dan REPLAY ×1–×7 memutarnya.
+- **Kamus trade**: setiap trade dari setting aktif tiap aset & timeframe disimpan permanen (tabel `patterns`) bersama
+  kondisi saat sinyal muncul. Baris di luar jendela riwayat terbaru tetap disimpan, jadi kamus terus bertambah (mis. trade
+  5M lebih lama dari 60 hari Yahoo).
+- **Multi-timeframe**: untuk setiap trade dicatat tren swing dua timeframe di atasnya *saat itu* (hanya candle TF tinggi
+  yang sudah tutup — tanpa melihat masa depan). Tabel MULTI TIMEFRAME menunjukkan win rate data uji saat TF tinggi searah,
+  campuran atau berlawanan — itulah persentase gabungan multi-timeframe yang terukur. Tuner juga mencoba filter "hanya
+  searah TF tinggi". Kartu PLAN menunjukkan arah tiap timeframe saat ini (▲/▼ per TF dan persentase naik vs turun);
+  sinyal tetap per timeframe.
+- **Mode EXPERT** (di samping SANGAT KETAT): hanya trade dari setting yang sudah terbukti **dan** searah dengan dua
+  timeframe di atasnya — eksekusi difokuskan ke arah yang dominan di multi-timeframe.
+- **Pemicu 1M**: pola candlestick di bar 1 menit (engulfing, pin bar, morning/evening star, three soldiers/crows) sebagai
+  pemicu awal, masing-masing dengan rekam jejaknya **di aset itu** (±7 hari data 1 menit: seberapa sering harga bergerak
+  searah dalam 15 menit). Uji 12 Nov: NVDA three white soldiers 47% dari 102, BTC three black crows 47% dari 267, BBCA
+  morning star 19% dari 48 — pola candlestick 1 menit sendirian kira-kira untung-untungan, jadi dipakai sebagai pemicu
+  bersama SMC, bukan sinyal sendiri. Data 1 menit gratis untuk **forex** hanya satu harga per menit (tanpa OHLC), jadi
+  untuk forex aplikasi menyebutkan bahwa pola tidak bisa dibaca.
+- **Berita & kalender di sinyal**: setiap sinyal live mencatat sentimen berita aset itu 24 jam terakhir (searah /
+  berlawanan) saat muncul. Kartu PLAN menampilkan rilis kalender ekonomi 7 hari ke depan yang menggerakkan aset itu:
+  konsensus (forecast vs sebelumnya) dan arah aset bila actual di atas / di bawah forecast. Forecast adalah perkiraan
+  nyata pasar sebelum rilis; sisi mana yang terjadi tidak ditebak — AI menimbangnya bersama berita. Data berita historis
+  tidak tersedia untuk backtest, jadi faktor berita diukur dari trade live.
 - **Riwayat panjang untuk pelatihan**: tuner belajar dari 10 tahun bar harian, 730 hari bar 1 jam / 4 jam (batas Yahoo)
   dan 60 hari bar 15 menit (maks. 6.000 bar), dengan bar terbaru dari analisa sebagai ujungnya. Bukti out-of-sample per
   aset jadi beberapa kali lebih banyak (uji 474 pasangan: 922 → 2.545 trade uji). Riwayat ini disimpan di cache terbatas
@@ -211,7 +240,7 @@ OB ± ATR, target = likuiditas impuls atau RR tetap (minimal **1:1**).
   tercapai (tanpa bocoran masa depan); kotak replay menghitung trade selesai, menang/kalah, win rate dan total R, dan
   di akhir sama dengan statistik data uji. Ini mempercepat tampilan hasil backtest, bukan trade live: candle live tetap
   mengikuti pasar sungguhan.
-- **Mode presisi**: NORMAL (batas bawah win rate ≥ 50%), KETAT (≥ 65%), SANGAT KETAT (≥ 80%). Mode lebih ketat hanya
+- **Mode presisi**: NORMAL (batas bawah win rate ≥ 50%), KETAT (≥ 65%), SANGAT KETAT (≥ 80%), EXPERT (terbukti + searah multi-timeframe). Mode lebih ketat hanya
   menghitung setting dengan bukti terkuat: win rate lebih tinggi, sinyal lebih jarang. Batas bawah tiap sinyal live
   dicap saat sinyal muncul, jadi hasil live per mode tidak dipilih setelah hasilnya diketahui.
 - **Trade terkualifikasi vs bayangan**: sinyal dihitung sebagai trade AI hanya bila parameter di baliknya sudah terbukti
@@ -272,7 +301,8 @@ Engine Python — FastAPI (engine/)
 | `GET /api/live?symbol=BTCUSD` | Bar 1 menit hari ini (cache 3 detik) untuk candle realtime |
 | `GET /api/company?symbol=BBRI` | Laporan perusahaan: valuasi, analis, laba rugi/neraca/arus kas, pemegang saham |
 | `GET /api/benefits?market=saham-idx` | Jadwal dividen & benefit + hype |
-| `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h` | Virtual trading: akurasi, jurnal, upgrade, trade untuk live chart |
+| `GET /api/training/summary` · `GET /api/training/asset?symbol=EURUSD&tf=1h` · `GET /api/training/chart?symbol=EURUSD&tf=1h&bars=5000` | Virtual trading: akurasi, multi-timeframe, jurnal, upgrade, trade untuk live chart |
+| `GET /api/training/lab` · `POST /api/training/lab/start` `{"markets":["forex"],"tfs":["5m"],"bars":5000}` · `POST /api/training/lab/stop` | Training lab |
 | `GET /api/voice/status` · `POST /api/voice/setup` | Status & unduh model suara (`{"items":["st3","stt"]}`; Piper: `id`, `en`, `engb`) |
 | `POST /api/voice/tts` `{"text":"…","lang":"id","rate":1,"engine":"supertonic","voice":"M1","persona":"natural","mixed":true}` | Suara (audio/wav): Supertonic 3 atau Piper; `mixed` = frasa Inggris dibaca dalam bahasa Inggris |
 | `POST /api/ai/news` `{"id":"…","symbol":"NVDA"}` | Analisa AI satu berita (isi dari link-nya) + sinyal per timeframe yang punya momentum |

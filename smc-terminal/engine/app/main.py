@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, outlook, screener, sentiment, training, voice
+from . import ai, analysis, background, benefits, company, direction, fundamental, instruments, market_data, newsctx, outlook, screener, sentiment, training, voice
 from .errors import EngineError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -120,6 +120,7 @@ class SentimentRequest(BaseModel):
 def score_sentiment(body: SentimentRequest) -> dict:
     raw = [i.model_dump() for i in body.items]
     scored = sentiment.score_items(raw)
+    newsctx.record(raw, scored)  # news context stamped on virtual-trading signals
     # benefit / corporate-action headlines (dividend, buyback, airdrop, ...) are kept per tagged asset
     benefits.record_news([{**r, "symbols": s.get("symbols", [])} for r, s in zip(raw, scored)])
     return {"items": scored}
@@ -242,9 +243,30 @@ def training_asset(symbol: str, tf: str = "1h") -> dict:
 
 
 @app.get("/training/chart")
-def training_chart(symbol: str, tf: str = "1h") -> dict:
+def training_chart(symbol: str, tf: str = "1h", bars: int | None = None) -> dict:
     market_data.timeframe(tf)  # validates the timeframe
-    return training.chart(symbol, tf)
+    return training.chart(symbol, tf, bars)
+
+
+class LabRequest(BaseModel):
+    markets: list[str] = Field(default_factory=list, max_length=8)
+    tfs: list[str] = Field(default_factory=list, max_length=8)
+    bars: int = 5000
+
+
+@app.get("/training/lab")
+def training_lab() -> dict:
+    return training.lab_status()
+
+
+@app.post("/training/lab/start")
+def training_lab_start(body: LabRequest) -> dict:
+    return training.lab_start(body.markets, body.tfs, body.bars)
+
+
+@app.post("/training/lab/stop")
+def training_lab_stop() -> dict:
+    return training.lab_stop()
 
 
 @app.get("/benefits")

@@ -222,12 +222,14 @@ export class AssetMap {
       const choch = s?.lastEvent?.kind === 'CHoCH' && s.lastEvent.barsAgo <= 3;
       cell.className = `${lvl}${recent.has(q.symbol) ? ' news' : ''}${hot.has(q.symbol) ? ' hot' : ''}${choch ? ' choch' : ''}${this.highlighted === q.symbol ? ' hl' : ''}`;
     }
+    this.groupInfo = new Map();
     for (const g of this.groups(rows)) {
       const vals = g.items.map((q) => q.changePct).filter((v) => v != null);
       const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       const el = this.grid.querySelector(`.am-block[data-b="${CSS.escape(g.name)}"]`);
       if (!el) continue;
-      el.title = `${g.name}: ${g.items.length} aset · ▲${vals.filter((v) => v > 0.05).length} ▼${vals.filter((v) => v < -0.05).length} · rata-rata ${avg == null ? '–' : fmtPct(avg)}`;
+      // shown as the last line of the map's own tooltip (a native title tooltip would cover it)
+      this.groupInfo.set(g.name, `${esc(g.name)}: ${g.items.length} aset · <span class="up">▲${vals.filter((v) => v > 0.05).length}</span> <span class="down">▼${vals.filter((v) => v < -0.05).length}</span> · rata-rata <span class="${avg > 0.05 ? 'up' : avg < -0.05 ? 'down' : 'flat'}">${avg == null ? '–' : fmtPct(avg)}</span>`);
       const span = el.querySelector('.am-block-avg');
       span.textContent = avg == null ? '' : fmtPct(avg);
       span.className = `am-block-avg ${avg > 0.05 ? 'up' : avg < -0.05 ? 'down' : 'flat'}`;
@@ -315,10 +317,11 @@ export class AssetMap {
       open <span class="num">${fmtPrice(q.open, q.decimals)}</span> → <b class="num">${fmtPrice(q.last, q.decimals)}</b>
       <span class="${q.changePct > 0 ? 'up' : q.changePct < 0 ? 'down' : ''}">${fmtPct(q.changePct)}</span><br>
       ${s ? `SMC 1D: skor <b class="${s.score > 0 ? 'up' : s.score < 0 ? 'down' : ''}">${s.score > 0 ? '+' : ''}${Math.round(s.score)}</b> · swing ${esc(s.swingTrend)}${s.lastEvent ? ` · ${esc(s.lastEvent.kind)} ${s.lastEvent.direction === 'bullish' ? '▲' : '▼'} ${s.lastEvent.barsAgo} bar` : ''}<br>` : ''}
-      ${n ? `berita 60 mnt: ${n.count} (▲${n.up} ▼${n.down})<br>` : ''}<span class="dim">klik untuk analisa</span>`;
+      ${n ? `berita 60 mnt: ${n.count} (▲${n.up} ▼${n.down})<br>` : ''}<span class="dim">klik untuk analisa</span>
+      ${this.groupInfo?.get(sq.closest('.am-block')?.dataset.b) ? `<div class="am-tip-group">${this.groupInfo.get(sq.closest('.am-block').dataset.b)}</div>` : ''}`;
     this.tip.style.display = 'block';
     const x = r.left - host.left + r.width + 8, y = r.top - host.top;
     this.tip.style.left = `${Math.min(x, host.width - 270)}px`;
-    this.tip.style.top = `${Math.min(Math.max(0, y), host.height - 130)}px`;
+    this.tip.style.top = `${Math.min(Math.max(0, y), host.height - this.tip.offsetHeight - 4)}px`;
   }
 }

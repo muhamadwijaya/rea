@@ -18,6 +18,39 @@ function levelTag(modes, qualified, low) {
   const hit = [...(modes || [])].sort((a, b) => b.low - a.low).find((m) => (low ?? 0) >= m.low);
   return `<span class="tag bull">${esc(hit?.label || 'NORMAL')}</span>`;
 }
+const modeText = (m) => (m.mtf ? 'EXPERT · MTF' : `${m.label} ≥${Math.round(m.low * 100)}%`);
+// EXPERT: a proven setting whose trade the two higher timeframes agree with (alignment stamped when it appeared)
+const expertTag = (s) => (s?.qualified && s.align != null && s.align >= 0.5 ? ' <span class="tag info">EXPERT</span>' : '');
+const arrowOf = (d) => (d > 0 ? '<b class="up">▲ naik</b>' : d < 0 ? '<b class="down">▼ turun</b>' : '–');
+const BUCKETS = [['aligned', 'TF lebih tinggi searah'], ['mixed', 'campuran'], ['against', 'TF lebih tinggi berlawanan'], ['unknown', 'tanpa data TF tinggi']];
+
+/** Context of the PLAN card: multi-timeframe direction and evidence, 1-minute trigger, news, calendar. */
+function contextHtml(d) {
+  const cons = d.consensus;
+  const mtf = d.mtf?.buckets || {};
+  const trig = d.trigger1m;
+  const when = (t) => new Date(t * 1000).toLocaleString('id-ID', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const rows = [];
+  if (cons?.up != null) {
+    rows.push(`<div><span>MULTI TIMEFRAME</span><b class="${cons.dominant === 'naik' ? 'up' : cons.dominant === 'turun' ? 'down' : 'flat'}">▲ ${cons.up}% · ▼ ${cons.down}%</b>
+      ${cons.tfs.map((t) => `<span class="chip ${t.trend > 0 ? 'up' : t.trend < 0 ? 'down' : ''}">${esc(t.tf.toUpperCase())} ${t.trend > 0 ? '▲' : t.trend < 0 ? '▼' : '–'}</span>`).join('')}</div>`);
+  }
+  if (mtf.aligned?.trades || mtf.mixed?.trades || mtf.against?.trades) {
+    rows.push(`<div><span>BUKTI MTF ASET INI</span>${BUCKETS.filter(([k]) => mtf[k]?.trades).map(([k, l]) => `${l}: <b>${pct(mtf[k].winRate)}</b> <span class="dim">(${mtf[k].trades})</span>`).join(' · ')}</div>`);
+  }
+  if (trig) {
+    rows.push(`<div><span>PEMICU 1M</span>${trig.pattern ? `<b class="${trig.direction === 'bullish' ? 'up' : 'down'}">${esc(trig.pattern)}</b> ${trig.barsAgo} mnt lalu ·
+      di aset ini searah dalam ${trig.horizonMin} mnt: <b>${pct(trig.hitRate)}</b> <span class="dim">dari ${trig.n} kejadian</span>`
+      : `<span class="dim">${esc(trig.unavailable || 'belum ada pola candlestick baru')}</span>`}</div>`);
+  }
+  if (d.news) rows.push(`<div><span>BERITA 24 JAM</span><b class="${d.news.score > 0.15 ? 'up' : d.news.score < -0.15 ? 'down' : 'flat'}">${d.news.score > 0 ? '+' : ''}${d.news.score}</b> <span class="dim">dari ${d.news.n} berita bertag</span></div>`);
+  if (d.calendar?.length) {
+    rows.push(`<div><span>KALENDER EKONOMI</span><ul class="tr-cal">${d.calendar.map((e) => `<li><b>${esc(e.currency)}</b> ${esc(e.title)} <span class="dim">${when(e.ts)} · ${esc(e.impact || '')}</span>
+      · forecast ${esc(e.forecast ?? '–')} <span class="dim">(sebelumnya ${esc(e.previous ?? '–')})</span> · di atas forecast → ${arrowOf(e.ifAbove)} · di bawah → ${arrowOf(e.ifBelow)}</li>`).join('')}</ul></div>`);
+  }
+  return rows.length ? `<div class="tr-ctx">${rows.join('')}</div>` : '';
+}
+
 const PRECISION_KEY = 'sharx.precision';
 const loadPrecision = () => { try { return localStorage.getItem(PRECISION_KEY) || 'normal'; } catch { return 'normal'; } };
 const savePrecision = (v) => { try { localStorage.setItem(PRECISION_KEY, v); } catch { /* per-viewer convenience only */ } };
@@ -45,7 +78,7 @@ function signalCard(s, rules, decimals, modes) {
   const f = (v) => fmtPrice(v, decimals);
   const risk = Math.abs(s.entry - s.stop);
   return `<div class="tr-signal">
-    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${levelTag(modes, s.qualified, s.quality ?? 0.5)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
+    <div class="tr-sig-top">${dirTag(s.direction)} <span class="tag ${cls}">${label}</span>${s.qualified != null ? ` ${levelTag(modes, s.qualified, s.quality ?? 0.5)}${expertTag(s)}` : ''} <span class="dim">${esc(s.kind || '')} ${esc(s.scope || '')} · ${esc(s.tf)}</span></div>
     <div class="tr-times">
       <div><span>SINYAL MUNCUL</span><b>${dt(s.created_t)}</b></div>
       <div><span>TERDETEKSI SISTEM</span><b>${s.first_seen ? dt(s.first_seen) : 'riwayat (backtest)'}</b></div>
@@ -83,6 +116,7 @@ export function mountPlanTraining(el) {
           <h5>SINYAL VIRTUAL TRADING · ${esc(tf.toUpperCase())} · SMC v${d.version}</h5>
           <div class="tr-sig-top">${levelTag(d.modes, ev.qualified, ev.winRateLow)} <span class="tag ${srcCls}">${srcLabel}</span>
             <span class="dim">bukti ${pct(ev.winRate)} dari ${ev.trades ?? 0} trade (batas bawah ${pct(ev.winRateLow)})</span></div>
+          ${contextHtml(d)}
           ${ev.qualified ? '' : '<div class="note">Belum terkualifikasi: sinyal tetap dicatat sebagai trade bayangan untuk belajar, tetapi tidak dihitung sebagai trade AI sampai buktinya cukup (batas bawah win rate ≥ 50% dengan ekspektasi positif).</div>'}
           ${current ? signalCard({ ...current, tf }, d.cancelRules, decimals, d.modes) : '<div class="empty">Belum ada sinyal untuk aset & timeframe ini.</div>'}
           ${others.length ? `<h5>SINYAL SEBELUMNYA</h5><table class="co-table"><thead><tr><th>Muncul</th><th>Arah</th><th>Status</th><th>Hasil</th></tr></thead><tbody>
@@ -151,7 +185,7 @@ function mountTrainingChart(el) {
   el.innerHTML = `
     <div class="tr-live-bar">
       <select class="input tr-live-pick" title="Aset & timeframe yang dilatih"></select>
-      <button class="tr-follow" title="Pindah otomatis ke aset dengan aktivitas trade virtual terbaru (sinyal, entry, hasil)">IKUTI AKTIVITAS</button>
+      <button class="tr-follow" title="Pindah otomatis ke aset yang sedang dilatih di TRAINING LAB, atau ke aktivitas trade virtual terbaru">IKUTI TRAINING</button>
       <button class="tr-smc" title="Tampilkan struktur SMC (BOS/CHoCH swing & internal)">SMC</button>
       <button class="tr-oos" title="Perbesar ke seluruh periode data uji (out-of-sample)">DATA UJI</button>
       <span class="tr-replay-ctl">
@@ -267,15 +301,19 @@ function mountTrainingChart(el) {
   }
 
   function followTarget() {
+    const lab = summary?.lab;
+    if (lab?.state === 'running') {  // the lab's asset; while it downloads or trains a whole group, stay where we are
+      return lab.current?.symbol ? { symbol: lab.current.symbol, tf: lab.current.tf, bars: lab.bars } : null;
+    }
     const a = summary?.activity?.[0];
     if (a) return { symbol: a.symbol, tf: a.tf };
     const t = summary?.progress?.lastTuned;
     return t ? { symbol: t.symbol, tf: t.tf } : null;
   }
 
-  async function open(symbol, tf) {
+  async function open(symbol, tf, bars) {
     stopReplay(false);
-    current = { symbol, tf };
+    current = { symbol, tf, bars };
     save();
     options();
     await load(false);
@@ -290,7 +328,7 @@ function mountTrainingChart(el) {
       chart.setLayers(prefs.smc ? SMC_ON : SMC_OFF);
     }
     try {
-      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      const t = await api(`/api/training/chart?symbol=${encodeURIComponent(symbol)}&tf=${tf}${current.bars ? `&bars=${current.bars}` : ''}`);
       if (my !== seq || replay) return;
       chartData = t;
       chart.setData({ ...t, candles: t.candles.map((c) => ({ ...c })) }, { keepRange });
@@ -361,7 +399,7 @@ function mountTrainingChart(el) {
     syncButtons();
     save();
     const target = prefs.follow && followTarget();
-    if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) open(target.symbol, target.tf);
+    if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) open(target.symbol, target.tf, target.bars);
   });
   $('.tr-oos').addEventListener('click', () => {
     const candles = chart?.data?.candles;
@@ -379,6 +417,16 @@ function mountTrainingChart(el) {
   setInterval(pollLive, 3000);
   setInterval(renderClock, 1000);
   setInterval(() => { if (visible() && !replay) load(true); }, 30_000);
+  // following a running training lab: check its current asset every few seconds
+  setInterval(async () => {
+    if (!prefs.follow || replay || !visible()) return;
+    try {
+      const lab = await api('/api/training/lab');
+      summary = { ...summary, lab };
+      const c = lab.current;
+      if (lab.state === 'running' && c?.symbol && (c.symbol !== current?.symbol || c.tf !== current?.tf)) open(c.symbol, c.tf, lab.bars);
+    } catch { /* the next tick retries */ }
+  }, 5000);
   $('.tr-play').addEventListener('click', () => {
     if (!replay) { startReplay(); return; }
     if (replay.i >= replay.full.candles.length) { stopReplay(false); startReplay(); return; }
@@ -403,7 +451,7 @@ function mountTrainingChart(el) {
       summary = d;
       if (replay) return;  // a running replay is not interrupted by refreshes or the follow mode
       const target = prefs.follow ? followTarget() : null;
-      if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) { open(target.symbol, target.tf); return; }
+      if (target && (target.symbol !== current?.symbol || target.tf !== current?.tf)) { open(target.symbol, target.tf, target.bars); return; }
       if (!current) {
         const first = prefs.symbol ? { symbol: prefs.symbol, tf: prefs.tf } : d.leaderboard?.[0];
         if (first) { open(first.symbol, first.tf); return; }
@@ -412,6 +460,114 @@ function mountTrainingChart(el) {
       if (chart && !chart.data) load(false);
     },
   };
+}
+
+// ------------------------------------------------------------------ training lab
+
+const LAB_MARKETS = [['forex', 'FOREX'], ['saham-as', 'SAHAM AS'], ['saham-idx', 'SAHAM IDX'], ['kripto', 'KRIPTO']];
+const LAB_TFS = ['5m', '15m', '1h', '4h', '1d', '1w'];
+const LAB_HISTORY = { '5m': '±60 hari', '15m': '±60 hari', '1h': '±730 hari', '4h': '±730 hari', '1d': 'seluruh riwayat', '1w': 'seluruh riwayat' };
+const LAB_KEY = 'sharx.lab';
+const STATE_TEXT = { idle: ['SIAP', 'ghost'], running: ['BERJALAN', 'bull'], done: ['SELESAI', 'bull'], stopped: ['DIHENTIKAN', 'neu'], error: ['GAGAL', 'bear'] };
+const duration = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
+
+/** TRAINING LAB tab: train chosen markets × timeframes on N candles in the engine, at full CPU speed. */
+function mountTrainingLab(el) {
+  let prefs = { markets: ['forex'], tfs: ['5m'], bars: 5000 };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(LAB_KEY) || '{}') }; } catch { /* per-viewer convenience only */ }
+  const save = () => { try { localStorage.setItem(LAB_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
+  el.innerHTML = `
+    <div class="lab-ctl">
+      <div class="lab-row"><span>PASAR</span><div class="lab-set" data-set="markets">${LAB_MARKETS.map(([k, l]) => `<button data-v="${k}">${l}</button>`).join('')}<button data-all="markets">SEMUA</button></div></div>
+      <div class="lab-row"><span>TIMEFRAME</span><div class="lab-set" data-set="tfs">${LAB_TFS.map((t) => `<button data-v="${t}">${t.toUpperCase()}</button>`).join('')}<button data-all="tfs">SEMUA</button></div></div>
+      <div class="lab-row"><span>CANDLE</span><input class="input lab-bars" type="number" min="200" max="20000" step="100" value="${prefs.bars}">
+        <span class="dim lab-hint"></span></div>
+      <div class="lab-row"><button class="btn-primary lab-start">▶ MULAI TRAINING</button><button class="btn danger lab-stop">■ STOP</button><span class="lab-state"></span></div>
+      <div class="tr-progress lab-progress"><i></i><span></span></div>
+      <div class="lab-current"></div>
+    </div>
+    <div class="lab-results"></div>
+    <div class="lab-mtf"></div>
+    <div class="note">Training berjalan di engine secepat CPU (ribuan candle per detik) — tidak menunggu waktu pasar. Per aset: parameter SMC diuji di
+      ${'±'}70% candle pertama dan diverifikasi di sisanya (data uji), setiap trade disimpan di kamus trade aset & timeframe itu bersama kondisi TF
+      lebih tinggi saat itu. Timeframe dilatih terpisah dengan sinyalnya sendiri; tabel multi-timeframe menunjukkan seberapa sering trade menang
+      saat TF lebih tinggi searah. Training otomatis di latar berhenti sementara selama lab berjalan. Untuk melihat chart-nya, buka LIVE CHART
+      dengan IKUTI TRAINING dan putar REPLAY ×1–×7. Tujuan 99% tetap arah perbaikan, bukan jaminan.</div>`;
+  const $ = (q) => el.querySelector(q);
+  let status = null, summary = null, timer = null;
+
+  const renderSets = () => {
+    for (const set of el.querySelectorAll('.lab-set')) {
+      const chosen = prefs[set.dataset.set];
+      set.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('active', chosen.includes(b.dataset.v)));
+    }
+    $('.lab-hint').textContent = `riwayat tersedia: ${prefs.tfs.map((t) => `${t.toUpperCase()} ${LAB_HISTORY[t]}`).join(' · ') || '–'} (bila riwayat lebih pendek, dipakai seluruhnya)`;
+  };
+
+  function render() {
+    const st = status || { state: 'idle' };
+    const [text, cls] = STATE_TEXT[st.state] || STATE_TEXT.idle;
+    const running = st.state === 'running';
+    $('.lab-state').innerHTML = `<span class="tag ${cls}">${text}</span>${st.error ? ` <span class="down">${esc(st.error)}</span>` : ''}`;
+    $('.lab-start').disabled = running;
+    $('.lab-stop').disabled = !running;
+    const pctDone = st.progressPct ?? 0;
+    $('.lab-progress i').style.width = `${pctDone}%`;
+    const elapsed = st.startedAt ? (st.finishedAt || Date.now() / 1000) - st.startedAt : 0;
+    $('.lab-progress span').textContent = st.total ? `${st.done} / ${st.total} aset × TF · ${pctDone}% · ${duration(elapsed)}${st.skipped ? ` · ${st.skipped} tanpa cukup data` : ''}` : 'belum ada training';
+    const cur = st.current;
+    $('.lab-current').innerHTML = cur ? `Sedang: <b>${esc(cur.symbol || MARKET_NAME[cur.market] || cur.market)}</b> · ${esc(cur.tf.toUpperCase())} · ${esc(cur.stage)}${cur.bars ? ` · ${cur.bars} candle` : ''}`
+      : st.total ? `Trade data uji: <b>${st.trades}</b> · menang <b class="${st.trades && st.wins / st.trades >= 0.5 ? 'up' : 'down'}">${st.trades ? pct(st.wins / st.trades) : '–'}</b>
+        · total ${rr(st.totalR)} · upgrade SMC ${st.upgrades}` : '';
+    $('.lab-results').innerHTML = st.groups?.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>TF</th><th>Aset</th><th>Candle</th><th>Trade uji</th><th>Win</th><th>Total R</th><th>Upgrade</th></tr></thead><tbody>
+      ${st.groups.map((g) => `<tr><td>${esc(MARKET_NAME[g.market] || g.market)}</td><td>${esc(g.tf.toUpperCase())}</td><td>${g.assets}</td><td>${g.bars}</td><td>${g.trades}</td>
+        <td class="${(g.winRate ?? (g.trades ? g.wins / g.trades : null)) >= 0.5 ? 'up' : ''}">${pct(g.winRate ?? (g.trades ? g.wins / g.trades : null))}</td><td>${rr(g.totalR)}</td><td>${g.upgrades}</td></tr>`).join('')}</tbody></table>` : '';
+    const mtf = summary?.mtf;
+    $('.lab-mtf').innerHTML = mtf?.all?.trades ? `<h5>MULTI TIMEFRAME — KAMUS TRADE (DATA UJI, ${mtf.all.trades} TRADE)</h5>
+      <table class="co-table"><thead><tr><th>Kondisi saat sinyal</th><th>Trade</th><th>Win</th><th>Ekspektasi</th></tr></thead><tbody>
+      ${BUCKETS.filter(([k]) => mtf.buckets[k]?.trades).map(([k, l]) => `<tr><td>${l}</td><td>${mtf.buckets[k].trades}</td><td class="${mtf.buckets[k].winRate >= 0.5 ? 'up' : 'down'}">${pct(mtf.buckets[k].winRate)}</td><td>${rr(mtf.buckets[k].expectancyR)}</td></tr>`).join('')}</tbody></table>
+      <table class="co-table"><thead><tr><th>TF</th><th>Semua</th><th>TF tinggi searah</th><th>Berlawanan</th></tr></thead><tbody>
+      ${Object.entries(mtf.tfs).map(([tf, b]) => `<tr><td>${esc(tf.toUpperCase())}</td>${['all', 'aligned', 'against'].map((k) => {
+        const m = k === 'all' ? Object.values(b).reduce((a, x) => ({ trades: a.trades + x.trades, wins: a.wins + x.wins }), { trades: 0, wins: 0 }) : b[k];
+        return `<td>${m?.trades ? `${pct(m.wins / m.trades)} <span class="dim">(${m.trades})</span>` : '–'}</td>`;
+      }).join('')}</tr>`).join('')}</tbody></table>` : '';
+  }
+
+  async function poll() {
+    try { status = await api('/api/training/lab'); } catch (e) { status = { ...(status || {}), error: e.message }; }
+    render();
+    clearTimeout(timer);
+    if (status?.state === 'running' && el.offsetParent !== null) timer = setTimeout(poll, 2000);
+  }
+
+  el.addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const set = b.closest('.lab-set')?.dataset.set;
+    if (set && b.dataset.v) {
+      const list = prefs[set];
+      prefs[set] = list.includes(b.dataset.v) ? list.filter((x) => x !== b.dataset.v) : [...list, b.dataset.v];
+    } else if (b.dataset.all) {
+      const all = b.dataset.all === 'markets' ? LAB_MARKETS.map(([k]) => k) : LAB_TFS;
+      prefs[b.dataset.all] = prefs[b.dataset.all].length === all.length ? [] : [...all];
+    } else if (b.classList.contains('lab-start')) {
+      prefs.bars = Number($('.lab-bars').value) || 5000;
+      save();
+      try { status = await api('/api/training/lab/start', { json: { markets: prefs.markets, tfs: prefs.tfs, bars: prefs.bars } }); } catch (err) { status = { ...(status || {}), state: status?.state || 'idle', error: err.message }; }
+      render();
+      poll();
+      return;
+    } else if (b.classList.contains('lab-stop')) {
+      try { status = await api('/api/training/lab/stop', { method: 'POST' }); } catch { /* the next poll shows it */ }
+      poll();
+      return;
+    }
+    save();
+    renderSets();
+  });
+  $('.lab-bars').addEventListener('change', (e) => { prefs.bars = Number(e.target.value) || 5000; save(); });
+  renderSets();
+  return { show(d) { summary = d; status = d.lab || status; render(); poll(); } };
 }
 
 /** The AI TRAINING page. */
@@ -430,9 +586,10 @@ export const trainingPage = {
           <div class="tr-equity"><canvas></canvas></div>
         </div>
         <div class="panel tabbed col-panel">
-          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="groups">GRUP PASAR</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button><button data-v="live">LIVE CHART</button></div>
+          <div class="ptabs tr-tabs"><button data-v="board" class="active">PAPAN AKURASI ASET</button><button data-v="groups">GRUP PASAR</button><button data-v="journal">JURNAL SINYAL</button><button data-v="upgrades">LOG UPGRADE SMC</button><button data-v="live">LIVE CHART</button><button data-v="lab">TRAINING LAB</button></div>
           <div class="scroll tr-body"></div>
           <div class="tr-live hidden"></div>
+          <div class="scroll tr-lab hidden"></div>
         </div>
       </div>`;
     this.el.querySelector('.tr-tabs').addEventListener('click', (e) => {
@@ -476,11 +633,11 @@ export const trainingPage = {
     const markets = Object.entries(d.markets || {});
     const sources = Object.entries(d.sources || {});
     this.el.querySelector('.tr-overview').innerHTML = `
-      <div class="tr-modes"><span>MODE PRESISI</span>${modes.map((m) => `<button data-mode="${m.key}" class="${m === mode ? 'active' : ''}">${esc(m.label)} ≥${Math.round(m.low * 100)}%</button>`).join('')}</div>
+      <div class="tr-modes"><span>MODE PRESISI</span>${modes.map((m) => `<button data-mode="${m.key}" class="${m === mode ? 'active' : ''}">${esc(modeText(m))}</button>`).join('')}</div>
       <h5>LIVE · ${esc(mode.label)} (${live.trades} selesai; semua termasuk bayangan: ${pct(d.liveAll.winRate)} dari ${d.liveAll.trades})</h5>${progress(live.winRate, d.target, d.goal)}
       <h5>BACKTEST OUT-OF-SAMPLE · ${esc(mode.label)} (${bt.trades} trade dari ${bt.pairs} pasangan; semua pasangan: ${pct(d.backtestAll.winRate)} dari ${d.backtestAll.trades})</h5>${progress(bt.winRate, d.target, d.goal)}
       <table class="co-table"><thead><tr><th>Mode presisi</th><th>Pasangan</th><th>Win OOS</th><th>Trade</th><th>Ekspektasi</th><th>Live win</th><th>Trade</th></tr></thead><tbody>
-        ${modes.map((m) => `<tr class="${m === mode ? 'sel' : ''}"><td>${esc(m.label)} <span class="dim">≥${Math.round(m.low * 100)}%</span></td><td>${m.backtest.pairs}</td><td>${pct(m.backtest.winRate)}</td><td>${m.backtest.trades}</td><td>${rr(m.backtest.expectancyR)}</td><td>${pct(m.live.winRate)}</td><td>${m.live.trades}</td></tr>`).join('')}</tbody></table>
+        ${modes.map((m) => `<tr class="${m === mode ? 'sel' : ''}"><td>${esc(m.label)} <span class="dim">${m.mtf ? 'MTF searah' : `≥${Math.round(m.low * 100)}%`}</span></td><td>${m.backtest.pairs}</td><td>${pct(m.backtest.winRate)}</td><td>${m.backtest.trades}</td><td>${rr(m.backtest.expectancyR)}</td><td>${pct(m.live.winRate)}</td><td>${m.live.trades}</td></tr>`).join('')}</tbody></table>
       ${sources.length ? `<table class="co-table"><thead><tr><th>Asal parameter</th><th>Pasangan</th><th>Win OOS</th><th>Trade</th><th>Ekspektasi</th></tr></thead><tbody>
         ${sources.map(([k, v]) => `<tr><td><span class="tag ${(SOURCE[k] || SOURCE.default)[1]}">${(SOURCE[k] || SOURCE.default)[0]}</span></td><td>${v.pairs}</td><td>${pct(v.winRate)}</td><td>${v.trades}</td><td>${rr(v.expectancyR)}</td></tr>`).join('')}</tbody></table>` : ''}
       ${markets.length ? `<table class="co-table"><thead><tr><th>Pasar</th><th>Live terkualifikasi</th><th>Trade</th><th>Backtest terkualifikasi</th><th>Semua</th></tr></thead><tbody>
@@ -497,8 +654,15 @@ export const trainingPage = {
     if (!d) return;
     const body = this.el.querySelector('.tr-body');
     const liveEl = this.el.querySelector('.tr-live');
-    body.classList.toggle('hidden', this.tab === 'live');
+    const labEl = this.el.querySelector('.tr-lab');
+    body.classList.toggle('hidden', this.tab === 'live' || this.tab === 'lab');
     liveEl.classList.toggle('hidden', this.tab !== 'live');
+    labEl.classList.toggle('hidden', this.tab !== 'lab');
+    if (this.tab === 'lab') {
+      this.lab ||= mountTrainingLab(labEl);
+      this.lab.show(d);
+      return;
+    }
     if (this.tab === 'live') {
       this.liveChart ||= mountTrainingChart(liveEl);
       this.liveChart.show(d);

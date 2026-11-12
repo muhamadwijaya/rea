@@ -213,13 +213,15 @@ def test_liquidity_sweep_needs_a_wick_through_an_untouched_known_low_and_a_close
 
 def test_precision_modes_count_quality_stamped_when_the_signal_appeared(store):
     db = training._db()
-    rows = [("a", 1, 0.85, 1.0), ("b", 1, 0.70, -1.0), ("c", 1, 0.55, 1.0), ("d", 1, None, -1.0), ("e", 0, 0.0, 1.0)]
-    for sid, q, quality, r in rows:
-        db.execute("INSERT INTO signals(id, symbol, market, tf, status, r, closed_t, qualified, quality) VALUES (?,?,?,?,?,?,?,?,?)",
-                   (sid, "A", "forex", "1h", "win" if r > 0 else "loss", r, 1, q, quality))
+    rows = [("a", 1, 0.85, 1.0, 0.8), ("b", 1, 0.70, -1.0, -0.6), ("c", 1, 0.55, 1.0, None), ("d", 1, None, -1.0, None),
+            ("e", 0, 0.0, 1.0, 1.0)]
+    for sid, q, quality, r, align in rows:
+        db.execute("INSERT INTO signals(id, symbol, market, tf, status, r, closed_t, qualified, quality, align) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   (sid, "A", "forex", "1h", "win" if r > 0 else "loss", r, 1, q, quality, align))
     db.commit()
     modes = {m["key"]: m["live"]["trades"] for m in training.summary()["modes"]}
-    assert modes == {"normal": 4, "ketat": 2, "sangat": 1}  # shadow trade "e" never counts; "d" predates quality stamps
+    # shadow trade "e" never counts; "d" predates quality stamps; EXPERT also needs the higher timeframes to agree
+    assert modes == {"normal": 4, "ketat": 2, "sangat": 1, "expert": 1}
 
 
 # ------------------------------------------------------------------ live training chart
@@ -233,8 +235,9 @@ def test_training_chart_marks_test_data_and_prefers_live_rows(store, monkeypatch
     early = training.simulate(b, sig(created=10, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     late = training.simulate(b, sig(created=90, entry=1.0, stop=0.9, target=1.2), set(), expiry=3, hold=5)
     monkeypatch.setattr(training.instruments, "resolve", lambda symbol: inst)
-    monkeypatch.setattr(training, "history", lambda i, tf: b)
-    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None: [early, late])
+    monkeypatch.setattr(training, "history", lambda i, tf, bars=None: b)
+    monkeypatch.setattr(training, "signals", lambda bars_, p, r=None, align=None: [early, late])
+    monkeypatch.setattr(training, "htf_alignment", lambda *a, **k: None)  # no network in tests
     db = training._db()
     db.execute("INSERT INTO signals(id, symbol, market, tf, direction, created_t, entry, stop, target, status, qualified) "
                "VALUES ('x', 'EURUSD', 'forex', '1h', 1, ?, 1.0, 0.9, 1.2, 'open', 0)", (int(b.time[90]),))

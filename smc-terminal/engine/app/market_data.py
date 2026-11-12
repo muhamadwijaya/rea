@@ -52,16 +52,20 @@ TIMEFRAMES: dict[str, Timeframe] = {
 }
 
 
-# Long history for the virtual-trading tuner (more out-of-sample trades per asset): Yahoo's longest intraday
-# periods (60 days of 15-minute, 730 days of hourly bars) and 10 years of daily bars, up to 6000 bars. Pivot
+# Long history for the virtual-trading tuner and the training lab: Yahoo's longest periods per interval (60 days
+# of 5- and 15-minute bars, 730 days of hourly bars, the whole daily and weekly history), up to 20000 bars. Pivot
 # lengths match the analysis timeframe of the same name. Kept in a bounded cache of their own (`history_many`).
+HISTORY_MAX_BARS = 20000
 HISTORY: dict[str, Timeframe] = {
-    "15m": Timeframe("15m@hist", "15M", "15m", "60d", None, 1800, 15, 4, 6000),
-    "1h": Timeframe("1h@hist", "1H", "60m", "730d", None, 3600, 12, 4, 6000),
-    "4h": Timeframe("4h@hist", "4H", "60m", "730d", "4h", 3600, 10, 3, 6000),
-    "1d": Timeframe("1d@hist", "1D", "1d", "10y", None, 6 * 3600, 10, 3, 6000),
+    "1m": Timeframe("1m@hist", "1M", "1m", "7d", None, 120, 10, 3, HISTORY_MAX_BARS),  # candlestick-pattern records
+    "5m": Timeframe("5m@hist", "5M", "5m", "60d", None, 900, 12, 4, HISTORY_MAX_BARS),
+    "15m": Timeframe("15m@hist", "15M", "15m", "60d", None, 1800, 15, 4, HISTORY_MAX_BARS),
+    "1h": Timeframe("1h@hist", "1H", "60m", "730d", None, 3600, 12, 4, HISTORY_MAX_BARS),
+    "4h": Timeframe("4h@hist", "4H", "60m", "730d", "4h", 3600, 10, 3, HISTORY_MAX_BARS),
+    "1d": Timeframe("1d@hist", "1D", "1d", "max", None, 6 * 3600, 10, 3, HISTORY_MAX_BARS),
+    "1w": Timeframe("1w@hist", "1W", "1wk", "max", None, 6 * 3600, 8, 3, HISTORY_MAX_BARS),
 }
-HISTORY_CACHE = 240  # assets × timeframes of long history held at once (least recently used dropped first)
+HISTORY_CACHE = 160  # assets × timeframes of long history held at once (least recently used dropped first)
 
 
 # Realtime feed for the open chart: today's 1-minute bars, refreshed every few seconds and merged by the

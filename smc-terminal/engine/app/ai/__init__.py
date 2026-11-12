@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import time
 
-from .. import instruments, signals, voice
+from .. import candles, instruments, signals, voice
 from . import claude, custom, openrouter
 from .common import SYSTEM, AiFailed, AiNotConfigured, confluence, facts, user_message
 
@@ -87,12 +87,19 @@ def analyze_news(symbol: str, item: dict, news: list[dict], provider: str | None
            "article": {"title": item.get("title"), "link": link, "source": item.get("source"), "published": item.get("published"),
                        "text": art["text"], "fullText": focus["fullText"], "reason": art.get("reason"),
                        "truncated": bool(art.get("truncated"))},
-           "timeframes": signals.for_direction(inst, direction)}
+           "timeframes": signals.for_direction(inst, direction), "trigger1m": _trigger(inst)}
     if basis == "ai":
         _news_cache[cache_key] = (time.time() + NEWS_CACHE_SECONDS, out)
         for k in [k for k, (until, _) in _news_cache.items() if until < time.time()]:
             _news_cache.pop(k, None)
     return out
+
+
+def _trigger(inst) -> dict | None:
+    try:
+        return candles.trigger(inst)
+    except Exception:  # 1-minute bars are optional context
+        return None
 
 
 def models(provider: str = "openrouter") -> dict:

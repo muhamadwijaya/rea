@@ -784,6 +784,20 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .chart-replay .rp-bar i { display: block; height: 100%; background: var(--go); }
 .chart-replay .rp-stats { display: flex; gap: 10px; flex-wrap: wrap; }
 .chart-replay .rp-note { margin-top: 4px; font-size: 9.5px; }
+.tr-lab { padding: 10px 12px; }
+.lab-ctl { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.lab-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+.lab-row > span:first-child { width: 78px; font-size: 9.5px; letter-spacing: .14em; color: var(--muted); }
+.lab-set { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+.lab-set button { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+  color: var(--text); background: transparent; border: 1px solid var(--line-2); }
+.lab-set button.active { color: #002644; background: var(--go); border-color: var(--go); }
+.lab-bars { width: 110px; }
+.lab-current { font-size: 11px; color: var(--text-2); min-height: 16px; }
+.tr-ctx { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; font-size: 11px; }
+.tr-ctx > div > span:first-child { display: inline-block; min-width: 130px; font-size: 9.5px; letter-spacing: .12em; color: var(--muted); }
+.tr-ctx .chip { font-size: 9.5px; padding: 1px 5px; margin-left: 3px; }
+.tr-cal { margin: 2px 0 0 0; padding-left: 16px; }
 .tr-sig-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: 10.5px; }
 .tr-times { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-bottom: 6px; }
 .tr-times div { display: flex; flex-direction: column; }
@@ -820,6 +834,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 .va-mic { color: var(--go); font-weight: 700; }
 .va-level { display: block; height: 4px; background: rgba(255, 255, 255, .08); border-radius: 2px; overflow: hidden; margin-top: 5px; }
 .va-level b { display: block; height: 100%; width: 0; background: var(--go); transition: width .08s; }
+.am-tip-group { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line-2); color: var(--text-2); }
 .va-news { display: flex; flex-direction: column; gap: 6px; }
 .va-src { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
 .va-src a { color: var(--accent-2); text-decoration: none; }

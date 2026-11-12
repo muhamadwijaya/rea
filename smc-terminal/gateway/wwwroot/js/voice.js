@@ -489,6 +489,8 @@ export class VoiceAssistant {
           <b>${c.final}/100</b><span class="dim">${esc(a.horizon)} · ${esc(String(r.model || '').replace(/:free$/, ''))}</span><p>${esc(a.summary)}</p></div>`
         : `<div class="note ${r?.failed ? 'down' : 'flat'}">${r?.failed ? `Analisa gagal: ${esc(r.failed)}` : `Analisa AI tidak tersedia${r?.aiError ? `: ${esc(r.aiError.message)}` : ''} — arah dari sentimen berita: <b>${esc((r?.direction || 'netral').toUpperCase())}</b>`}</div>`}
       ${rows ? `<table class="va-tf"><thead><tr><th>TF</th><th>SMC</th><th>Sinyal (bila ada momentum)</th><th>Presisi</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+      ${r?.trigger1m?.pattern ? `<div class="va-src"><span><span class="tag ${r.trigger1m.direction === 'bullish' ? 'bull' : 'bear'}">PEMICU 1M</span> ${esc(r.trigger1m.pattern)}
+        <span class="dim">${r.trigger1m.barsAgo} mnt lalu · di aset ini searah dalam ${r.trigger1m.horizonMin} mnt: ${r.trigger1m.hitRate == null ? '–' : `${Math.round(r.trigger1m.hitRate * 100)}%`} dari ${r.trigger1m.n}</span></span></div>` : ''}
       ${a ? `<div class="va-detail hidden">${aiResultHtml(r)}</div>` : ''}
     </div>`);
   }
@@ -513,6 +515,10 @@ export class VoiceAssistant {
       }
       return t.status === 'against' ? `${when}: berlawanan.` : t.status === 'no_momentum' ? `${when}: belum ada momentum.` : '';
     }).filter(Boolean);
+    const t = r?.trigger1m;
+    if (t?.pattern) {
+      tfs.push(`Pemicu 1 menit: ${t.pattern}, ${t.barsAgo} menit lalu${t.n ? `; di aset ini searah ${Math.round(t.hitRate * 100)} persen dari ${t.n} kejadian` : ''}.`);
+    }
     return { verdict, signals: tfs.length ? `Sinyal per timeframe. ${tfs.join(' ')}` : '' };
   }
 

@@ -259,14 +259,34 @@ public static class Api
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
-        api.MapGet("/training/chart", async (string symbol, string? tf, EngineClient engine, CancellationToken ct) =>
+        api.MapGet("/training/chart", async (string symbol, string? tf, int? bars, EngineClient engine, CancellationToken ct) =>
         {
             tf = string.IsNullOrWhiteSpace(tf) ? "1h" : tf.ToLowerInvariant();
             if (!Timeframes.Contains(tf))
             {
                 return Results.BadRequest(new { error = "invalid_timeframe", message = $"Timeframe {tf} tidak dikenal" });
             }
-            var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}", ct);
+            var window = bars is > 0 ? $"&bars={bars.Value}" : "";
+            var response = await engine.GetAsync($"training/chart?symbol={Uri.EscapeDataString(symbol)}&tf={tf}{window}", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        // Training lab: train chosen markets × timeframes on N candles in the engine, at full CPU speed.
+        api.MapGet("/training/lab", async (EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.GetAsync("training/lab", ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapPost("/training/lab/start", async (LabRequest body, EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.PostJsonAsync("training/lab/start", new { markets = body.Markets, tfs = body.Tfs, bars = body.Bars }, ct);
+            return Results.Content(response.Body, "application/json", statusCode: response.Status);
+        });
+
+        api.MapPost("/training/lab/stop", async (EngineClient engine, CancellationToken ct) =>
+        {
+            var response = await engine.PostJsonAsync("training/lab/stop", new { }, ct);
             return Results.Content(response.Body, "application/json", statusCode: response.Status);
         });
 
@@ -355,6 +375,8 @@ public static class Api
     public sealed record AiRequest(string Symbol);
 
     public sealed record NewsAiRequest(string Id, string? Symbol);
+
+    public sealed record LabRequest(string[] Markets, string[] Tfs, int Bars);
 
     public sealed record AiSettingsRequest(string? Provider, string? ApiKey, string? KeyProvider, string? OpenRouterModel, string? CustomBaseUrl, string? CustomModel);
 

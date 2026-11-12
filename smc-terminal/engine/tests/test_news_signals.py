@@ -53,6 +53,7 @@ def news_env(monkeypatch):
     seen = []
     monkeypatch.setattr(ai.signals, "for_direction", lambda i, d: seen.append(d) or [{"tf": "1h", "status": "no_momentum"}])
     monkeypatch.setattr(ai, "_news_cache", {})
+    monkeypatch.setattr(ai, "_trigger", lambda inst: None)  # no network in tests
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     return seen
 

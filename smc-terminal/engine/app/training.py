@@ -60,7 +60,8 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 
-from . import instruments, market_data, paths, smc
+from . import candles, fundamental, instruments, market_data, newsctx, paths, smc
+from .errors import EngineError
 from .market_data import Bars
 
 log = logging.getLogger("smc.training")
@@ -73,7 +74,12 @@ MIN_OOS_TRADES = 5
 ADOPT_Z = 1.64  # adoption compares one-sided 90 % lower bounds of the win rate
 MIN_IMPROVEMENT = 0.02
 MIN_RR = 1.0  # setups paying less than they risk are never taken (keeps the win rate honest)
-CORE_TFS = ("15m", "1h", "4h", "1d")
+CORE_TFS = ("5m", "15m", "1h", "4h", "1d", "1w")  # trained per asset, each with its own setting and evidence
+TF_ORDER = ("1m", "5m", "15m", "1h", "4h", "1d", "1w")
+# Bars the background tuner learns from per timeframe; the training lab can ask for up to MAX_TRAIN_BARS.
+DEFAULT_TRAIN_BARS = {"5m": 6000, "15m": 5000, "1h": 6000, "4h": 3000, "1d": 2600, "1w": 1000}
+MAX_TRAIN_BARS = market_data.HISTORY_MAX_BARS
+MTF_ALIGNED = 0.5  # higher-timeframe alignment (−1…+1, relative to the trade) from which a trade counts as aligned
 UNIVERSE_TFS = ("1d",)
 TUNE_EVERY = 6 * 3600
 HISTORY_BASIS = 2  # evaluations are made on market_data.HISTORY bars; older ones (short history) are re-done first
@@ -98,6 +104,7 @@ class Params:
     hold: int = 60  # bars an open trade may run before it is closed at market
     confluence: str = "none"  # extra SMC confirmation: "none" | "sweep" | "fvg" | "both"
     manage: str = "none"  # "none" | "partial" = close half at +1R and move the stop to entry
+    mtf: str = "none"  # "none" | "align" = only trades the two higher timeframes' swing trends agree with
 
     def key(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -124,12 +131,13 @@ class Signal:
     exit: float | None = None
     r: float | None = None
     reason: str = ""
+    align: float | None = None  # higher-timeframe alignment with this trade at its signal bar (−1…+1)
 
 
 # ------------------------------------------------------------------ bars
 
 
-def _with_tail(long: Bars, short: Bars | None, cap: int = 6000) -> Bars:
+def _with_tail(long: Bars, short: Bars | None, cap: int = MAX_TRAIN_BARS) -> Bars:
     """Long history with the fresher bars of the analysis cache in place of its end (same timeframe grid)."""
     if short is None or not len(short) or not len(long) or short.time[-1] <= long.time[-1]:
         return long
@@ -140,11 +148,52 @@ def _with_tail(long: Bars, short: Bars | None, cap: int = 6000) -> Bars:
                 join(long.low, short.low), join(long.close, short.close), join(long.volume, short.volume), short.fetched_at)
 
 
-def history(inst: instruments.Instrument, tf: str) -> Bars | None:
-    """Bars the tuner learns from: long history (market_data.HISTORY) with a fresh tail, else the analysis bars."""
+def _last(b: Bars | None, n: int) -> Bars | None:
+    if b is None or len(b) <= n:
+        return b
+    return Bars(b.time[-n:], b.open[-n:], b.high[-n:], b.low[-n:], b.close[-n:], b.volume[-n:], b.fetched_at)
+
+
+def history(inst: instruments.Instrument, tf: str, bars: int | None = None) -> Bars | None:
+    """Bars the tuner learns from: the last `bars` (default DEFAULT_TRAIN_BARS) of the long history with a fresh tail,
+    else the analysis bars."""
     got = market_data.history_many([inst], tf).get(inst.symbol)
     short = market_data.cached(inst, tf)
-    return _with_tail(got, short) if isinstance(got, Bars) else short
+    full = _with_tail(got, short) if isinstance(got, Bars) else short
+    return _last(full, bars or DEFAULT_TRAIN_BARS.get(tf, 6000))
+
+
+def higher_tfs(tf: str) -> list[str]:
+    """The two trained timeframes above `tf` (5m → 15m, 1h; 4h → 1d, 1w; 1w → none)."""
+    if tf not in TF_ORDER:
+        return []
+    i = TF_ORDER.index(tf)
+    return [t for t in TF_ORDER[i + 1:] if t in CORE_TFS][:2]
+
+
+def htf_alignment(inst: instruments.Instrument, tf: str, bars: Bars, download: bool = False) -> np.ndarray | None:
+    """Per bar of `bars`: the swing trend of the two higher timeframes as known when that bar closed (only higher
+    bars already closed by then — no hindsight), weighted 0.6 / 0.4, from −1 (both bearish) to +1 (both bullish).
+    None when no higher-timeframe bars are at hand (without `download`, only bars already held are used)."""
+    close_t = bars.time + TF_SECONDS.get(tf, 3600)
+    parts, weights = [], []
+    for weight, htf in zip((0.6, 0.4), higher_tfs(tf)):
+        hb = None
+        if download or market_data.history_cached(inst, htf):
+            got = market_data.history_many([inst], htf).get(inst.symbol)
+            hb = got if isinstance(got, Bars) else None
+        if hb is None:
+            hb = market_data.cached(inst, htf)
+        if hb is None or len(hb) < 60:
+            continue
+        d = default_params(htf)
+        trend = smc.analyze(hb.open, hb.high, hb.low, hb.close, d.swing, d.internal).swing.trend_history
+        j = np.searchsorted(hb.time + TF_SECONDS.get(htf, 86400), close_t, side="right") - 1
+        parts.append(weight * np.where(j >= 0, trend[np.clip(j, 0, len(hb) - 1)], 0).astype(float))
+        weights.append(weight)
+    if not parts:
+        return None
+    return np.sum(parts, axis=0) / sum(weights)
 
 
 # ------------------------------------------------------------------ strategy + simulation
@@ -242,7 +291,9 @@ def _swept(d: int, ob, t: int, l, h, c, pivots_low, pivots_high) -> bool:
     return False
 
 
-def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> list[Signal]:
+def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None) -> list[Signal]:
+    """Signals of setting `p`; `align` (htf_alignment) is recorded on each signal and, with p.mtf == "align", only
+    trades the higher timeframes agree with are taken (without alignment data such a setting takes none)."""
     o, h, l, c = bars.open, bars.high, bars.low, bars.close
     if r is None:
         r = smc.analyze(o, h, l, c, p.swing, p.internal)
@@ -294,7 +345,10 @@ def signals(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> list[Signa
             k = bisect.bisect_left(gap_index[d], (ob.index, -1))  # first gap of this direction from the block on
             if k == len(gap_index[d]) or gap_index[d][k][1] > t:
                 continue  # no displacement (fair value gap) in the leg that broke structure
-        s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage=p.manage)
+        aligned = float(align[t]) * d if align is not None else None
+        if p.mtf == "align" and (aligned is None or aligned < MTF_ALIGNED):
+            continue
+        s = Signal(d, b.kind, b.scope, t, float(entry), float(stop), float(target), manage=p.manage, align=aligned)
         out.append(simulate(bars, s, against[d], p.expiry, p.hold))
     return out
 
@@ -329,8 +383,8 @@ def wilson_low(wins: int, n: int, z: float = 1.0) -> float:
     return (centre - margin) / denom
 
 
-def walk_forward(bars: Bars, p: Params, r: smc.SmcResult | None = None) -> dict:
-    sigs = signals(bars, p, r)
+def walk_forward(bars: Bars, p: Params, r: smc.SmcResult | None = None, align: np.ndarray | None = None) -> dict:
+    sigs = signals(bars, p, r, align)
     split_t = bars.time[0] + (bars.time[-1] - bars.time[0]) * SPLIT
     ins = [s for s in sigs if bars.time[s.created] < split_t]
     oos = [s for s in sigs if bars.time[s.created] >= split_t]
@@ -354,13 +408,14 @@ VARIANTS = tuple((c, m) for c in ("none", "sweep", "fvg", "both") for m in ("non
 REFINE_TOP = 6
 
 
-def _refine(ranked: list, evaluate) -> list:
-    """Second search stage: the best base settings with every confluence filter and trade-management variant."""
+def _refine(ranked: list, evaluate, mtf: tuple[str, ...] = ("none",)) -> list:
+    """Second search stage: the best base settings with every confluence filter, trade-management variant and (with
+    higher-timeframe data) the higher-timeframe alignment filter."""
     seen = {p for _, p, _ in ranked}
     extra = []
     for _, p, _ in ranked[:REFINE_TOP]:
-        for confluence, manage in VARIANTS:
-            q = replace(p, confluence=confluence, manage=manage)
+        for (confluence, manage), m in itertools.product(VARIANTS, mtf):
+            q = replace(p, confluence=confluence, manage=manage, mtf=m)
             if q not in seen:
                 seen.add(q)
                 extra.append(evaluate(q))
@@ -373,7 +428,7 @@ def _score(m: dict, min_trades: int) -> float:
     return wilson_low(m["wins"], m["trades"], ADOPT_Z)
 
 
-def tune(bars: Bars, tf_key: str, current: Params) -> tuple[Params, dict, dict]:
+def tune(bars: Bars, tf_key: str, current: Params, align: np.ndarray | None = None) -> tuple[Params, dict, dict]:
     """(best params, its walk-forward report, the current params' report)."""
     analyses: dict[tuple[int, int], smc.SmcResult] = {}
 
@@ -383,13 +438,14 @@ def tune(bars: Bars, tf_key: str, current: Params) -> tuple[Params, dict, dict]:
             analyses[key] = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
         return analyses[key]
 
-    current_report = walk_forward(bars, current, analysis_for(current))
+    current_report = walk_forward(bars, current, analysis_for(current), align)
+
     def evaluate(p: Params):
-        report = walk_forward(bars, p, analysis_for(p))
+        report = walk_forward(bars, p, analysis_for(p), align)
         return _score(report["inSample"], MIN_IS_TRADES), p, report
 
     ranked = sorted((evaluate(p) for p in _grid(tf_key)), key=lambda x: x[0], reverse=True)
-    ranked = _refine(ranked, evaluate)
+    ranked = _refine(ranked, evaluate, ("none", "align") if align is not None else ("none",))
     best, best_report, best_oos = current, current_report, _score(current_report["outOfSample"], MIN_OOS_TRADES)
     for is_score, p, report in ranked[:8]:
         if is_score < 0:
@@ -496,11 +552,18 @@ def _db() -> sqlite3.Connection:
                 before TEXT, after TEXT, params TEXT, created INTEGER);
             CREATE TABLE IF NOT EXISTS tracking (symbol TEXT, tf TEXT, since INTEGER, last_tuned INTEGER,
                 PRIMARY KEY (symbol, tf));
+            -- the trade dictionary: every closed trade of each pair's active setting on the history it was trained on,
+            -- with its context; rows outside the latest history window are kept, so it only grows
+            CREATE TABLE IF NOT EXISTS patterns (
+                symbol TEXT, market TEXT, tf TEXT, created_t INTEGER, direction INTEGER, kind TEXT, scope TEXT,
+                status TEXT, r REAL, sample TEXT, align REAL, version INTEGER, recorded INTEGER,
+                PRIMARY KEY (symbol, tf, created_t, direction));
+            CREATE INDEX IF NOT EXISTS patterns_market ON patterns(market, tf, sample);
         """)
         # additive migrations of journals written by earlier versions
         if "qualified" not in _columns(_conn, "signals"):
             _conn.execute("ALTER TABLE signals ADD COLUMN qualified INTEGER")
-        for column, kind in (("quality", "REAL"), ("manage", "TEXT")):
+        for column, kind in (("quality", "REAL"), ("manage", "TEXT"), ("align", "REAL"), ("news", "REAL")):
             if column not in _columns(_conn, "signals"):
                 _conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {kind}")
         if "report" not in _columns(_conn, "tracking"):
@@ -579,7 +642,7 @@ def _since(symbol: str, tf: str, now: int) -> int:
 
 SIGNAL_COLUMNS = ["id", "symbol", "market", "tf", "version", "direction", "kind", "scope", "created_t", "first_seen", "entry",
                   "stop", "target", "expiry_t", "status", "opened_t", "closed_t", "exit", "r", "reason", "updated", "qualified",
-                  "quality", "manage"]
+                  "quality", "manage", "align", "news"]
 
 
 def _sid(symbol: str, tf: str, s: Signal, t: int) -> str:
@@ -597,7 +660,8 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
     ev = evidence(inst.symbol, tf)
     qualified_now = 1 if ev["qualified"] else 0
     quality_now = ev["winRateLow"] if ev["qualified"] else 0.0  # precision modes compare this, stamped before the outcome
-    sigs = signals(bars, p)
+    sigs = signals(bars, p, None, htf_alignment(inst, tf, bars))
+    news = newsctx.score(inst.symbol)
     tf_sec = TF_SECONDS.get(tf, 3600)
     index_of = {int(t): i for i, t in enumerate(bars.time)}
     written = 0
@@ -607,7 +671,8 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
         db = _db()
         since = _since(inst.symbol, tf, now)
         existing = {row[0]: row for row in db.execute(
-            "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified, quality, manage FROM signals "
+            "SELECT id, status, first_seen, version, direction, entry, stop, target, created_t, qualified, quality, manage, align, news "
+            "FROM signals "
             "WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, since - tf_sec * (p.expiry + p.hold)))}
         for s in sigs:
             created_t = int(bars.time[s.created])
@@ -622,10 +687,13 @@ def track(inst: instruments.Instrument, tf: str, bars: Bars) -> int:
             row["quality"] = old[10] if old and old[10] is not None else quality_now
             if old and old[11]:
                 row["manage"] = old[11]
+            # context stamped once, when the signal appears: higher-timeframe alignment and the news agreement
+            row["align"] = old[12] if old and old[12] is not None else s.align
+            row["news"] = old[13] if old and old[13] is not None else (round(news["score"] * s.direction, 3) if news else None)
             db.execute(insert, {**row, "id": sid})
             written += 1
         # signals of an older parameter version keep their stored levels and are advanced on their own
-        for sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage in existing.values():
+        for sid, status, first_seen, ver, direction, entry, stop, target, created_t, _q, _quality, manage, _a, _n in existing.values():
             if status in ("pending", "open") and ver != version and created_t in index_of:
                 s = simulate(bars, Signal(direction, "", "", index_of[created_t], entry, stop, target, manage=manage or "none"),
                              set(), p.expiry, p.hold)
@@ -644,7 +712,7 @@ def _row(inst, tf, version, s: Signal, bars: Bars, created_t, first_seen, p: Par
             "kind": s.kind, "scope": s.scope, "created_t": created_t, "first_seen": first_seen, "entry": s.entry,
             "stop": s.stop, "target": s.target, "expiry_t": created_t + tf_sec * p.expiry, "status": s.status,
             "opened_t": t(s.opened), "closed_t": t(s.closed), "exit": s.exit, "r": s.r, "reason": s.reason,
-            "updated": int(time.time()), "manage": s.manage}
+            "updated": int(time.time()), "manage": s.manage, "align": s.align}
 
 
 def _save_params(symbol: str, tf: str, params: dict, report: dict, now: int) -> int:
@@ -661,11 +729,29 @@ def _log_upgrade(symbol, tf, old_version, new_version, before, after, params, no
                                                json.dumps(params, sort_keys=True), now))
 
 
-def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars) -> dict | None:
+def _record_patterns(inst: instruments.Instrument, tf: str, bars: Bars, p: Params, version: int,
+                     align: np.ndarray | None) -> int:
+    """Store the closed trades of setting `p` on `bars` in the trade dictionary (replacing that window only)."""
+    sigs = signals(bars, p, None, align)
+    split_t = bars.time[0] + (bars.time[-1] - bars.time[0]) * SPLIT
+    now = int(time.time())
+    rows = [(inst.symbol, inst.market, tf, int(bars.time[s.created]), s.direction, s.kind, s.scope, s.status, s.r,
+             "oos" if bars.time[s.created] >= split_t else "is", s.align, version, now)
+            for s in sigs if s.status in ("win", "loss", "timeout")]
+    with _db_lock:
+        db = _db()
+        db.execute("DELETE FROM patterns WHERE symbol=? AND tf=? AND created_t>=?", (inst.symbol, tf, int(bars.time[0])))
+        db.executemany("INSERT OR REPLACE INTO patterns VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        db.commit()
+    return len(rows)
+
+
+def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars, align: np.ndarray | None = None) -> dict | None:
     """Give an asset its own parameters only when they beat its inherited ones (group / default) out of sample;
-    drop an own setting that the inherited one now beats. Every evaluation is kept for the accuracy board."""
+    drop an own setting that the inherited one now beats. Every evaluation is kept for the accuracy board, and the
+    active setting's trades go to the trade dictionary."""
     source, version, current = active(inst.symbol, tf)
-    best, best_report, current_report = tune(bars, tf, current)
+    best, best_report, current_report = tune(bars, tf, current, align)
     now = int(time.time())
     upgrade = None
     with _db_lock:
@@ -681,7 +767,7 @@ def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars) -> dict | None:
             report = current_report
             group = _groups.get((inst.market, tf))
             if source == "asset" and group:
-                inherited = walk_forward(bars, group[1])
+                inherited = walk_forward(bars, group[1], None, align)
                 if _score(inherited["outOfSample"], MIN_OOS_TRADES) > _score(current_report["outOfSample"], MIN_OOS_TRADES) + MIN_IMPROVEMENT:
                     _save_params(inst.symbol, tf, {"inherit": True}, inherited, now)
                     _params.pop((inst.symbol, tf), None)
@@ -691,6 +777,8 @@ def tune_pair(inst: instruments.Instrument, tf: str, bars: Bars) -> dict | None:
         db.execute("UPDATE tracking SET last_tuned=?, report=? WHERE symbol=? AND tf=?",
                    (now, json.dumps(report), inst.symbol, tf))
         db.commit()
+    _, now_version, now_params = active(inst.symbol, tf)
+    _record_patterns(inst, tf, bars, now_params, now_version, align)
     if upgrade:
         log.info("SMC upgrade %s %s v%d→v%d: OOS win %.0f%% → %.0f%%", inst.symbol, tf, version, upgrade["to"],
                  100 * (upgrade["before"]["winRate"] or 0), 100 * (upgrade["after"]["winRate"] or 0))
@@ -758,6 +846,77 @@ def _sum(parts: list[dict]) -> dict:
             "expectancyR": round(total_r / trades, 3) if trades else None}
 
 
+# ------------------------------------------------------------------ multi-timeframe evidence (trade dictionary)
+
+TF_WEIGHT = {"5m": 1.0, "15m": 1.0, "1h": 1.5, "4h": 2.0, "1d": 2.5, "1w": 3.0}
+EXPERT = {"key": "expert", "label": "EXPERT", "mtf": True}
+
+
+def _rows_metrics(rows: list[tuple]) -> dict:
+    """rows: (r, ...) of closed trades."""
+    rs = [float(r[0] or 0) for r in rows]
+    wins = sum(1 for x in rs if x > 0)
+    n = len(rs)
+    return {"trades": n, "wins": wins, "winRate": round(wins / n, 4) if n else None,
+            "winRateLow": round(wilson_low(wins, n), 4) if n else None,
+            "expectancyR": round(sum(rs) / n, 3) if n else None, "totalR": round(sum(rs), 2)}
+
+
+def _bucket(align) -> str:
+    if align is None:
+        return "unknown"
+    return "aligned" if align >= MTF_ALIGNED else "against" if align <= -MTF_ALIGNED else "mixed"
+
+
+def mtf_stats(symbol: str | None = None) -> dict:
+    """Out-of-sample trades of the dictionary by higher-timeframe alignment: how much more often trades win when the
+    two higher timeframes agree (the multi-timeframe percentage), overall and per timeframe."""
+    where, args = "WHERE sample='oos'", ()
+    if symbol:
+        where, args = where + " AND symbol=?", (symbol,)
+    with _db_lock:
+        rows = _db().execute(f"SELECT r, align, tf FROM patterns {where}", args).fetchall()
+    buckets: dict[str, list] = {}
+    per_tf: dict[str, dict[str, list]] = {}
+    for r, align, tf in rows:
+        b = _bucket(align)
+        buckets.setdefault(b, []).append((r,))
+        per_tf.setdefault(tf, {}).setdefault(b, []).append((r,))
+    return {"all": _rows_metrics([(r,) for r, _, _ in rows]),
+            "buckets": {b: _rows_metrics(v) for b, v in buckets.items()},
+            "tfs": {tf: {b: _rows_metrics(v) for b, v in bs.items()} for tf, bs in sorted(per_tf.items(), key=lambda kv: TF_ORDER.index(kv[0]) if kv[0] in TF_ORDER else 99)}}
+
+
+def _expert_backtest(qualified: set[tuple[str, str]]) -> dict:
+    with _db_lock:
+        rows = _db().execute("SELECT r, symbol, tf FROM patterns WHERE sample='oos' AND align>=?", (MTF_ALIGNED,)).fetchall()
+    keep = [row for row in rows if (row[1], row[2]) in qualified]
+    return {**_rows_metrics(keep), "pairs": len({(row[1], row[2]) for row in keep})}
+
+
+def consensus(inst: instruments.Instrument) -> dict:
+    """Direction across the trained timeframes right now: each timeframe's swing trend (its active pivot lengths),
+    weighted by timeframe (weekly 3 … 5-minute 1). Signals stay per timeframe; this shows which side dominates."""
+    tfs, up, down = [], 0.0, 0.0
+    for tf in CORE_TFS:
+        try:
+            bars = market_data.cached(inst, tf) or market_data.load(inst, tf)
+        except Exception:  # a timeframe without data must not hide the others
+            continue
+        if bars is None or len(bars) < 60:
+            continue
+        _, _, p = active(inst.symbol, tf)
+        r = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
+        trend, w = int(r.swing.trend), TF_WEIGHT.get(tf, 1.0)
+        up += w if trend > 0 else 0.0
+        down += w if trend < 0 else 0.0
+        tfs.append({"tf": tf, "trend": trend, "internal": int(r.internal.trend), "weight": w})
+    total = up + down
+    share = up / total if total else 0.5
+    return {"up": round(100 * share) if total else None, "down": round(100 * (1 - share)) if total else None,
+            "dominant": "naik" if total and share >= 0.6 else "turun" if total and share <= 0.4 else "netral", "tfs": tfs}
+
+
 def summary() -> dict:
     rows = _live_rows()
     with _db_lock:
@@ -806,7 +965,12 @@ def summary() -> dict:
         "modes": [{"key": key, "label": label, "low": low, "backtest": _sum(by_mode[key]),
                    "live": _live_metrics([r for r in rows if r["qualified"] and (r["quality"] is None and low <= QUALIFY_LOW
                                                                                  or (r["quality"] or 0) >= low)])}
-                  for key, label, low in PRECISION_MODES],
+                  for key, label, low in PRECISION_MODES]
+                 + [{**EXPERT, "low": QUALIFY_LOW,
+                     "backtest": _expert_backtest({(b["symbol"], b["tf"]) for b in board if b["qualified"]}),
+                     "live": _live_metrics([r for r in rows if r["qualified"] and (r["align"] or -1) >= MTF_ALIGNED])}],
+        "mtf": mtf_stats(),
+        "lab": lab_status(),
         "markets": {m: {"live": _live_metrics([r for r in rows if r["market"] == m and r["qualified"]]),
                         "liveAll": _live_metrics([r for r in rows if r["market"] == m]),
                         "backtest": _sum(by_market.get(m, {}).get("qualified", [])),
@@ -832,7 +996,7 @@ def asset(symbol: str, tf: str) -> dict:
     recent: list[dict] = []
     if bars is not None and len(bars) > 50:
         tf_sec = TF_SECONDS.get(tf, 3600)
-        for s in signals(bars, p)[-5:][::-1]:
+        for s in signals(bars, p, None, htf_alignment(inst, tf, bars))[-5:][::-1]:
             created_t = int(bars.time[s.created])
             recent.append(_row(inst, tf, version, s, bars, created_t, None, p, tf_sec))
     with _db_lock:
@@ -846,16 +1010,33 @@ def asset(symbol: str, tf: str) -> dict:
             "upgrades": [{"from": a, "to": b, "before": json.loads(be), "after": json.loads(af), "created": c}
                          for a, b, be, af, c in ups],
             "target": TARGET_WIN_RATE, "goal": GOAL_WIN_RATE,
-            "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES]}
+            "modes": [{"key": key, "label": label, "low": low} for key, label, low in PRECISION_MODES] + [{**EXPERT, "low": QUALIFY_LOW}],
+            "consensus": consensus(inst), "mtf": mtf_stats(inst.symbol), "news": newsctx.score(inst.symbol),
+            "trigger1m": _safe(lambda: candles.trigger(inst)), "calendar": _safe(lambda: fundamental.upcoming_for(inst, _fundamentals()))}
 
 
-def chart(symbol: str, tf: str) -> dict:
+def _fundamentals() -> dict | None:
+    from . import outlook  # imported here: outlook → analysis → training would otherwise be an import cycle
+
+    return outlook.fundamentals()
+
+
+def _safe(fn):
+    """Optional context (1-minute trigger, calendar): missing data must not fail the PLAN card."""
+    try:
+        return fn()
+    except Exception as exc:
+        log.debug("optional context unavailable: %s", exc)
+        return None
+
+
+def chart(symbol: str, tf: str, bars_wanted: int | None = None) -> dict:
     """Live training chart of one pair: the bars the tuner learns from (long history with a fresh tail), the
     structure the active setting sees, and its virtual trades — the journal's live rows replacing their
     re-simulated twins. Times are bar opens (UTC seconds)."""
     inst = instruments.resolve(symbol)
     source, version, p = active(inst.symbol, tf)
-    bars = history(inst, tf)
+    bars = history(inst, tf, max(200, min(MAX_TRAIN_BARS, bars_wanted)) if bars_wanted else None)
     if bars is None or len(bars) < 50:
         bars = market_data.load(inst, tf)
     tf_sec = TF_SECONDS.get(tf, 3600)
@@ -865,7 +1046,7 @@ def chart(symbol: str, tf: str) -> dict:
     r = smc.analyze(bars.open, bars.high, bars.low, bars.close, p.swing, p.internal)
     live = _live_rows("WHERE symbol=? AND tf=? AND created_t >= ?", (inst.symbol, tf, t0))
     replaced = {(row["created_t"], row["direction"]) for row in live}
-    sigs = signals(bars, p, r)
+    sigs = signals(bars, p, r, htf_alignment(inst, tf, bars, download=True))
     trades = []
     for s in sigs:
         created_t = int(t[s.created])
@@ -927,7 +1108,8 @@ def current_setup(inst: instruments.Instrument, tf: str, direction: int) -> dict
         bars = market_data.cached(inst, tf)
         if bars is None or len(bars) < 50:
             return None
-        sig = next((s for s in reversed(signals(bars, p)) if s.direction == direction and s.status in ("pending", "open")), None)
+        sig = next((s for s in reversed(signals(bars, p, None, htf_alignment(inst, tf, bars)))
+                    if s.direction == direction and s.status in ("pending", "open")), None)
         if sig is None:
             return None
         setup = {"entry": sig.entry, "stop": sig.stop, "target": sig.target, "status": sig.status,
@@ -1011,7 +1193,8 @@ def _group_candidates(market: str, tf: str, pairs) -> list[tuple[instruments.Ins
 def _group_pairs(chosen: list[tuple[instruments.Instrument, Bars]], tf: str) -> list[tuple[str, Bars]]:
     """Long history of the chosen assets (downloaded in batches), each with the fresh tail of its analysis bars."""
     got = market_data.history_many([inst for inst, _ in chosen], tf)
-    return [(inst.symbol, _with_tail(got[inst.symbol], short) if isinstance(got.get(inst.symbol), Bars) else short)
+    n = DEFAULT_TRAIN_BARS.get(tf, 6000)
+    return [(inst.symbol, _last(_with_tail(got[inst.symbol], short) if isinstance(got.get(inst.symbol), Bars) else short, n))
             for inst, short in chosen]
 
 
@@ -1022,6 +1205,8 @@ def _due(key: tuple[str, str], last: dict, report: dict | None, now: float) -> b
 
 
 def _tune_next() -> None:
+    if _lab.get("state") == "running":
+        return  # the training lab has the CPU
     with _db_lock:
         last = dict(((s, tf), lt) for s, tf, lt in _db().execute("SELECT symbol, tf, last_tuned FROM tracking"))
     now = time.time()
@@ -1057,7 +1242,7 @@ def _tune_next() -> None:
             continue
         _progress["tuning"] = f"{inst.symbol} {tf}"
         try:
-            tune_pair(inst, tf, bars)
+            tune_pair(inst, tf, bars, htf_alignment(inst, tf, bars))
             _progress["tunedThisRun"] += 1
             _progress["lastTuned"] = {"symbol": inst.symbol, "tf": tf, "market": inst.market, "at": int(time.time())}
         except Exception:
@@ -1066,6 +1251,140 @@ def _tune_next() -> None:
         finally:
             _progress["tuning"] = None
         return
+
+
+# ------------------------------------------------------------------ training lab
+
+
+MARKETS = ("forex", "saham-as", "saham-idx", "kripto")
+LAB_MAX_ASSETS = 150  # assets per market & timeframe (core watchlist first, then a stable spread of the universe)
+
+
+class LabBusy(EngineError):
+    status = 409
+    code = "lab_busy"
+
+
+class LabInvalid(EngineError):
+    status = 400
+    code = "invalid_argument"
+
+
+_lab_lock = threading.Lock()
+_lab: dict = {"state": "idle"}
+_lab_stop = threading.Event()
+
+
+def lab_plan(markets: list[str], tfs: list[str]) -> list[tuple[str, str, list[instruments.Instrument]]]:
+    core = list(instruments.watchlist())
+    names = {i.symbol for i in core}
+    universe = sorted((i for i in instruments.universe() if i.symbol not in names),
+                      key=lambda i: hashlib.sha1(i.symbol.encode()).hexdigest())
+    plan = []
+    for market in markets:
+        for tf in tfs:
+            insts = [i for i in core if i.market == market]
+            if tf in UNIVERSE_TFS + ("1w",):
+                insts += [i for i in universe if i.market == market][:max(0, LAB_MAX_ASSETS - len(insts))]
+            if insts:
+                plan.append((market, tf, insts[:LAB_MAX_ASSETS]))
+    return plan
+
+
+def lab_status() -> dict:
+    with _lab_lock:
+        out = json.loads(json.dumps(_lab, default=str))
+    total = out.get("total") or 0
+    out["progressPct"] = round(100 * (out.get("done") or 0) / total, 1) if total else None
+    out["markets_all"], out["tfs_all"], out["maxBars"] = list(MARKETS), list(CORE_TFS), MAX_TRAIN_BARS
+    out["defaultBars"] = DEFAULT_TRAIN_BARS
+    return out
+
+
+def _lab_set(**kw) -> None:
+    with _lab_lock:
+        _lab.update(kw)
+
+
+def lab_start(markets: list[str], tfs: list[str], bars: int) -> dict:
+    """Train the chosen markets × timeframes on the last `bars` candles, at full CPU speed, in the background."""
+    markets = [m for m in MARKETS if m in set(markets or [])]
+    tfs = [t for t in CORE_TFS if t in set(tfs or [])]
+    if not markets or not tfs:
+        raise LabInvalid("Pilih minimal satu pasar dan satu timeframe.")
+    try:
+        bars = int(bars)
+    except (TypeError, ValueError):
+        raise LabInvalid("Jumlah candle harus angka.") from None
+    if not 200 <= bars <= MAX_TRAIN_BARS:
+        raise LabInvalid(f"Jumlah candle 200 – {MAX_TRAIN_BARS}.")
+    with _lab_lock:
+        if _lab.get("state") == "running":
+            raise LabBusy("Training lab masih berjalan; hentikan dulu.")
+        plan = lab_plan(markets, tfs)
+        _lab.clear()
+        _lab.update({"state": "running", "markets": markets, "tfs": tfs, "bars": bars, "total": sum(len(p[2]) for p in plan),
+                     "done": 0, "skipped": 0, "current": None, "trades": 0, "wins": 0, "totalR": 0.0, "upgrades": 0,
+                     "groups": [], "startedAt": int(time.time()), "finishedAt": None, "error": None})
+        _lab_stop.clear()
+    threading.Thread(target=_lab_run, args=(plan, bars), daemon=True, name="training-lab").start()
+    return lab_status()
+
+
+def lab_stop() -> dict:
+    _lab_stop.set()
+    return lab_status()
+
+
+def _lab_run(plan, bars: int) -> None:
+    state = "done"
+    try:
+        for market, tf, insts in plan:
+            if _lab_stop.is_set():
+                break
+            _lab_set(current={"market": market, "tf": tf, "symbol": None, "stage": f"unduh riwayat {len(insts)} aset"})
+            got = market_data.history_many(insts, tf)
+            pairs = []
+            for inst in insts:
+                long, short = got.get(inst.symbol), market_data.cached(inst, tf)
+                full = _last(_with_tail(long, short) if isinstance(long, Bars) else short, bars)
+                if full is not None and len(full) >= 200:
+                    pairs.append((inst, full))
+            with _lab_lock:
+                _lab["skipped"] += len(insts) - len(pairs)
+                _lab["done"] += len(insts) - len(pairs)
+                row = {"market": market, "tf": tf, "assets": len(pairs), "bars": int(np.median([len(b) for _, b in pairs])) if pairs else 0,
+                       "trades": 0, "wins": 0, "totalR": 0.0, "upgrades": 0, "aligned": None}
+                _lab["groups"].append(row)
+            if len(pairs) >= GROUP_MIN_PAIRS and not _lab_stop.is_set():
+                _lab_set(current={"market": market, "tf": tf, "symbol": None, "stage": f"grup {len(pairs)} aset"})
+                train_group(market, tf, [(inst.symbol, b) for inst, b in pairs])
+            for inst, b in pairs:
+                if _lab_stop.is_set():
+                    break
+                _lab_set(current={"market": market, "tf": tf, "symbol": inst.symbol, "stage": "tuning", "bars": len(b)})
+                upgrade = tune_pair(inst, tf, b, htf_alignment(inst, tf, b, download=True))
+                oos = (_evals.get((inst.symbol, tf)) or {}).get("outOfSample") or {}
+                with _lab_lock:
+                    row["trades"] += oos.get("trades", 0) or 0
+                    row["wins"] += oos.get("wins", 0) or 0
+                    row["totalR"] = round(row["totalR"] + (oos.get("totalR") or 0), 2)
+                    row["upgrades"] += 1 if upgrade else 0
+                    _lab["trades"] += oos.get("trades", 0) or 0
+                    _lab["wins"] += oos.get("wins", 0) or 0
+                    _lab["totalR"] = round(_lab["totalR"] + (oos.get("totalR") or 0), 2)
+                    _lab["upgrades"] += 1 if upgrade else 0
+                    _lab["done"] += 1
+            with _lab_lock:
+                row["winRate"] = round(row["wins"] / row["trades"], 4) if row["trades"] else None
+        if _lab_stop.is_set():
+            state = "stopped"
+    except Exception as exc:  # reported in the status; the engine keeps running
+        log.exception("training lab failed")
+        state = "error"
+        _lab_set(error=str(getattr(exc, "message", exc))[:200])
+    finally:
+        _lab_set(state=state, current=None, finishedAt=int(time.time()))
 
 
 def _loop() -> None:

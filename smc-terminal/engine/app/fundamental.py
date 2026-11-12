@@ -388,6 +388,42 @@ def us_equity_score(events: list[dict], now: float) -> float:
     return round(max(-100.0, min(100.0, total)), 1)
 
 
+def _asset_sign(inst: instruments.Instrument, currency: str, kind: str) -> int:
+    """How the asset moves when `currency` strengthens on a `kind` release (+1 with it, −1 against it, 0 not at all)."""
+    if inst.asset_class == "forex" and len(inst.symbol) == 6:
+        return 1 if inst.symbol[:3] == currency else -1 if inst.symbol[3:] == currency else 0
+    if currency != "USD":
+        return 1 if inst.market == "saham-idx" and currency == "IDR" else 0
+    if inst.symbol == "DXY":
+        return 1
+    if inst.symbol in ("XAUUSD", "XAGUSD", "XPTUSD") or inst.market == "kripto":
+        return -1
+    if inst.market in ("saham-as", "saham-idx"):  # a stronger dollar on hot inflation / rates weighs on stocks
+        return -1 if kind in ("inflation", "rates") else 1 if kind in ("growth", "labor") and inst.market == "saham-as" else 0
+    return 0
+
+
+def upcoming_for(inst: instruments.Instrument, fundamentals: dict | None, days: int = 7) -> list[dict]:
+    """Upcoming calendar releases that move this asset, with the asset's expected direction if the actual comes in
+    above / below the forecast. The forecast is the market consensus — the closest real estimate of the number before
+    it is released; which side it lands on is not predicted here (the AI weighs it with the news)."""
+    now = time.time()
+    out = []
+    for e in (fundamentals or {}).get("events", []):
+        if e.get("status") == "released" or not e.get("ts") or e["ts"] > now + days * 86400:
+            continue
+        ind = classify(e.get("title", ""))
+        sign = _asset_sign(inst, e.get("currency", ""), e.get("kind", "")) if ind and ind.sign else 0
+        if not sign:
+            continue
+        forecast, previous = parse_value(e.get("forecast")), parse_value(e.get("previous"))
+        expected = None if forecast is None or previous is None else "naik" if forecast > previous else "turun" if forecast < previous else "tetap"
+        out.append({"title": e.get("title"), "currency": e.get("currency"), "ts": e["ts"], "impact": e.get("impact"),
+                    "kind": e.get("kind"), "forecast": e.get("forecast"), "previous": e.get("previous"),
+                    "consensusChange": expected, "ifAbove": ind.sign * sign, "ifBelow": -ind.sign * sign})
+    return sorted(out, key=lambda r: r["ts"])[:6]
+
+
 def exposure(inst: instruments.Instrument, fundamentals: dict | None) -> tuple[float | None, list[str]]:
     """Fundamental score of one instrument from the latest currency scores, with explanations."""
     if not fundamentals:
