@@ -27,12 +27,12 @@ cp "$work/package/Readability.js" "$work/raw/assets/reader/Readability.js"
 cp "$work/package/LICENSE.md" "$work/raw/assets/reader/Readability-LICENSE.md"
 cp "$here/assets/reader/extract.js" "$work/raw/assets/reader/extract.js"
 
-# 4) engine (Chaquopy app.imy): browser fallback, reader text endpoint, identity fix
-mkdir -p "$work/py" "$work/patched/app"
-unzip -q "$work/raw/assets/chaquopy/app.imy" android_gateway.py app/article_retrieval.py -d "$work/py"
+# 4) engine (Chaquopy app.imy): the files named by the diffs (+++ b/<path>) are patched and repacked
+files=$(sed -n 's|^+++ b/||p' "$here"/python/*.diff)
+mkdir -p "$work/py" "$work/patched"
+unzip -q "$work/raw/assets/chaquopy/app.imy" $files -d "$work/py"
 for d in "$here"/python/*.diff; do patch -p1 -d "$work/py" < "$d"; done
-cp "$work/py/android_gateway.py" "$work/patched/android_gateway.py"
-cp "$work/py/app/article_retrieval.py" "$work/patched/app/article_retrieval.py"
+for f in $files; do mkdir -p "$work/patched/$(dirname "$f")"; cp "$work/py/$f" "$work/patched/$f"; done
 python3 "$here/repack_app.py" "$work/raw/assets/chaquopy/app.imy" "$work/patched" "$work/app.imy" "$work/raw/assets/chaquopy/build.json"
 cp "$work/app.imy" "$work/raw/assets/chaquopy/app.imy"
 

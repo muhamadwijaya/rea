@@ -12,6 +12,7 @@ import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -57,6 +58,9 @@ public final class ReaderHooks {
     private static final Handler UI = new Handler(Looper.getMainLooper());
     private static final int MIN_CHARS = 300;
     private static final int READER_POLL_MS = 2500, READER_MAX_POLLS = 48;  // keep trying ~2 minutes while open
+    // opened by the assistant: closed again once the text is taken; given up after AUTO_MAX_MS, or AUTO_CHECK_MS after
+    // a verification page appeared that nobody touched
+    private static final long AUTO_MAX_MS = 30000, AUTO_CHECK_MS = 6000, AUTO_CLOSE_MS = 700;
     private static final int NAVY = 0xFF001B33, BAR = 0xFF04223F, TEXT = 0xFFEDF3FB, ACCENT = 0xFF99FF00,
             RED = 0xFFFF4D6A, DIM = 0xFF8FA6C3;
 
@@ -82,8 +86,10 @@ public final class ReaderHooks {
 
     static final class Session {
         String url, id, title, symbol, source, lang;
-        boolean delivered, extracting;
+        boolean delivered, extracting, ended;
+        boolean auto;  // opened by the assistant (closes itself); false once the user touches the page
         int polls;
+        long started, checkSince;
     }
 
     interface Done {
@@ -259,6 +265,7 @@ public final class ReaderHooks {
             s.symbol = text(o, "symbol");
             s.source = o.optString("source", "");
             s.lang = o.optString("lang", "");
+            s.auto = o.optBoolean("auto", false);
             openReader(s);
         } catch (Throwable t) {
             Log.w(TAG, "open", t);
@@ -269,7 +276,16 @@ public final class ReaderHooks {
 
     private static void openReader(Session s) {
         Activity a = activity.get();
-        if (a == null || a.isFinishing() || !web(s.url)) return;
+        if (a == null || a.isFinishing() || !web(s.url)) {
+            fail(s, "Halaman baca tidak tersedia.");
+            return;
+        }
+        Session old = session;
+        if (s.auto && old != null && !old.auto && overlay != null && overlay.getVisibility() == View.VISIBLE) {
+            fail(s, "Halaman baca sedang dibuka manual.");  // the assistant never takes over a page the user reads
+            return;
+        }
+        if (old != null && !old.delivered && !old.ended) fail(old, "Diganti halaman lain.");
         ensureOverlay(a);
         // a fresh page per article: no history or script state of the previous one
         if (reader != null) {
@@ -278,10 +294,18 @@ public final class ReaderHooks {
         }
         reader = new WebView(a);
         configure(reader, false);
+        reader.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent e) {
+                takeOver();
+                return false;  // the page handles the touch as usual
+            }
+        });
         column.addView(reader, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        s.started = SystemClock.uptimeMillis();
         session = s;
         titleView.setText(TextUtils.isEmpty(s.title) ? host(s.url) : s.title);
-        setStatus("Memuat halaman berita di aplikasi…");
+        setStatus(s.auto ? "Dibuka otomatis untuk mengambil teks berita; ditutup sendiri setelah teks diambil. Sentuh halaman untuk membaca manual."
+                : "Memuat halaman berita di aplikasi…");
         overlay.setVisibility(View.VISIBLE);
         overlay.bringToFront();
         reader.loadUrl(s.url);
@@ -374,13 +398,55 @@ public final class ReaderHooks {
     private static void closeReader() {
         if (overlay == null) return;
         Session s = session;
+        hide();
+        if (s != null && !s.delivered && !s.ended) {
+            s.ended = true;
+            event(s, "closed", "Halaman ditutup sebelum teks diambil.");
+        }
+    }
+
+    /** Hides the reader without reporting anything (the page's text was delivered or its failure reported). */
+    private static void hide() {
         session = null;
         if (reader != null) {
             reader.stopLoading();
             reader.loadUrl("about:blank");
         }
-        overlay.setVisibility(View.GONE);
-        if (s != null) emit("{\"type\":\"closed\"}");
+        if (overlay != null) overlay.setVisibility(View.GONE);
+    }
+
+    /** The user touched the page or a button: it is theirs now, it is not closed automatically. */
+    private static void takeOver() {
+        Session s = session;
+        if (s == null || !s.auto) return;
+        s.auto = false;
+        s.checkSince = 0;
+        setStatus(s.delivered ? "Dibuka manual: halaman tidak ditutup otomatis." : "Dibuka manual: teks diambil saat berita tampil; halaman tidak ditutup otomatis.");
+    }
+
+    /** The page gave no text: reported to the app, which continues without it; an automatic page closes. */
+    private static void fail(Session s, String reason) {
+        if (s.ended || s.delivered) return;
+        s.ended = true;
+        event(s, "failed", reason);
+        if (session == s) {
+            if (s.auto) hide();
+            else setStatus(reason);
+        }
+    }
+
+    private static void event(Session s, String type, String reason) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("type", type);
+            o.put("id", s.id == null ? JSONObject.NULL : s.id);
+            o.put("url", s.url);
+            o.put("reason", reason);
+            o.put("auto", s.auto);
+            emit(o.toString());
+        } catch (Throwable t) {
+            Log.w(TAG, "event", t);
+        }
     }
 
     private static void openOutside() {
@@ -400,7 +466,11 @@ public final class ReaderHooks {
     private static void schedulePoll(final Session s) {
         UI.postDelayed(new Runnable() {
             public void run() {
-                if (session != s || s.delivered) return;
+                if (session != s || s.delivered || s.ended) return;
+                if (s.auto && SystemClock.uptimeMillis() - s.started > AUTO_MAX_MS) {
+                    fail(s, "Teks berita belum tampil dalam 30 detik.");
+                    return;
+                }
                 if (++s.polls > READER_MAX_POLLS) {
                     setStatus("Teks belum terbaca otomatis. Setelah isi berita tampil, tekan 🔊 BACAKAN.");
                     return;
@@ -422,10 +492,17 @@ public final class ReaderHooks {
         reader.evaluateJavascript(script, new ValueCallback<String>() {
             public void onReceiveValue(String value) {
                 s.extracting = false;
-                if (session != s || s.delivered) return;
+                if (session != s || s.delivered || s.ended) return;
                 Result r = Result.parse(value);
                 if (r == null) return;
                 if (r.blocked) {
+                    if (s.auto) {  // a verification is the user's to do: it is not waited out automatically
+                        long now = SystemClock.uptimeMillis();
+                        if (s.checkSince == 0) s.checkSince = now;
+                        if (now - s.checkSince > AUTO_CHECK_MS) fail(s, "Halaman meminta verifikasi.");
+                        else setStatus("Halaman meminta verifikasi. Sentuh halaman untuk menyelesaikannya sendiri; jika tidak, ditutup dan asisten lanjut.");
+                        return;
+                    }
                     setStatus("Halaman meminta verifikasi. Selesaikan di layar ini; teks diambil otomatis setelah berita tampil.");
                     return;
                 }
@@ -433,9 +510,22 @@ public final class ReaderHooks {
                     setStatus("Menunggu isi berita tampil…");
                     return;
                 }
+                if (s.auto && s.checkSince != 0) {  // the check page went away without the user: still not used
+                    fail(s, "Halaman meminta verifikasi.");
+                    return;
+                }
                 s.delivered = true;
-                setStatus("Teks berita diambil dari halaman (" + words(r.text) + " kata). AI membacakan, lalu menganalisa.");
                 deliver(s, r, "text");
+                if (s.auto) {
+                    setStatus("Teks berita diambil (" + words(r.text) + " kata). Halaman ditutup otomatis.");
+                    UI.postDelayed(new Runnable() {
+                        public void run() {
+                            if (session == s && s.auto) hide();
+                        }
+                    }, AUTO_CLOSE_MS);
+                } else {
+                    setStatus("Teks berita diambil dari halaman (" + words(r.text) + " kata). AI membacakan, lalu menganalisa.");
+                }
             }
         });
     }
@@ -444,6 +534,7 @@ public final class ReaderHooks {
     private static void request(final String kind) {
         final Session s = session;
         if (s == null || reader == null || script == null) return;
+        takeOver();
         reader.evaluateJavascript(script, new ValueCallback<String>() {
             public void onReceiveValue(String value) {
                 if (session != s) return;
@@ -474,6 +565,7 @@ public final class ReaderHooks {
             o.put("byline", r.byline);
             o.put("lang", s.lang);
             o.put("source", s.source);
+            o.put("auto", s.auto);
             emit(o.toString());
         } catch (Throwable t) {
             Log.w(TAG, "deliver", t);
