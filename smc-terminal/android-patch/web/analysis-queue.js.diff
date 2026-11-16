@@ -13,7 +13,7 @@
    }
    restore(saved) {
      const prior = [...(saved?.current && typeof saved.current==='object' ? [saved.current] : []), ...(Array.isArray(saved?.pending)?saved.pending:[])];
-@@ -22,10 +24,20 @@
+@@ -22,10 +24,26 @@
          if(!held.preparedResult&&job.preparedResult)held.preparedResult=job.preparedResult;
        }else{merged.push(job);if(job.key)seen.set(job.key,job);}
      }
@@ -31,6 +31,12 @@
 +    this.generation++; this.running = false; this.paused = false; this.current = null;
 +    this.pending = [job, ...(interrupted && !interrupted.transient ? [interrupted] : []), ...this.pending];
 +    this.changed(); this.drain(); return done;
++  }
++  // The paused job stays where it stopped and the queue goes on with the next one (LANJUTKAN, or by itself).
++  skip() {
++    if (!this.paused) return;
++    this.current?.complete?.(false);
++    this.current = null; this.paused = false; this.changed(); this.drain();
 +  }
    cancel() {
      this.generation++; this.current?.complete?.(false);

@@ -35,7 +35,7 @@
    ];
    $('#status-left').textContent = `SHARX INVEST · ${parts.join(' · ')}`;
 -  $('#status-left').title = s.priceData?.lastError || 'SHARX INVEST 3.20-independent.9';
-+  $('#status-left').title = s.priceData?.lastError || 'SHARX INVEST 3.20-independent.11';
++  $('#status-left').title = s.priceData?.lastError || 'SHARX INVEST 3.20-independent.12';
  }
  
  function updateLiveLabel() {

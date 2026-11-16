@@ -1,9 +1,9 @@
-# SHARX INVEST Android — patch Fix10–Fix11 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView)
+# SHARX INVEST Android — patch Fix10–Fix12 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView)
 
 Patch ini dipasang di atas APK Android **SHARX-INVEST-AI-Fix9.apk** (paket `com.sharx.trader`, versi
 3.20-independent.9). Source Android-nya tidak ada di repo ini. Patch dibuat dari APK itu: kode Java baru, hook smali di
 `MainActivity`, perubahan UI web (`assets/wwwroot`) dan engine Python (Chaquopy `app.imy`). Di aplikasi, status bar
-menampilkan versi **3.20-independent.11** (Fix11; Fix10 = .10).
+menampilkan versi **3.20-independent.12** (Fix12; Fix11 = .11, Fix10 = .10).
 
 ## Perubahan
 
@@ -57,6 +57,22 @@ menampilkan versi **3.20-independent.11** (Fix11; Fix10 = .10).
      total) ikut ke fakta AI. Sumber lain yang belum punya teks diambil cepat lewat HTTP.
    - Hasilnya lalu dibacakan.
 
+## Fix12
+
+1. **Pop-up asisten:**
+   - Tombol (DETAIL ANALISA, BUKA CHART, BACAKAN SUMBER, BUKA BERITA, STOP SEMUA) berada di atas teks dan tidak ikut
+     di-scroll. Teks analisa yang panjang di-scroll di dalam pop-up.
+   - Dulu `.va-body` (min-height 18px di dalam kolom flex yang tingginya dibatasi) mengecil, sehingga isinya meluber
+     dan tertimpa baris tombol.
+2. **Antrean tertunda lanjut sendiri.** Misalnya saat suara perangkat gagal: setelah 5 detik asisten lanjut ke item
+   berikutnya, apa pun penyebabnya. Tombol LANJUTKAN melakukan hal yang sama, tanpa menunggu.
+3. **Pop-up analisa kalender ekonomi memakai template yang sama dengan berita:**
+   - Tag KALENDER, jadwal/forecast/actual, dan jumlah sumber yang dianalisa dengan isi artikel.
+   - Label perkiraan (DI ATAS / SESUAI / DI BAWAH / BELUM PASTI) dengan skor keyakinan, ringkasan, dan tabel aset
+     (SMC, tindakan).
+   - Rincian ada di DETAIL ANALISA.
+   - Tombol BACAKAN SUMBER membacakan isi sumber yang dipakai AI. BUKA SUMBER membuka sumber pertama di halaman baca.
+
 ## Terukur dan diuji
 
 - **Kode Python APK dijalankan di server ini** terhadap 3 berita terbaru dari setiap 40 feed:
@@ -80,6 +96,11 @@ menampilkan versi **3.20-independent.11** (Fix11; Fix10 = .10).
   - **Halaman tanpa teks:** AI tetap jalan.
   - **Kalender:** 6 halaman sumber dibuka, 9 dari 12 sumber sampai ke AI dengan isi artikel, lalu dibacakan.
   - **Uji unit Python:** jeda per menit, kuota harian, sumber kalender.
+- **Fix12 diuji di Chromium (layar 1600×720):**
+  - Pop-up berita dan kalender dengan teks panjang: urutan judul → tombol → teks, tombol tidak menimpa teks, teks
+    bisa di-scroll, tombol tetap di tempat saat teks digulir.
+  - Antrean tertunda lanjut ke item berikutnya setelah 5,1 detik.
+  - Skenario A–D Fix11 diulang dan lulus.
 - **`ReaderHooks.java` hanya dikompilasi** (javac + d8, API 26) dan hook smali diperiksa dengan dexdump. Di server ini
   tidak ada emulator Android (tanpa KVM), jadi perilaku native belum dijalankan di perangkat.
 
@@ -92,6 +113,6 @@ APKTOOL=apktool_2.10.0.jar BUILD_TOOLS=build-tools/36 ANDROID_JAR=android-35/and
 
 Perlu Java 17+, python3, npm (Readability.js 0.5.0, Apache-2.0, diunduh saat build), unzip, zip dan patch. Resource
 dan manifest APK tidak diubah (apktool `-r`). APK hasil ditandatangani kunci baru. Kunci asli Fix9 tidak tersedia,
-jadi **Fix9 harus di-uninstall dulu** (API key AI perlu dimasukkan lagi). Fix11 memakai kunci yang sama dengan Fix10,
-jadi bisa dipasang di atas Fix10 tanpa uninstall. Simpan keystore itu di tempat aman
+jadi **Fix9 harus di-uninstall dulu** (API key AI perlu dimasukkan lagi). Fix11 dan Fix12 memakai kunci yang sama dengan
+Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall. Simpan keystore itu di tempat aman
 dan pakai lagi untuk versi berikutnya. Keystore dan APK tidak disimpan di repo ini.

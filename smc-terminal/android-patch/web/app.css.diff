@@ -1,0 +1,13 @@
+--- a/assets/wwwroot/css/app.css
++++ b/assets/wwwroot/css/app.css
+@@ -927,3 +927,10 @@
+ .cal-row[data-calendar-id]:hover,.cal-row[data-calendar-id]:focus { outline:1px solid var(--go); opacity:1; }
+ 
+ .va-head { position:sticky; top:0; z-index:2; background:rgb(3,45,80); flex-wrap:wrap; }
++
++/* assistant pop-up (Fix12): header, title, tags and buttons stay at the top; only the analysis text scrolls */
++.va-card { overflow: hidden; }
++.va-card > .va-head, .va-card > .va-title, .va-card > .va-tags, .va-card > .va-actions { flex: none; }
++.va-card > .va-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
++.va-card > .va-actions { padding-bottom: 7px; border-bottom: 1px solid var(--line); }
++.va-news h5 { margin: 6px 0 0; font-size: 9.5px; letter-spacing: .14em; color: var(--muted); }

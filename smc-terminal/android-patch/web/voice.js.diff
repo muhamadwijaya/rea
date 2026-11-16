@@ -8,14 +8,15 @@
  
  const KEY = 'sharx.voice';
  const SETTINGS_VERSION = 4;  // v3: restore clear, unprocessed narration after the playback fix
-@@ -22,10 +23,25 @@
+@@ -22,10 +23,26 @@
  const TF_NAME = { '5m': '5 menit', '15m': '15 menit', '1h': '1 jam', '4h': '4 jam', '1d': 'harian' };
  const TF_STATUS = { signal: null, against: ['berlawanan', 'down'], no_momentum: ['belum ada momentum', 'dim'], neutral: ['netral', 'dim'], error: ['data tidak tersedia', 'dim'] };
  const ANALYSIS_FAILURE = 'Kegagalan sistem AI. Analisa tidak berjalan.';
 +// A failed AI analysis is tried again AI_ATTEMPTS times, AI_RETRY_MS apart; then the assistant goes on to the next
 +// item by itself (the queue never stops on an AI failure).
 +const AI_ATTEMPTS = 3, AI_RETRY_MS = 5000;
-+const CALENDAR_PAGES = 6;  // public sources of a calendar event whose pages are opened for their text
++const CALENDAR_PAGES = 6;
++const AUTO_NEXT_MS = 5000;  // a paused queue (reading stopped, e.g. the device voice failed) goes on by itself  // public sources of a calendar event whose pages are opened for their text
 +// why an AI answer has no analysis (engine message, request error)
 +const aiReason = (r) => String(r?.aiError?.message || r?.failed || (r && !r.analysis && !r.assessment ? 'jawaban AI tidak lengkap' : '') || '').trim();
 +const newsAnalysed = (r) => !!(r?.analysis && r.directionBasis === 'ai');
@@ -34,7 +35,7 @@
  
  function loadSettings() {
    let saved = {};
-@@ -107,7 +123,7 @@
+@@ -107,7 +124,7 @@
      this.speaker = new Speaker(this);
      this.buildUi();
      this.tasks = new AnalysisQueue({execute:(job,active)=>this.executeJob(job,active),
@@ -43,16 +44,34 @@
        changed:()=>this.queueChanged()});
      this.tasks.restoring=true;
      this.restoreQueue();
-@@ -149,7 +165,7 @@
+@@ -148,8 +165,8 @@
+       if (!b) return;
        if (b.dataset.va === 'yes' || b.dataset.va === 'no') this.answer?.(b.dataset.va);
        if (b.dataset.va === 'stop') this.stop();
-       if (b.dataset.va === 'resume') this.tasks.resume();
+-      if (b.dataset.va === 'resume') this.tasks.resume();
 -      if (b.dataset.va === 'open' && this.current?.link) window.open(this.current.link, '_blank', 'noopener');
++      if (b.dataset.va === 'resume') this.tasks.skip();
 +      if (b.dataset.va === 'open' && this.current?.link && !openInApp(this.current.link, this.current)) window.open(this.current.link, '_blank', 'noopener');
        if (b.dataset.va === 'analysis' && this.current?.symbol) window.SMC.openAnalysis(this.current.symbol);
        if (b.dataset.va === 'detail') this.card.querySelector('.va-detail')?.classList.toggle('hidden');
        if (b.dataset.va === 'source' && this.currentResult?.article?.text) {
-@@ -327,7 +343,32 @@
+@@ -271,12 +288,12 @@
+     const c = this.current;
+     this.card.classList.remove('hidden');
+     this.card.innerHTML = `
+-      <div class="va-head" title="Geser untuk memindahkan pop-up"><span class="va-dot"></span><b>ASISTEN ANALISA</b><span class="va-queue"></span><button class="btn sm hidden" data-va="resume" title="Ulangi bacaan yang terhenti, lalu lanjutkan antrean">LANJUTKAN</button><span class="va-state">${esc(state)}</span>
++      <div class="va-head" title="Geser untuk memindahkan pop-up"><span class="va-dot"></span><b>ASISTEN ANALISA</b><span class="va-queue"></span><button class="btn sm hidden" data-va="resume" title="Lanjut ke berikutnya sekarang (otomatis setelah 5 detik)">LANJUTKAN</button><span class="va-state">${esc(state)}</span>
+         <button class="va-x" data-va="stop" title="Hentikan bacaan dan kosongkan antrean">✕</button></div>
+       ${c ? `<div class="va-title">${esc(c.title)}</div>
+       <div class="va-tags">${(c.symbols || []).slice(0, 4).map((t) => `<span class="chip">${esc(t.symbol)}</span>`).join('')}<span class="dim">${esc(c.source || '')}</span></div>` : ''}
+-      <div class="va-body"></div>
+-      <div class="va-actions"></div>`;
++      <div class="va-actions"></div>
++      <div class="va-body"></div>`;
+     this.dragCard?.restore(); this.renderQueue();
+   }
+ 
+@@ -327,7 +344,32 @@
      }
    }
  
@@ -86,7 +105,27 @@
    analyzeAsset(symbol,options={}) { return this.enqueue({type:'asset',asset:symbol,options,at:Date.now(),direct:true,key:'asset:'+symbol+':'+(options.technical?.tf||'')}); }
    readAnalysis(result,technical=null) { return this.enqueue({type:'result',result,options:{technical},at:Date.now(),direct:true}); }
    analyzeCalendar(event,symbol) { return this.enqueue({type:'calendar',event,symbol,at:Date.now(),direct:true,key:'calendar:'+event.id+':'+(symbol||'')}); }
-@@ -384,15 +425,56 @@
+@@ -344,15 +386,15 @@
+     const count=this.tasks?.pending.length||0,paused=!!this.tasks?.paused;
+     const badge=this.card?.querySelector('.va-queue');if(badge)badge.textContent=count?count+' antrean':'';
+     this.card?.querySelector('[data-va="resume"]')?.classList.toggle('hidden',!paused);
+-    if(paused)this.cardState('bacaan tertunda; tekan Lanjutkan');
++    if(paused)this.cardState('bacaan tertunda; lanjut otomatis dalam 5 detik');
+   }
+   queueChanged() {
+     this.busy=!!this.tasks?.running;this.renderQueue();
+     clearTimeout(this.retryTimer);
+     const job=this.tasks?.current;
+-    if(this.tasks?.paused&&job?.retryAt)this.retryTimer=setTimeout(()=>{
+-      if(this.tasks.paused&&this.tasks.current===job)this.tasks.resume();
+-    },Math.max(500,job.retryAt-Date.now()));
++    if(this.tasks?.paused)this.retryTimer=setTimeout(()=>{  // whatever stopped it: the next item after 5 s
++      if(this.tasks.paused&&this.tasks.current===job)this.tasks.skip();
++    },AUTO_NEXT_MS);
+     if(!this.queueReady)return;
+     clearTimeout(this.queueTimer);this.queueTimer=setTimeout(()=>{
+       this.saveQueue();
+@@ -384,15 +426,56 @@
      if(!symbol||!active())return;
      try{await window.SMC?.openAnalysis?.(symbol,tf||'1h',{fromAssistant:true});}catch{/* chart loading must not interrupt narration */}
    }
@@ -107,7 +146,7 @@
 +    for (let attempt = 1; attempt <= AI_ATTEMPTS; attempt++) {
 +      try { last = await call(); }
 +      catch (e) {
-+        if (e.name === 'AbortError') throw e;
++        if (e.name === 'AbortError') return { failed: 'dibatalkan', aborted: true };  // the job ended meanwhile
 +        last = { failed: e.body?.message || e.message, aiError: { message: e.body?.message || e.message } };
 +      }
 +      if (!active() || ok(last)) return last;
@@ -150,7 +189,7 @@
    }
    async executeJob(job,active) {
      this.cancelled=false;
-@@ -400,6 +482,7 @@
+@@ -400,6 +483,7 @@
        await this.navigateChart(job.item?.symbol,active);if(!active())return false;
        this.showCard(job.item,'membacakan isi sumber');return this.speaker.say(job.source,job.item?.lang==='en'?'en':'id');
      }
@@ -158,7 +197,7 @@
      if(job.type==='calendar')return this.handleCalendar(job,active);
      if(job.type==='asset'||job.type==='result')return this.handleAsset(job,active);
      return this.handle(job.item,job.direct,active,job);
-@@ -443,7 +526,7 @@
+@@ -443,7 +527,7 @@
        ${art.retryScheduled?'<div class="note">Isi lengkap belum tersedia. Percobaan ulang tersimpan dan berjalan saat aplikasi aktif. Hasil yang lebih lengkap masuk ke antrean analisa ulang.</div>':''}
        ${a ? `<div class="va-result"><span class="ai-signal sm ${c.signal === 'BELI' ? 'sig-buy' : c.signal === 'JUAL' ? 'sig-sell' : 'sig-neutral'}">${esc(c.signal)}</span>
            <b>${c.final}/100</b><span class="dim">${esc(a.horizon)} · ${esc(String(r.model || '').replace(/:free$/, ''))}</span><p>${esc(a.summary)}</p></div>`
@@ -167,7 +206,60 @@
        ${r?.strategyDirection?`<div class="note"><b>${r.article?'DAMPAK ARTIKEL: '+esc(a?.direction||'netral')+' · ':''}STRATEGI HARIAN: ${esc(r.strategyDirection)}</b>. Target mengikuti kecenderungan harian.</div>`:''}
        ${rows ? `<table class="va-tf"><thead><tr><th>TF</th><th>SMC</th><th>Target strategi harian</th><th>Presisi</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
        ${r?.trigger1m?.pattern ? `<div class="va-src"><span><span class="tag ${r.trigger1m.direction === 'bullish' ? 'bull' : 'bear'}">PEMICU 1M</span> ${esc(r.trigger1m.pattern)}
-@@ -529,8 +612,25 @@
+@@ -505,20 +589,40 @@
+       .filter(Boolean).join(' ');
+   }
+ 
++  /** The calendar analysis in the card, same template as a news analysis: event and sources, verdict, asset table,
++   *  details on DETAIL ANALISA; buttons above the text. */
+   renderCalendar(result) {
+     const a=result.assessment,e=result.event;
+-    const forecast={above:'di atas konsensus',inline:'sesuai konsensus',below:'di bawah konsensus',uncertain:'belum cukup bukti'}[a.expectation];
+-    this.cardLine(`<div class="va-news"><h5>${esc(e.currency)} · ${esc(e.title)}</h5>
+-      <div class="note">Jadwal ${esc(fmtCalendarTime(e.date))} · forecast ${esc(e.forecast||'belum ada')} · sebelumnya ${esc(e.previous||'belum ada')}<br>
+-      Actual: <b>${e.actual==null?'belum tersedia':esc(e.actual)+' (dilaporkan sumber kalender)'}</b></div>
+-      <p>${esc(a.summary)}</p><h5>PERKIRAAN DAN GEOPOLITIK</h5><p>${esc(forecast)} · keyakinan penilaian ${a.confidence}/100.</p>
+-      <p>${esc(a.forecastReason)}</p><p>${esc(a.geopolitics)}</p><div class="note">${esc(result.forecastLabel)}</div>
+-      <h5>SKENARIO RILIS</h5>${a.scenarios.map(s=>`<p><b>${esc({above:'Di atas forecast',inline:'Sesuai forecast',below:'Di bawah forecast'}[s.case])}</b>: ${esc(s.explanation)}</p>`).join('')}
+-      ${result.assets.map(row=>`<h5>${esc(row.symbol)} · ${esc(row.action)}</h5><p><b>Dampak baik:</b> ${esc(row.positiveImpact)}<br><b>Dampak buruk:</b> ${esc(row.negativeImpact)}</p>
+-      <p>${esc(row.reason)}</p><p>SMC: ${esc(row.smc.label||'belum lengkap')} · ${row.smc.complete?'lengkap':'menunggu data'}. ${esc(row.executionCondition)} ${esc(row.condition)}</p>`).join('')}
+-      <h5>INVALIDASI DAN KUALITAS DATA</h5><p>${esc(a.invalidation)}</p><p>${esc(a.dataQuality)}</p>
+-      <h5>SUMBER PUBLIK</h5>${result.sources.map(s=>`<p><a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.source||'Penerbit')} · ${esc(s.title)} ↗</a>${s.kind==='unverified_report'?' · klaim belum terverifikasi':''}</p>`).join('')||'<p>Belum ada berita publik yang dapat diperiksa.</p>'}</div>`);
+-    this.cardActions('<button class="btn" data-va="analysis">BUKA CHART</button><button class="btn danger" data-va="stop" title="Hentikan bacaan dan kosongkan antrean">STOP SEMUA</button>');
++    const [label,cls]={above:['DI ATAS','sig-buy'],inline:['SESUAI','sig-neutral'],below:['DI BAWAH','sig-sell'],uncertain:['BELUM PASTI','sig-neutral']}[a.expectation]||['BELUM PASTI','sig-neutral'];
++    const sources=result.sources||[],withText=sources.filter((s)=>s.text).length;
++    const rows=(result.assets||[]).map((row)=>{const score=row.smc?.score;
++      return `<tr><td><b>${esc(row.symbol)}</b></td><td class="${score>0?'up':score<0?'down':''}">${score==null?'–':Math.round(score)}</td>
++        <td><span class="tag ${row.action==='BUY'?'bull':row.action==='SELL'?'bear':'ghost'}">${esc(row.action)}</span> <span class="dim">${esc(row.executionCondition||'')}</span></td></tr>`;}).join('');
++    const scenario={above:'Di atas forecast',inline:'Sesuai forecast',below:'Di bawah forecast'};
++    this.cardLine(`<div class="va-news">
++      <div class="va-src"><span><span class="tag info">KALENDER</span> ${esc(e.currency)} · ${esc(e.title)}</span>
++        <span class="dim">Jadwal ${esc(fmtCalendarTime(e.date))} · forecast ${esc(e.forecast||'belum ada')} · sebelumnya ${esc(e.previous||'belum ada')} · actual ${e.actual==null?'belum tersedia':esc(e.actual)}</span>
++        <span class="dim">${withText} dari ${sources.length} sumber dianalisa dengan isi artikel</span></div>
++      <div class="va-result"><span class="ai-signal sm ${cls}">${label}</span><b>${a.confidence}/100</b>
++        <span class="dim">perkiraan vs konsensus · ${esc(String(result.model||'').replace(/:free$/,''))}</span><p>${esc(a.summary)}</p></div>
++      <div class="note">${esc(result.forecastLabel)}</div>
++      ${rows?`<table class="va-tf"><thead><tr><th>ASET</th><th>SMC</th><th>Tindakan</th></tr></thead><tbody>${rows}</tbody></table>`:''}
++      <div class="va-detail hidden">
++        <h5>PERKIRAAN DAN GEOPOLITIK</h5><p>${esc(a.forecastReason)}</p><p>${esc(a.geopolitics)}</p>
++        <h5>SKENARIO RILIS</h5>${a.scenarios.map((s)=>`<p><b>${esc(scenario[s.case])}</b>: ${esc(s.explanation)}</p>`).join('')}
++        ${(result.assets||[]).map((row)=>`<h5>${esc(row.symbol)} · ${esc(row.action)}</h5><p><b>Dampak baik:</b> ${esc(row.positiveImpact)}<br><b>Dampak buruk:</b> ${esc(row.negativeImpact)}</p>
++          <p>${esc(row.reason)}</p><p>SMC: ${esc(row.smc?.label||'belum lengkap')} · ${row.smc?.complete?'lengkap':'menunggu data'}. ${esc(row.condition)}</p>`).join('')}
++        <h5>INVALIDASI DAN KUALITAS DATA</h5><p>${esc(a.invalidation)}</p><p>${esc(a.dataQuality)}</p>
++        <h5>SUMBER PUBLIK</h5>${sources.map((s)=>`<p><a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.source||'Penerbit')} · ${esc(s.title)} ↗</a>${s.text?' · isi artikel dianalisa':''}${s.kind==='unverified_report'?' · klaim belum terverifikasi':''}</p>`).join('')||'<p>Belum ada berita publik yang dapat diperiksa.</p>'}
++      </div></div>`);
++    // BACAKAN SUMBER reads the source texts the AI used; BUKA SUMBER opens the first source in the app
++    const read=sources.filter((s)=>s.text).map((s)=>`${s.source||'Sumber'}: ${s.title}. ${s.text}`).join(' ');
++    this.currentResult={...result,article:read?{text:read}:null};
++    const first=sources.find((s)=>s.link);
++    if(this.current)this.current.link=first?.link||null;
++    this.cardActions(`<button class="btn" data-va="detail">DETAIL ANALISA</button><button class="btn" data-va="analysis">BUKA CHART</button>
++      ${read?'<button class="btn" data-va="source">BACAKAN SUMBER</button>':''}${first?'<button class="btn" data-va="open">BUKA SUMBER ↗</button>':''}
++      <button class="btn danger" data-va="stop" title="Hentikan bacaan dan kosongkan antrean">STOP SEMUA</button>`);
+   }
+ 
+   async handleCalendar(job,active) {
+@@ -529,8 +633,25 @@
      this.cardLine('Mengumpulkan berita publik, kondisi geopolitik dan candle SMC untuk aset terkait.');
      const controller=new AbortController();this.analysisController=controller;
      try {
@@ -194,7 +286,7 @@
        job.preparedResult=result;delete job.retryAt;this.queueChanged();this.current.symbol=result.primarySymbol;
        await this.navigateChart(result.primarySymbol,active);if(!active())return false;
        this.renderCalendar(result);const a=result.assessment,e=result.event;
-@@ -553,6 +653,54 @@
+@@ -553,6 +674,54 @@
      } finally {controller.abort();if(this.analysisController===controller)this.analysisController=null;}
    }
  
@@ -249,7 +341,7 @@
    async handleAsset(job,active) {
      const symbol=job.asset||job.result.symbol;
      const item={title:`Analisa aset ${symbol}`,symbols:[{symbol}],lang:'id'};
-@@ -560,9 +708,10 @@
+@@ -560,9 +729,10 @@
      this.showCard(item,'AI menganalisa aset dan berita hari ini');
      const controller=new AbortController();this.analysisController=controller;
      try {
@@ -262,7 +354,7 @@
        job.preparedResult=result;delete job.retryAt;this.queueChanged();job.options?.onResult?.(result);
        if(!await this.present(item,result,true,controller,active))return false;
        const technical=this.technicalSpeech(job.options?.technical);
-@@ -576,18 +725,33 @@
+@@ -576,18 +746,33 @@
      const lang = item.lang === 'en' ? 'en' : 'id';
      const symbol = newsSymbol(item);
      await this.navigateChart(symbol,active);if(!active())return false;
@@ -304,7 +396,7 @@
        return await this.present(item,r,direct,controller,active);
      } finally {
        // Stop target polling when this article ends, including failed or cancelled speech.
-@@ -604,9 +768,7 @@
+@@ -604,9 +789,7 @@
      this.cardActions(`${r?.analysis ? '<button class="btn" data-va="detail">DETAIL ANALISA</button>' : ''}<button class="btn" data-va="analysis">BUKA CHART</button>
        ${r?.article?.extracted?'<button class="btn" data-va="source">BACAKAN SUMBER</button>':''}
        ${item.link?'<button class="btn" data-va="open">BUKA BERITA ↗</button>':''}<button class="btn danger" data-va="stop" title="Hentikan bacaan dan kosongkan antrean">STOP SEMUA</button>`);
