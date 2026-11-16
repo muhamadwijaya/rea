@@ -1,0 +1,80 @@
+--- a/app/article_retrieval.py
++++ b/app/article_retrieval.py
+@@ -145,7 +145,45 @@
+     except Exception:pass
+     return None
+ 
+-def retrieve(url,title='',summary='',item=None,max_chars=24000,budget=35,fetch=None):
++_stop=frozenset(('the','a','an','and','or','in','on','of','to','for','as','at','by','is','with','from','yang','dan','di','ke','dari','untuk','ini','itu'))
++def same_title(expected,actual,need=.35):
++    """True unless both titles are known and share too few words (a different page than the news item)."""
++    words=set(re.findall(r'\w+',(expected or '').lower()))-_stop
++    if len(words)<4 or not actual:return True
++    return len(words&set(re.findall(r'\w+',actual.lower())))/len(words)>=need
++
++def browser_fetch(url,title='',timeout=25):
++    """The article as a browser renders it: the Android host loads the page in a hidden WebView (normal WebView
++    user agent; the page's own scripts run, e.g. the Google News redirect) and returns its readable text. Pages that
++    show a bot check or captcha are left unread. None without a host browser (desktop, tests)."""
++    try:
++        from java import jclass
++    except ImportError:
++        return None
++    try:raw=jclass('com.sharx.invest.ReaderHooks').fetch(url,title or '',int(timeout*1000))
++    except Exception:return None
++    if raw is None:return None
++    try:
++        page=json.loads(str(raw))
++        return page if isinstance(page,dict) else None
++    except ValueError:return None
++
++def accept_page_text(url,final_url,text,title='',expected='',max_chars=24000):
++    """Text the in-app reader took from the article page the user opened: kept as the article of `url`, so the AI
++    analyses exactly what was read aloud. A page that is not this news item (different title) is not kept."""
++    if not public_url(url or ''):raise ValueError('Tautan berita tidak valid.')
++    text=clean(text)
++    if len(text)<300:return {'ok':False,'reason':'Teks halaman terlalu pendek.'}
++    if _blocked.search(text[:400]):return {'ok':False,'reason':'Halaman masih meminta verifikasi.'}
++    if not same_title(expected,title):return {'ok':False,'reason':'Halaman yang dibuka bukan artikel berita ini.'}
++    final=final_url if public_url(final_url or '') else url
++    value={'text':text[:max_chars],'source':'article','url':final,'chars':len(text),'truncated':len(text)>max_chars,
++           'complete':True,'method':'reader','reason':None,'attempts':[{'method':'reader','status':'complete'}],
++           'retrievedAt':int(time.time())}
++    with _lock:store().save(url,value)
++    return {'ok':True,'chars':len(text),'url':final}
++
++def retrieve(url,title='',summary='',item=None,max_chars=24000,budget=35,fetch=None,browser=None):
+     started=time.monotonic();attempts=[];item=item or {};host=urlsplit(url).hostname or ''
+     fallback={'text':clean(' '.join(x for x in (title,summary) if x)),'source':'summary','complete':False,'url':url,'reason':'Isi lengkap belum tersedia.'}
+     if not public_url(url):return {**fallback,'reason':'Tautan berita tidak valid.'}
+@@ -224,7 +262,7 @@
+                 actual=set(re.findall(r'\w+',declared.lower()))
+                 if len(expected&actual)/len(expected)<.35:
+                     attempts.append({'method':'article_identity','status':'different_page'});continue
+-            if page.meta.get('og:type','').lower() in ('website','profile') and not any(method=='jsonld' for method,_,_ in candidates):
++            if page.meta.get('og:type','').lower() in ('website','profile') and not any(method=='jsonld' for method,_,_ in candidates) and not (declared and same_title(title,declared,.5)):
+                 attempts.append({'method':'article_identity','status':'not_an_article'});continue
+             candidates.sort(key=lambda row:ranking.get(row[0],0),reverse=True)
+             for method,text,meta in candidates:
+@@ -240,6 +278,21 @@
+                     if public_url(absolute) and urlsplit(absolute).hostname==urlsplit(final).hostname and absolute not in seen:urls.append(absolute)
+     finally:
+         if client:client.close()
++    # plain HTTP found no article text (JavaScript redirect, page that only a browser renders): the app's browser
++    remaining=budget-(time.monotonic()-started)
++    if remaining>=6:
++        page=(browser or browser_fetch)(decoded or url,title,timeout=min(30,remaining))
++        if not page:attempts.append({'method':'browser','status':'unavailable'})
++        else:
++            final=page.get('url') if public_url(page.get('url') or '') else url
++            if not same_title(title,page.get('title')):attempts.append({'method':'browser','status':'different_page'})
++            else:
++                value=consider('browser',page.get('text',''),final,{})
++                attempts.append({'method':'browser','status':'complete' if value else 'not_complete'})
++                if value:
++                    value.update(attempts=attempts,retrievedAt=int(time.time()))
++                    with _lock:store().success(urlsplit(final).hostname or host,'browser');store().save(url,value)
++                    return value
+     best.update(attempts=attempts,retrievedAt=int(time.time()),retryable=True)
+     with _lock:store().save(url,best)
+     return best

@@ -1,0 +1,11 @@
+--- a/assets/wwwroot/js/tv.js
++++ b/assets/wwwroot/js/tv.js
+@@ -44,6 +44,8 @@
+     ],
+     showSymbolLogo: true,
+     displayMode: 'adaptive',
++    // a symbol click opens this app's chart of the asset (#tv?tvwidgetsymbol=…), not TradingView outside the app
++    largeChartUrl: `${location.origin}/#tv`,
+   });
+ }
+ 

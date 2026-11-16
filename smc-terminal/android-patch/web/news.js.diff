@@ -1,0 +1,16 @@
+--- a/assets/wwwroot/js/news.js
++++ b/assets/wwwroot/js/news.js
+@@ -1,4 +1,5 @@
+ import { readPref, writePref } from './ui-state.js';
++import { rememberNews } from './reader.js';
+ // Berita view of one market page: realtime headlines for that market only (SignalR), sentiment summary,
+ // sources and the market's TradingView news timeline.
+ import { api, esc, on, dirClass, fmtTime, segmented, timeAgo } from './util.js';
+@@ -133,6 +134,7 @@
+     }
+     try {
+       const res = await api(this.query());
++      rememberNews(res.items);
+       this.items = reset ? res.items : [...this.items, ...res.items];
+       $('.news-sub').textContent = `· update ${res.updated ? timeAgo(res.updated) : '–'}`;
+       $('.news-more').classList.toggle('hidden', res.items.length < PAGE);

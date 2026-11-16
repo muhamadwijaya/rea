@@ -1,0 +1,139 @@
+--- a/assets/wwwroot/js/voice.js
++++ b/assets/wwwroot/js/voice.js
+@@ -13,6 +13,7 @@
+ import { api, esc, on } from './util.js';
+ import { aiResultHtml, dailyNewsHtml } from './ai-panel.js';
+ import { Speaker } from './voice-audio.js';
++import { newsById, newsByLink, openInApp, readerAvailable, readerStatus } from './reader.js';
+ 
+ const KEY = 'sharx.voice';
+ const SETTINGS_VERSION = 4;  // v3: restore clear, unprocessed narration after the playback fix
+@@ -26,6 +27,14 @@
+ const ANSWER_MS = 8000;
+ const SCOPES = [['all', 'Semua berita yang terkait aset'], ['core', 'Hanya aset inti (watchlist)'], ['strong', 'Hanya sentimen kuat']];
+ const newsSymbol=item=>item.symbols?.[0]?.symbol||({crypto:'BTCUSD',us:'SPX',idx:'IHSG',commodity:'XAUUSD'}[item.category]||'EURUSD');
++const SPOKEN_MAX = 12000;  // characters of an opened page read aloud (the AI still analyses the whole text)
++// language of a page whose news item does not say it: common Indonesian vs English function words
++const guessLang = (text) => {
++  const s = ` ${String(text).slice(0, 3000).toLowerCase()} `;
++  const id = (s.match(/ (yang|dan|di|dengan|untuk|ini|itu|dari|pada|akan|tidak) /g) || []).length;
++  const en = (s.match(/ (the|and|of|to|in|that|for|with|on|is|was) /g) || []).length;
++  return id > en ? 'id' : 'en';
++};
+ 
+ function loadSettings() {
+   let saved = {};
+@@ -149,7 +158,7 @@
+       if (b.dataset.va === 'yes' || b.dataset.va === 'no') this.answer?.(b.dataset.va);
+       if (b.dataset.va === 'stop') this.stop();
+       if (b.dataset.va === 'resume') this.tasks.resume();
+-      if (b.dataset.va === 'open' && this.current?.link) window.open(this.current.link, '_blank', 'noopener');
++      if (b.dataset.va === 'open' && this.current?.link && !openInApp(this.current.link, this.current)) window.open(this.current.link, '_blank', 'noopener');
+       if (b.dataset.va === 'analysis' && this.current?.symbol) window.SMC.openAnalysis(this.current.symbol);
+       if (b.dataset.va === 'detail') this.card.querySelector('.va-detail')?.classList.toggle('hidden');
+       if (b.dataset.va === 'source' && this.currentResult?.article?.text) {
+@@ -327,7 +336,32 @@
+     }
+   }
+ 
+-  readNow(item) { return this.enqueue({type:'news',item,at:Date.now(),direct:true,key:'news:'+item.id+':'+newsSymbol(item)}); }
++  // Android: the article opens in the app's reader page first; its text, taken from the opened page, is read aloud
++  // and analysed (onReaderEvent). Desktop: the engine fetches the article.
++  readNow(item) {
++    if (readerAvailable() && item?.link && openInApp(item.link, item)) return Promise.resolve(true);
++    return this.enqueue({type:'news',item,at:Date.now(),direct:true,key:'news:'+item.id+':'+newsSymbol(item)});
++  }
++
++  /** The reader page reports: its text was taken ('text'), or its buttons ask to read again / analyse ('speak' /
++   *  'analyze'). That page goes first; the narration in progress resumes after it. */
++  onReaderEvent(evt) {
++    if (!evt || !['text', 'speak', 'analyze'].includes(evt.type)) return;
++    const text = String(evt.text || '').slice(0, 24000);
++    if (text.length < 300) return;
++    const found = (evt.id && (this.store.headlines?.find((i) => i.id === evt.id) || newsById(evt.id))) || newsByLink(evt.url)
++      || (this.current?.link === evt.url ? this.current : null);
++    const item = found ? { ...found } : { id: null, title: evt.itemTitle || evt.title || '', link: evt.url, source: evt.site || '',
++      symbols: evt.symbol ? [{ symbol: evt.symbol }] : [], lang: evt.lang || '' };
++    // first text of a page: read aloud, then analyse · BACAKAN: read only · AI ANALISA: analyse only
++    const mode = { text: 'read', speak: 'speak', analyze: 'analyze' }[evt.type];
++    const job = { type: 'reader', mode, item, text, title: evt.title || item.title || '',
++      finalUrl: evt.finalUrl || evt.url, lang: evt.lang || item.lang || '', at: Date.now(), direct: true, transient: true,
++      key: `reader:${evt.type}:${item.id || evt.url}:${Date.now()}` };
++    this.cancelled = false;
++    this.speaker.stop();
++    return this.tasks.interruptWith(job);
++  }
+   analyzeAsset(symbol,options={}) { return this.enqueue({type:'asset',asset:symbol,options,at:Date.now(),direct:true,key:'asset:'+symbol+':'+(options.technical?.tf||'')}); }
+   readAnalysis(result,technical=null) { return this.enqueue({type:'result',result,options:{technical},at:Date.now(),direct:true}); }
+   analyzeCalendar(event,symbol) { return this.enqueue({type:'calendar',event,symbol,at:Date.now(),direct:true,key:'calendar:'+event.id+':'+(symbol||'')}); }
+@@ -400,6 +434,7 @@
+       await this.navigateChart(job.item?.symbol,active);if(!active())return false;
+       this.showCard(job.item,'membacakan isi sumber');return this.speaker.say(job.source,job.item?.lang==='en'?'en':'id');
+     }
++    if(job.type==='reader')return this.handleReader(job,active);
+     if(job.type==='calendar')return this.handleCalendar(job,active);
+     if(job.type==='asset'||job.type==='result')return this.handleAsset(job,active);
+     return this.handle(job.item,job.direct,active,job);
+@@ -553,6 +588,62 @@
+     } finally {controller.abort();if(this.analysisController===controller)this.analysisController=null;}
+   }
+ 
++  /** A page opened in the reader: its text (taken from the rendered page) is read aloud, then the AI analyses that
++   *  same text (the engine keeps it as the article of this news item). */
++  async handleReader(job, active) {
++    const item = job.item || {};
++    const symbol = item.id ? newsSymbol(item) : (item.symbols?.[0]?.symbol || null);
++    const text = String(job.text || '');
++    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
++    let site = '';
++    try { site = new URL(job.finalUrl || item.link).hostname.replace(/^www\./, ''); } catch { /* unknown */ }
++    if (symbol) { await this.navigateChart(symbol, active); if (!active()) return false; }
++    this.showCard({ ...item, title: item.title || job.title }, job.mode === 'analyze' ? 'AI menganalisa halaman yang dibuka' : 'membacakan berita dari halaman yang dibuka');
++    this.cardLine(`<div class="va-news"><div class="va-src"><span><span class="tag info">HALAMAN DIBUKA</span> ${esc(job.title || item.title || '')}</span>
++      <span class="dim">${words.toLocaleString('id-ID')} kata diambil dari ${esc(site)}</span></div></div>`);
++    this.cardActions('<button class="btn danger" data-va="stop" title="Hentikan bacaan dan kosongkan antrean">STOP SEMUA</button>');
++    let kept = null;
++    if (item.link) {
++      try {
++        kept = await api('/api/news/article-text', { json: { id: item.id || null, item: item.id ? item : null, acceptedAt: (job.at || Date.now()) / 1000,
++          url: item.link, finalUrl: job.finalUrl, title: job.title, itemTitle: item.title || '', text } });
++      } catch (e) { kept = { ok: false, reason: e.message }; }
++    }
++    if (!active()) return false;
++    const controller = new AbortController();
++    this.analysisController = controller;
++    const analysis = job.mode !== 'speak' && item.id && symbol
++      ? api('/api/ai/news', { signal: controller.signal, json: { id: item.id, item, acceptedAt: (job.at || Date.now()) / 1000, symbol, fast: true } })
++        .catch((e) => ({ failed: e.message, symbol, aiError: { retryAfterSeconds: e.body?.retryAfterSeconds ?? (e.status === 0 || e.status >= 500 ? 60 : null) } }))
++      : null;
++    try {
++      if (job.mode !== 'analyze') {
++        readerStatus('AI membacakan berita…');
++        const lang = job.lang === 'en' || job.lang === 'id' ? job.lang : guessLang(text);
++        const spoken = text.length > SPOKEN_MAX ? `${text.slice(0, SPOKEN_MAX)} … Bacaan dipotong di sini; seluruh isi tetap dianalisa AI.` : text;
++        if (!(await this.speaker.say(`${job.title || item.title || ''}. ${spoken}`, lang,
++          (i, n) => { if (active()) this.cardState(i < n ? `menyiapkan suara ${i + 1}/${n}` : 'membacakan berita'); })) || !active()) return false;
++      }
++      if (!analysis) {
++        readerStatus(job.mode === 'speak' ? 'Selesai dibacakan. Tekan AI ANALISA untuk analisa isi halaman ini.'
++          : 'Selesai dibacakan. Analisa AI tersedia untuk berita dari daftar berita aplikasi.');
++        this.cardState('selesai');
++        return true;
++      }
++      readerStatus('AI menganalisa isi berita…');
++      this.cardState('AI menganalisa isi berita');
++      if (kept && !kept.ok) this.note(`Teks halaman tidak dipakai untuk analisa: ${kept.reason || 'ditolak'}.`);
++      const r = await analysis;
++      if (!active()) return false;
++      const done = await this.present(item, r, true, controller, active);
++      readerStatus(done ? 'Selesai: berita dibacakan dan dianalisa AI.' : 'Analisa AI belum berhasil. Coba tombol AI ANALISA lagi.');
++      return done;
++    } finally {
++      controller.abort();
++      if (this.analysisController === controller) this.analysisController = null;
++    }
++  }
++
+   async handleAsset(job,active) {
+     const symbol=job.asset||job.result.symbol;
+     const item={title:`Analisa aset ${symbol}`,symbols:[{symbol}],lang:'id'};

@@ -1,0 +1,63 @@
+--- a/assets/wwwroot/js/app.js
++++ b/assets/wwwroot/js/app.js
+@@ -9,6 +9,7 @@
+ import { VoiceAssistant } from './voice.js';
+ import { marketPage } from './market.js';
+ import { MARKET_KEYS, MARKETS } from './markets.js';
++import { initReader, rememberNews } from './reader.js';
+ 
+ export const store = {
+   stats: null,
+@@ -62,7 +63,21 @@
+ window.SMC = { go, openAnalysis };
+ 
+ 
++// TradingView ticker tape: a symbol click comes back as #tv?tvwidgetsymbol=EXCHANGE:TICKER (largeChartUrl) and opens
++// the app's chart page of that asset; the #tv entry itself is not kept in the history.
++function tradingViewRoute() {
++  const m = /^#tv\?(.*)$/.exec(location.hash);
++  if (!m) return false;
++  const symbol = new URLSearchParams(m[1]).get('tvwidgetsymbol');
++  const back = readPref('route', '#dashboard');
++  history.replaceState(null, '', back && !back.startsWith('#tv') ? back : '#dashboard');
++  if (symbol) openAnalysis(symbol, '1h');
++  else route();
++  return true;
++}
++
+ function route() {
++  if (tradingViewRoute()) return;
+   const [name = 'dashboard', ...params] = location.hash.replace(/^#/, '').split('/').map(decodeURIComponent);
+   const tab = modules[name] ? name : 'dashboard';
+   $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+@@ -133,7 +148,7 @@
+     `${s.alerts24h} alert 24j`,
+   ];
+   $('#status-left').textContent = `SHARX INVEST · ${parts.join(' · ')}`;
+-  $('#status-left').title = s.priceData?.lastError || 'SHARX INVEST 3.20-independent.9';
++  $('#status-left').title = s.priceData?.lastError || 'SHARX INVEST 3.20-independent.10';
+ }
+ 
+ function updateLiveLabel() {
+@@ -222,11 +237,13 @@
+   try {
+     const res = await api('/api/news?limit=40');
+     store.headlines = res.items;
++    rememberNews(res.items);
+     renderMarquee();
+   } catch { /* marquee keeps old content */ }
+ }
+ 
+ function pushHeadlines(items) {
++  rememberNews(items);
+   const ids = new Set(store.headlines.map((h) => h.id));
+   store.headlines = [...items.filter((i) => !ids.has(i.id)), ...store.headlines].slice(0, 40);
+   renderMarquee();
+@@ -446,6 +463,7 @@
+ async function boot() {
+   await initPreferences();
+   window.SMC.voice = new VoiceAssistant(store);
++  initReader({ onEvent: (evt) => window.SMC.voice?.onReaderEvent(evt), openTv: (symbol) => openAnalysis(symbol, '1h') });
+   if (!location.hash) location.replace(readPref('route', '#dashboard') || '#dashboard');
+   runBoot();
+   desktopIntegration();

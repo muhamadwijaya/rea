@@ -1,0 +1,28 @@
+--- a/assets/wwwroot/js/analysis-queue.js
++++ b/assets/wwwroot/js/analysis-queue.js
+@@ -10,7 +10,8 @@
+   }
+   snapshot() {
+     const clean = job => job ? JSON.parse(JSON.stringify(job, (key, value) => typeof value === 'function' || key==='contentHtml' || key==='candles' ? undefined : value)) : null;
+-    return { version: 1, pending: this.pending.map(clean), current: clean(this.current), paused: this.paused };
++    // reader jobs (a page the user has open) belong to this session only: they are not restored after a restart
++    return { version: 1, pending: this.pending.filter(j => !j.transient).map(clean), current: this.current?.transient ? null : clean(this.current), paused: this.paused };
+   }
+   restore(saved) {
+     const prior = [...(saved?.current && typeof saved.current==='object' ? [saved.current] : []), ...(Array.isArray(saved?.pending)?saved.pending:[])];
+@@ -26,6 +27,15 @@
+     if(saved?.paused&&saved.current?.retryAt>Date.now()&&this.pending.length){this.current=this.pending.shift();this.paused=true;}
+     this.restoring = false; this.changed(); this.drain();
+   }
++  // A page the user just opened goes first: the job in progress stops (the caller stops its speech) and runs again
++  // right after it, unless it was itself such a page.
++  interruptWith(job) {
++    const done = new Promise(resolve => Object.defineProperty(job, 'complete', { value: resolve, configurable: true }));
++    const interrupted = this.current;
++    this.generation++; this.running = false; this.paused = false; this.current = null;
++    this.pending = [job, ...(interrupted && !interrupted.transient ? [interrupted] : []), ...this.pending];
++    this.changed(); this.drain(); return done;
++  }
+   cancel() {
+     this.generation++; this.current?.complete?.(false);
+     for (const j of this.pending) j.complete?.(false);

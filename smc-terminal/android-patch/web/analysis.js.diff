@@ -1,0 +1,16 @@
+--- a/assets/wwwroot/js/analysis.js
++++ b/assets/wwwroot/js/analysis.js
+@@ -1,4 +1,5 @@
+ import { readPref, writePref } from './ui-state.js';
++import { rememberNews } from './reader.js';
+ // Analisa SMC view of one market page: market watchlist + SMC chart / TradingView live + bias, MTF,
+ // trade plan, narrative, key levels and symbol news.
+ import { api, esc, on, badge, dirHex, dirClass, fmtPct, fmtPrice, fmtScore, fmtTime, segmented, timeAgo, trendText, arrow, divBar, CLASS_LABEL } from './util.js';
+@@ -417,6 +418,7 @@
+     const target = () => this.$('.sym-news');
+     try {
+       const res = await api(`/api/symbol-news?symbol=${encodeURIComponent(symbol)}`);
++      rememberNews(res.items.map((n) => ({ ...n, symbols: [{ symbol }, ...(n.symbols || []).filter((t) => t.symbol !== symbol)] })));
+       if (!target()) return;
+       target().innerHTML = res.items.length ? res.items.slice(0, 12).map((n) => `
+         <div class="news-mini"><div class="m"><span class="tag ${dirClass(n.sentimentLabel)}">${esc((n.sentimentLabel || 'neutral').toUpperCase())}</span>${esc(n.source)} · ${timeAgo(n.published)}</div>
