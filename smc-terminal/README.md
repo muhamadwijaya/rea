@@ -69,6 +69,7 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 | **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis, live chart trade virtual per aset |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
+| **JARVIS** | Asisten AI suara **Mark LVII** (FatihMakes, CC BY-NC 4.0): pasang & jalankan di PC ini, panel kendalinya tampil di tab ↓ [JARVIS](#jarvis-mark-lvii) |
 
 **Aset**: 57 aset inti (`config/watchlist.json`, dipindai SMC 1H/4H/1D) + **universe ±2.100 aset**
 (`config/universe.json`): seluruh S&P 500 + saham AS populer & ETF, seluruh saham BEI yang tersedia di Yahoo
@@ -169,6 +170,45 @@ Indonesia, Liputan6, IDX Channel, Bloomberg, CryptoSlate). Yang tidak bisa:
 Pembatasan ini tidak diakali (tidak menyamar sebagai browser manusia). Asisten menyebutkan alasannya, AI menilai dari
 judul dan ringkasan, dan tombol BUKA BERITA membuka artikel di browser. Opsi *Hanya berita yang isinya bisa dibaca AI*
 di pengaturan suara melewati tautan Google News.
+
+## JARVIS (Mark LVII)
+
+Tab **JARVIS** memasang dan menjalankan [**Mark LVII**](https://github.com/FatihMakes/Mark-LVII) oleh **FatihMakes**,
+asisten AI suara untuk PC (Gemini Live: perintah suara dan ketik, kendali PC, file, rutinitas), lalu menampilkan panel
+kendalinya (dashboard Mark LVII) di dalam tab.
+
+> Mark LVII berlisensi [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/): hanya untuk pemakaian
+> **non-komersial**, dengan atribusi ke FatihMakes. Kodenya tidak ada di repo ini: tombol PASANG mengunduhnya dari
+> repositori aslinya.
+
+1. **PASANG** (sekali, 5–20 menit, ±1–2 GB):
+   - Mencari Python 3.11–3.13 (`py -3.12`, `-3.13`, `-3.11`, lalu `python`). Python tidak dipasang otomatis.
+   - Mengunduh arsip `main` Mark LVII ke `%LOCALAPPDATA%\SharxInvest\jarvis\app` (commit tercatat dari arsip).
+   - Membuat virtualenv khusus (`jarvis\venv`), menjalankan `setup.py` Mark LVII (dependensi + browser Playwright),
+     lalu memeriksa modul dashboard.
+   - **PERBARUI** mengulang langkah yang sama. File buatan Mark LVII atau pengguna (`config/api_keys.json` berisi
+     Gemini key, memori, plugin) tidak disentuh; file yang dihapus di versi baru ikut dihapus.
+2. **JALANKAN**: `venv\Scripts\python.exe main.py`, tanpa jendela konsol; HUD JARVIS tetap jendela sendiri. Pertama
+   kali, tempel Gemini API key gratis ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)) di layar setup
+   HUD. Output tercatat di `logs/jarvis.log` dan log tab.
+3. Dashboard Mark LVII (port 8000) tampil di tab begitu aktif. Tekan **Remote Control** di HUD, lalu ketik kode 8
+   karakternya di **KODE REMOTE CONTROL**. Perangkat diingat sampai JARVIS dijalankan ulang.
+4. **HENTIKAN** menutup jendela HUD (Mark LVII sempat menyimpan sesinya), lalu menghentikan prosesnya setelah 10 detik.
+   JARVIS yang dijalankan dari tab ikut ditutup saat SHARX ditutup. JARVIS yang dijalankan di luar SHARX tetap
+   terdeteksi dan panelnya tetap tampil.
+
+- **Keamanan**: `/api/jarvis/*` hanya menerima permintaan dari halaman SHARX di loopback (Host loopback, koneksi dari
+  PC ini, header `X-Sharx-Action` untuk aksi), jadi situs lain tidak bisa memicu pemasangan atau menjalankan program.
+  Dashboard Mark LVII sendiri terbuka di jaringan lokal (port 8000) dan dijaga kode pairing-nya. Lewat HTTP biasa
+  perintahnya tidak dienkripsi di Wi-Fi (bawaan Mark LVII). HTTPS bisa diaktifkan di config Mark LVII, tetapi panelnya
+  lalu tidak bisa tampil di tab (sertifikat buatan sendiri).
+- **Diuji di server Linux ini** (bukan Windows):
+  - Alur PASANG → JALANKAN → panel → kode → MUAT ULANG → HENTIKAN → JALANKAN diuji di Chromium dengan arsip Mark LVII
+    tiruan.
+  - Pemasangan nyata memakai arsip Mark LVII berstruktur GitHub (`git archive` commit `752ff61`) dan `setup.py` aslinya:
+    selesai dalam 4 menit 40 detik, modul dashboard lengkap.
+  - Unduhan langsung dari github.com diblokir proxy server ini (403), jadi belum diuji.
+  - Jendela HUD dan Windows (CloseMainWindow, job object) belum dijalankan.
 
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
@@ -474,6 +514,8 @@ Engine Python — FastAPI (engine/)
 - **Port**: aplikasi desktop memakai port lokal bebas secara otomatis (utamakan 5080 dan 8765);
   mode browser memakai `WEB_PORT` di `start-browser.bat`.
 - **Kategori berita → pasar**: `gateway/Services/Markets.cs`.
+- **JARVIS** (`Terminal` di `appsettings.json`): `JarvisDirectory` (folder pemasangan), `JarvisArchiveUrl` (arsip
+  Mark LVII), `JarvisPython` (Python 3.11–3.13 tertentu), `JarvisDashboardPort` (8000, tetap di Mark LVII).
 
 ## API
 
@@ -504,6 +546,7 @@ Engine Python — FastAPI (engine/)
 | `GET/POST/DELETE /api/settings/ai` | Provider, model, base URL & key AI (key tidak pernah dikembalikan) |
 | `GET /api/symbol-news?symbol=AAPL` | Berita per simbol |
 | `GET /api/calendar` · `/api/alerts` · `/api/stats` · `/api/health` | Kalender, alert, KPI, status |
+| `GET /api/jarvis/status?after=N` · `POST /api/jarvis/install` · `/cancel` · `/start` · `/stop` | JARVIS (Mark LVII): status, log sejak baris N, pasang/perbarui, jalankan, hentikan. Hanya dari loopback; POST butuh header `X-Sharx-Action: 1` |
 
 ## Sumber data & keterbatasan
 

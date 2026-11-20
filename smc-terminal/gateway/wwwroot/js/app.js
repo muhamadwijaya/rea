@@ -4,6 +4,7 @@ import * as tv from './tv.js';
 import dashboard from './dashboard.js';
 import calendar from './calendar.js';
 import method from './method.js';
+import jarvis from './jarvis.js';
 import { trainingPage } from './training.js';
 import { VoiceAssistant } from './voice.js';
 import { marketPage } from './market.js';
@@ -28,6 +29,7 @@ const modules = {
   training: trainingPage,
   kalender: calendar,
   metode: method,
+  jarvis,
 };
 const initialized = new Set();
 let current = null;

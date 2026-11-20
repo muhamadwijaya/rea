@@ -58,6 +58,22 @@ public static class GatewayHost
                 PooledConnectionLifetime = TimeSpan.FromMinutes(10),
             });
 
+        // JARVIS tab: Mark LVII (FatihMakes, CC BY-NC 4.0) installed in the per-user data folder and run on this PC
+        var jarvisRoot = string.IsNullOrWhiteSpace(options.JarvisDirectory) ? AppPaths.File("jarvis") : options.JarvisDirectory;
+        builder.Services.AddSingleton(new JarvisOptions(
+            jarvisRoot,
+            Path.Combine(options.LogDirectory ?? Path.Combine(root, "logs"), "jarvis.log"),
+            new Uri(options.JarvisArchiveUrl),
+            options.JarvisPython,
+            options.JarvisDashboardPort));
+        builder.Services.AddHttpClient(JarvisService.HttpName, client =>
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan; // bounded by the download's own 10-minute limit
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SHARX-INVEST");
+        });
+        builder.Services.AddSingleton<JarvisService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<JarvisService>());
+
         builder.Services.AddSingleton<Broadcaster>();
         builder.Services.AddSingleton<MarketState>();
         builder.Services.AddSingleton<NewsStore>();
@@ -79,6 +95,7 @@ public static class GatewayHost
         });
         app.MapHub<MarketHub>("/hub/market");
         app.MapTerminalApi();
+        app.MapJarvisApi();
         app.Logger.LogInformation("SHARX INVEST gateway — engine {Engine} ({Mode}), {Feeds} feed berita",
             options.EngineUrl, options.ManageEngine ? "dikelola gateway" : "eksternal", options.Feeds.Count);
         return app;

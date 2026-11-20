@@ -1,0 +1,52 @@
+/* JARVIS tab (js/jarvis.js): settings on the left, the Mark LVII control panel (iframe) on the right. */
+#tab-jarvis.active { display: flex; }
+.jv { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: var(--gap); }
+.jv.jv-collapsed { grid-template-columns: minmax(0, 1fr); }
+.jv.jv-collapsed .jv-side { display: none; }
+.jv-side, .jv-main { display: flex; flex-direction: column; min-height: 0; }
+.jv-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; line-height: 1.5; }
+.jv-about, .jv-credit { margin: 0; color: var(--text-2); }
+.jv-credit { color: var(--muted); font-size: 11px; border-left: 2px solid var(--accent); padding-left: 8px; }
+.jv a { color: var(--accent-2); }
+.jv-chip { font-size: 10px; letter-spacing: .12em; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--muted); font-weight: 700; white-space: nowrap; }
+.jv-chip.on { color: var(--go); border-color: rgba(153, 255, 0, .55); background: var(--accent-bg); }
+.jv-chip.busy { color: var(--neu); border-color: rgba(242, 201, 76, .5); background: var(--neu-bg); }
+.jv-chip.warn { color: var(--orange); border-color: rgba(255, 159, 67, .5); }
+.jv-chip.off { color: var(--bear); border-color: rgba(255, 77, 94, .45); background: var(--bear-bg); }
+.jv-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.jv-actions[hidden], .jv-form[hidden], .jv-logbox[hidden], .jv [hidden] { display: none; }
+.jv .btn.jv-stop { color: var(--stop); border-color: rgba(255, 46, 85, .6); background: rgba(255, 46, 85, .06); }
+.jv .btn.jv-stop:hover { background: var(--stop); color: #fff; box-shadow: var(--stop-glow); }
+.jv button:disabled { opacity: .5; cursor: wait; }
+.jv-form { display: flex; gap: 8px; align-items: flex-end; }
+.jv-form label { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+.jv-form input { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--text); padding: 6px 8px; border-radius: 3px; font: 600 12.5px var(--mono); letter-spacing: .06em; min-width: 0; }
+.jv-form input:focus { outline: none; border-color: var(--accent); }
+.jv-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 0; font-size: 11.5px; }
+.jv-facts:empty { display: none; }
+.jv-facts dt { color: var(--muted); white-space: nowrap; }
+.jv-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
+.jv-steps { margin: 0; padding-left: 18px; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; }
+.jv-steps b { color: var(--text); }
+.jv-logbox { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.jv-logtitle { font-size: 10px; letter-spacing: .14em; color: var(--muted); font-weight: 700; }
+.jv-log { margin: 0; height: 200px; overflow: auto; background: #001427; border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; font: 10.5px/1.45 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.jv-main .panel-head .right .btn { text-decoration: none; }
+.jv-toggle { background: none; border: 1px solid var(--line-2); color: var(--muted); border-radius: 3px; cursor: pointer; padding: 1px 7px; font-size: 13px; }
+.jv-toggle:hover { color: var(--text); border-color: var(--accent); }
+.jv-stage { --jv-zoom: 1; position: relative; flex: 1 1 auto; min-height: 0; background: #07090f; overflow: hidden; }
+.jv-stage iframe { position: absolute; left: 0; top: 0; width: calc(100% / var(--jv-zoom)); height: calc(100% / var(--jv-zoom)); transform: scale(var(--jv-zoom)); transform-origin: 0 0; border: 0; color-scheme: dark; visibility: hidden; }
+.jv-zoom { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+.jv-zoom button { background: var(--panel); border: 0; color: var(--muted); padding: 4px 8px; cursor: pointer; font: 700 11px var(--mono); }
+.jv-zoom button:hover { color: var(--text); background: var(--accent-bg); }
+.jv-zoom b { font: 600 10.5px var(--mono); color: var(--text-2); padding: 0 6px; min-width: 42px; text-align: center; }
+.jv-stage.jv-live iframe { visibility: visible; }
+.jv-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 24px; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+.jv-empty b { color: var(--text); }
+.jv-empty code { font-family: var(--mono); font-size: 11.5px; color: var(--accent-2); }
+.jv-stage.jv-live .jv-empty { display: none; }
+@media (max-width: 860px), (max-height: 520px) {
+  .jv { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 8px; }
+  .jv-body { padding: 8px; gap: 8px; font-size: 11px; }
+  .jv-log { height: 140px; }
+}

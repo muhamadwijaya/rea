@@ -18,6 +18,14 @@ public sealed class TerminalOptions
     public string? EnginePython { get; set; }
     /// <summary>When set, gateway and engine logs are written to files in this folder.</summary>
     public string? LogDirectory { get; set; }
+    /// <summary>JARVIS tab: folder of the Mark LVII install (app, venv); defaults to the per-user data folder.</summary>
+    public string? JarvisDirectory { get; set; }
+    /// <summary>JARVIS tab: zip archive of Mark LVII that PASANG downloads.</summary>
+    public string JarvisArchiveUrl { get; set; } = "https://github.com/FatihMakes/Mark-LVII/archive/refs/heads/main.zip";
+    /// <summary>JARVIS tab: Python 3.11–3.13 for its virtualenv; found automatically when empty.</summary>
+    public string? JarvisPython { get; set; }
+    /// <summary>JARVIS tab: port of the Mark LVII dashboard (fixed at 8000 by Mark LVII).</summary>
+    public int JarvisDashboardPort { get; set; } = 8000;
     public List<FeedConfig> Feeds { get; set; } = new();
 }
 
