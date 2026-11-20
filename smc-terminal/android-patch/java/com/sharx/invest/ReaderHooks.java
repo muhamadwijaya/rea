@@ -65,6 +65,11 @@ public final class ReaderHooks {
             RED = 0xFFFF4D6A, DIM = 0xFF8FA6C3;
 
     private static WeakReference<Activity> activity = new WeakReference<>(null);
+
+    /** The app's activity while it is open (JarvisHooks starts phone actions from it). */
+    static Activity currentActivity() {
+        return activity.get();
+    }
     private static WebView main;
     private static String script;  // Readability + extractor, evaluated in article pages
 

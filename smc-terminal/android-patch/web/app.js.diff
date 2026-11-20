@@ -1,6 +1,11 @@
 --- a/assets/wwwroot/js/app.js
 +++ b/assets/wwwroot/js/app.js
-@@ -9,6 +9,7 @@
+@@ -5,10 +5,12 @@
+ import dashboard from './dashboard.js';
+ import calendar from './calendar.js';
+ import method from './method.js';
++import jarvis from './jarvis.js';
+ import { trainingPage } from './training.js';
  import { VoiceAssistant } from './voice.js';
  import { marketPage } from './market.js';
  import { MARKET_KEYS, MARKETS } from './markets.js';
@@ -8,7 +13,15 @@
  
  export const store = {
    stats: null,
-@@ -62,7 +63,21 @@
+@@ -30,6 +32,7 @@
+   training: trainingPage,
+   kalender: calendar,
+   metode: method,
++  jarvis,
+ };
+ const initialized = new Set();
+ let current = null;
+@@ -62,7 +65,21 @@
  window.SMC = { go, openAnalysis };
  
  
@@ -30,7 +43,7 @@
    const [name = 'dashboard', ...params] = location.hash.replace(/^#/, '').split('/').map(decodeURIComponent);
    const tab = modules[name] ? name : 'dashboard';
    $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-@@ -133,7 +148,7 @@
+@@ -133,7 +150,7 @@
      `${s.alerts24h} alert 24j`,
    ];
    $('#status-left').textContent = `SHARX INVEST · ${parts.join(' · ')}`;
@@ -39,7 +52,15 @@
  }
  
  function updateLiveLabel() {
-@@ -222,11 +237,13 @@
+@@ -177,6 +194,7 @@
+   conn.on('direction', async () => { await loadDirection(); });
+   conn.on('stats', (s) => { store.stats = s; updateLiveLabel(); emit('stats', s); });
+   conn.on('calendar', () => { emit('calendar'); });
++  conn.on('jarvis', (evt) => { emit('jarvis', evt); });
+   conn.on('engine', (s) => {
+     if (!s.online) toast('Analisa belum tersedia', s.error || 'Analisa tidak tersedia sementara.');
+     refreshStats();
+@@ -222,11 +240,13 @@
    try {
      const res = await api('/api/news?limit=40');
      store.headlines = res.items;
@@ -53,7 +74,7 @@
    const ids = new Set(store.headlines.map((h) => h.id));
    store.headlines = [...items.filter((i) => !ids.has(i.id)), ...store.headlines].slice(0, 40);
    renderMarquee();
-@@ -446,6 +463,7 @@
+@@ -446,6 +466,7 @@
  async function boot() {
    await initPreferences();
    window.SMC.voice = new VoiceAssistant(store);

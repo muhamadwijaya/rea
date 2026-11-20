@@ -1,0 +1,53 @@
+/* JARVIS on the phone (js/jarvis-phone.js), on top of css/jarvis.css. */
+.jp-core { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 2px; }
+.jp-orb { width: 168px; height: 168px; cursor: pointer; }
+.jp-state { font: 700 12px var(--mono); letter-spacing: .2em; color: var(--muted); }
+.jp-state.jp-listening, .jp-state.jp-speaking { color: var(--go); }
+.jp-state.jp-thinking, .jp-state.jp-connecting, .jp-state.jp-reconnecting { color: var(--neu); }
+.jp-state.jp-error, .jp-state.jp-nokey { color: var(--bear); }
+.jp-controls { display: flex; gap: 8px; }
+.jp-controls .btn-primary { min-width: 120px; }
+.jp-controls .btn-primary.danger { background: var(--stop); color: #fff; border-color: #ff7d96; box-shadow: var(--stop-glow); }
+.jp-sec { border: 1px solid var(--line); border-radius: 3px; background: var(--bg-2); }
+.jp-sec > summary { cursor: pointer; padding: 7px 10px; font: 700 10.5px var(--mono); letter-spacing: .14em; color: var(--text-2); list-style: none; }
+.jp-sec > summary::-webkit-details-marker { display: none; }
+.jp-sec > summary::before { content: '▸ '; color: var(--accent); }
+.jp-sec[open] > summary::before { content: '▾ '; }
+.jp-sec > :not(summary) { margin: 0 10px 10px; }
+.jp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
+.jp-grid label, .jp-sec .jv-form label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+.jp-grid input, .jp-grid select, .jp-say input { background: var(--bg); border: 1px solid var(--line-2); color: var(--text); padding: 6px 8px; border-radius: 3px; font: 600 12.5px var(--mono); min-width: 0; width: 100%; box-sizing: border-box; }
+.jp-sec .jv-form { min-width: 0; }
+.jp-sec .jv-form input { width: 100%; box-sizing: border-box; }
+.jp-grid input:focus, .jp-grid select:focus, .jp-say input:focus { outline: none; border-color: var(--accent); }
+.jp-grid button { grid-column: 1 / -1; }
+.jp-check { display: flex; gap: 8px; align-items: flex-start; font-size: 11px; color: var(--text-2); margin-top: 8px !important; }
+.jp-check input { margin-top: 2px; accent-color: var(--accent); }
+.jp-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.jp-keyline, .jp-pcinfo { font-size: 11px; color: var(--muted); }
+.jp-pcinfo b { color: var(--text); }
+.jp-pcchip.on { color: var(--go); }
+.jp-pcchip.off { color: var(--bear); }
+.jp-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; font-size: 11.5px; }
+.jp-list li { display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; border-bottom: 1px dashed var(--line); padding-bottom: 4px; overflow-wrap: anywhere; }
+.jp-x { background: none; border: 1px solid var(--line-2); color: var(--muted); border-radius: 3px; cursor: pointer; flex: none; padding: 0 6px; }
+.jp-x:hover { color: var(--bear); border-color: var(--bear); }
+.jp-views button { font-weight: 700; letter-spacing: .1em; }
+.jp-chat { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.jp-chat[hidden], .jv-main .jv-stage[hidden] { display: none; }
+.jp-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: #001427; }
+.jp-empty { margin: auto; color: var(--muted); font-size: 13px; }
+.jp-msg { max-width: 80%; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.jp-msg b { display: block; font: 700 9.5px var(--mono); letter-spacing: .16em; color: var(--muted); margin-bottom: 2px; }
+.jp-model { align-self: flex-start; background: rgba(56, 211, 245, .08); border: 1px solid rgba(56, 211, 245, .25); border-bottom-left-radius: 3px; }
+.jp-model b { color: var(--cyan); }
+.jp-user { align-self: flex-end; background: var(--accent-bg); border: 1px solid rgba(153, 255, 0, .3); border-bottom-right-radius: 3px; }
+.jp-user b { color: var(--accent-2); }
+.jp-tool { align-self: center; font: 600 11px var(--mono); color: var(--muted); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 99px; padding: 3px 10px; max-width: 92%; }
+.jp-tool.ok { color: var(--text-2); }
+.jp-tool.fail { color: var(--bear); border-color: rgba(255, 77, 94, .45); }
+.jp-pc { align-self: flex-end; background: rgba(167, 139, 250, .1); border: 1px solid rgba(167, 139, 250, .35); border-bottom-right-radius: 3px; }
+.jp-pc b { color: var(--purple); }
+.jp-note { align-self: center; font-size: 12px; color: var(--neu); text-align: center; max-width: 90%; }
+.jp-say { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); flex: none; }
+.jp-say input { flex: 1 1 auto; font-size: 14px; padding: 9px 10px; }

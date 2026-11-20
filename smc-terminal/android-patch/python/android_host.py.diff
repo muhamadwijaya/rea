@@ -1,0 +1,21 @@
+--- a/android_host.py
++++ b/android_host.py
+@@ -21,6 +21,9 @@
+  except OSError:server=Server(('127.0.0.1',0),Handler)
+  server.state=state;state.server=server;state.origin=f'http://127.0.0.1:{server.server_port}';_STATE=state
+  threading.Thread(target=server.serve_forever,name='sharx-http',daemon=True).start()
++ try:
++  from app import jarvis_lan;jarvis_lan.restore(state)  # JARVIS: PC → phone listener, when the user left it on
++ except Exception:pass
+  if os.environ.get('SHARX_TEST_MODE')!='1':state.start()
+  return state.origin
+ 
+@@ -45,6 +48,8 @@
+   try:
+    if path=='/hub/market/negotiate':return self.reply(200,dict(negotiateVersion=1,connectionId=secrets.token_hex(16),connectionToken=secrets.token_urlsafe(24),availableTransports=[dict(transport='WebSockets',transferFormats=['Text','Binary'])]))
+    if path=='/hub/market' and self.headers.get('Upgrade','').lower()=='websocket':return self.websocket()
++   if path=='/api/jarvis/live' and self.headers.get('Upgrade','').lower()=='websocket':
++    from app import jarvis_phone;return jarvis_phone.live(self)
+    if path.startswith('/api/'):
+     length=int(self.headers.get('Content-Length','0'))
+     if not 0<=length<=32000000:return self.reply(413,dict(error='too_large',message='Body terlalu besar.'))

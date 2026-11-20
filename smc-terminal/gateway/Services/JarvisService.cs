@@ -11,12 +11,15 @@ using System.Text.RegularExpressions;
 namespace SmcTerminal.Gateway.Services;
 
 /// <summary>Where the JARVIS tab keeps Mark LVII (FatihMakes, CC BY-NC 4.0) and where its dashboard answers.</summary>
-public sealed record JarvisOptions(string Root, string LogFile, Uri Archive, string? Python, int DashboardPort)
+public sealed record JarvisOptions(string Root, string LogFile, Uri Archive, string? Python, int DashboardPort, string? PluginSource = null)
 {
     public string AppDirectory => Path.Combine(Root, "app");
     public string VenvDirectory => Path.Combine(Root, "venv");
     public string ManifestFile => Path.Combine(Root, "installed.json");
     public string StagingDirectory => Path.Combine(Root, "app.new");
+    /// <summary>PC → phone: where Mark LVII finds the SHARX phone_command plugin and the paired phone.</summary>
+    public string PhonePlugin => Path.Combine(AppDirectory, "plugins", "sharx_phone.py");
+    public string PhoneConfig => Path.Combine(AppDirectory, "config", "sharx_phone.json");
     public string VenvPython => OperatingSystem.IsWindows()
         ? Path.Combine(VenvDirectory, "Scripts", "python.exe")
         : Path.Combine(VenvDirectory, "bin", "python");
@@ -37,11 +40,15 @@ public sealed record JarvisProcessState(string State, int? Pid, DateTimeOffset? 
 /// (the port answers but it is not Mark LVII).</summary>
 public sealed record JarvisDashboardState(string State, string? Url, string? LanUrl, string? Detail, DateTimeOffset Checked);
 
+/// <summary>PC → phone: the phone this PC sends requests to (JARVIS on the phone in SHARX Android).</summary>
+public sealed record JarvisPhoneState(bool Paired, string? Address, DateTimeOffset? PairedAt, bool PluginInstalled);
+
 /// <summary>Everything the JARVIS tab shows. <c>Log</c> holds the output lines after the caller's <c>after</c> sequence
 /// number (at most 150); <c>LogSeq</c> is the number of the last line.</summary>
 public sealed record JarvisStatus(
     string Mode, string Source, string License, string LicenseUrl, string Folder, bool Installed, JarvisInstallView? Install,
-    JarvisJobState? Job, JarvisProcessState Process, JarvisDashboardState Dashboard, long LogSeq, IReadOnlyList<string> Log);
+    JarvisJobState? Job, JarvisProcessState Process, JarvisDashboardState Dashboard, JarvisPhoneState Phone, long LogSeq,
+    IReadOnlyList<string> Log);
 
 public sealed record JarvisResult(bool Ok, string? Error, string Message);
 
@@ -98,7 +105,7 @@ public sealed partial class JarvisService(JarvisOptions options, IHttpClientFact
             var view = install is null ? null : new JarvisInstallView(install.Commit, install.InstalledAt, install.PythonVersion, install.SetupOk);
             var lines = _lines.Where(l => l.Seq > after).Select(l => l.Text).ToList();
             return new JarvisStatus("local", Source, License, LicenseUrl, options.AppDirectory, IsInstalled(install), view, _job,
-                _processState, dashboard, _lineSeq, lines.Count > ShownLines ? lines[^ShownLines..] : lines);
+                _processState, dashboard, PhoneState(), _lineSeq, lines.Count > ShownLines ? lines[^ShownLines..] : lines);
         }
     }
 
@@ -167,6 +174,8 @@ public sealed partial class JarvisService(JarvisOptions options, IHttpClientFact
             Line($"{files.Count} file Mark LVII{(commit is null ? "" : $" (commit {commit[..7]})")} di {options.AppDirectory}");
             // written before setup.py: a later install still knows which files came from the archive
             WriteManifest(new JarvisInstall(commit, DateTimeOffset.Now, python.Path, python.Version, options.Archive.ToString(), false, files));
+
+            EnsurePlugin();
 
             Step("venv", "Menyiapkan virtualenv Python khusus JARVIS …");
             await EnsureVenvAsync(python, ct);
@@ -818,6 +827,199 @@ public sealed partial class JarvisService(JarvisOptions options, IHttpClientFact
     {
         var b = address.GetAddressBytes();
         return b[0] == 10 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168);
+    }
+
+    // ------------------------------------------------------------------ PC → phone
+
+    /// <summary>config/sharx_phone.json, read by the phone_command plugin (lower-case keys: address, token, pairedAt).</summary>
+    private sealed record PhoneConfigFile(string Address, string Token, DateTimeOffset PairedAt);
+
+    private static readonly JsonSerializerOptions PhoneJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private PhoneConfigFile? ReadPhone()
+    {
+        try
+        {
+            return File.Exists(options.PhoneConfig) ? JsonSerializer.Deserialize<PhoneConfigFile>(File.ReadAllText(options.PhoneConfig), PhoneJson) : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private JarvisPhoneState PhoneState()
+    {
+        var phone = ReadPhone();
+        return new JarvisPhoneState(phone is not null, phone?.Address, phone?.PairedAt, File.Exists(options.PhonePlugin));
+    }
+
+    /// <summary>Puts the SHARX phone_command plugin into Mark LVII's plugins folder (Mark LVII loads it at start).</summary>
+    private void EnsurePlugin()
+    {
+        if (options.PluginSource is null || !File.Exists(options.PluginSource) || !Directory.Exists(options.AppDirectory))
+        {
+            return;
+        }
+        try
+        {
+            var text = File.ReadAllText(options.PluginSource);
+            if (!File.Exists(options.PhonePlugin) || File.ReadAllText(options.PhonePlugin) != text)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(options.PhonePlugin)!);
+                File.WriteAllText(options.PhonePlugin, text);
+                Line("plugin SHARX phone_command dipasang ke Mark LVII (JARVIS di PC bisa menyuruh HP).");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.LogWarning("JARVIS phone plugin not written: {Message}", ex.Message);
+        }
+    }
+
+    /// <summary>The phone's address, only on this PC or a private network (home LAN, link-local, a VPN such as Tailscale).</summary>
+    private static string ParsePhoneAddress(string? address)
+    {
+        var text = (address ?? "").Trim();
+        foreach (var prefix in new[] { "http://", "https://" })
+        {
+            if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                text = text[prefix.Length..];
+            }
+        }
+        text = text.Split('/')[0];
+        var colon = text.LastIndexOf(':');
+        var host = colon > 0 ? text[..colon] : text;
+        var port = 8010;
+        if (colon > 0 && (!int.TryParse(text[(colon + 1)..], out port) || port is < 1 or > 65535))
+        {
+            throw new JarvisException("Port HP tidak valid (bawaan 8010).");
+        }
+        if (!IPAddress.TryParse(host, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork)
+        {
+            throw new JarvisException("Isi alamat IP HP, mis. 192.168.1.7:8010 (tertulis di tab JARVIS di HP).");
+        }
+        var b = ip.GetAddressBytes();
+        var allowed = IPAddress.IsLoopback(ip) || IsPrivate(ip) || (b[0] == 100 && b[1] is >= 64 and <= 127) || (b[0] == 169 && b[1] == 254);
+        if (!allowed)
+        {
+            throw new JarvisException("Hanya alamat jaringan lokal (mis. 192.168.x.x) atau VPN pribadi yang bisa dipakai.");
+        }
+        return $"{ip}:{port}";
+    }
+
+    /// <summary>A JSON body with a Content-Length (the phone's small server reads no chunked streams).</summary>
+    private static StringContent JsonBody(object value) => new(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json");
+
+    private static HttpClient PhoneClient(TimeSpan timeout) =>
+        new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, ConnectTimeout = TimeSpan.FromSeconds(4) }) { Timeout = timeout };
+
+    private static async Task<JsonElement?> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var text = await ReadPrefixAsync(response, 65536, ct);
+            return JsonDocument.Parse(text).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? Text(JsonElement? json, string name) =>
+        json is { ValueKind: JsonValueKind.Object } j && j.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    public async Task<JarvisResult> PairPhoneAsync(string? address, string? key, CancellationToken ct)
+    {
+        string target;
+        try
+        {
+            target = ParsePhoneAddress(address);
+        }
+        catch (JarvisException ex)
+        {
+            return Fail("invalid_address", ex.Message);
+        }
+        var code = (key ?? "").Trim().ToUpperInvariant().Replace("-", "").Replace(" ", "");
+        if (code.Length != 8 || code.Any(c => !"ABCDEFGHJKMNPQRSTUVWXYZ23456789".Contains(c)))
+        {
+            return Fail("invalid_key", "Kode dari HP terdiri dari 8 huruf/angka (tanpa O, I, L, 0, 1).");
+        }
+        using var http = PhoneClient(TimeSpan.FromSeconds(10));
+        try
+        {
+            using var response = await http.PostAsync($"http://{target}/pair", JsonBody(new { key = code }), ct);
+            var json = await ReadJsonAsync(response, ct);
+            var token = Text(json, "token");
+            if (!response.IsSuccessStatusCode || string.IsNullOrEmpty(token))
+            {
+                return Fail("refused", Text(json, "message") ?? $"HP menolak pairing (HTTP {(int)response.StatusCode}).");
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(options.PhoneConfig)!);
+            File.WriteAllText(options.PhoneConfig, JsonSerializer.Serialize(new PhoneConfigFile(target, token, DateTimeOffset.Now), PhoneJson));
+            EnsurePlugin();
+            Line($"HP {target} terpasang.");
+            return new JarvisResult(true, null, _process is null
+                ? "HP terpasang. JARVIS di PC bisa menyuruh HP setelah dijalankan."
+                : "HP terpasang. Jalankan ulang JARVIS di PC agar perintah suara ke HP aktif.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException)
+        {
+            return Fail("offline", $"HP {target} tidak menjawab ({ex.GetType().Name}). SHARX harus terbuka di HP dengan \"Izinkan PC mengontrol HP\" aktif, satu Wi-Fi.");
+        }
+    }
+
+    public async Task<JarvisResult> PhoneCommandAsync(string? text, CancellationToken ct)
+    {
+        var command = string.Join(' ', (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (command.Length == 0)
+        {
+            return Fail("empty", "Perintah untuk HP kosong.");
+        }
+        if (command.Length > 2000)
+        {
+            command = command[..2000];
+        }
+        var phone = ReadPhone();
+        if (phone is null)
+        {
+            return Fail("not_paired", "HP belum dipasangkan.");
+        }
+        using var http = PhoneClient(TimeSpan.FromSeconds(60));
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://{phone.Address}/command") { Content = JsonBody(new { text = command }) };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", phone.Token);
+        try
+        {
+            using var response = await http.SendAsync(request, ct);
+            var json = await ReadJsonAsync(response, ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return Fail("pairing_lost", "HP tidak lagi menerima PC ini. Buat kode baru di HP dan pasangkan lagi.");
+            }
+            var reply = Text(json, "reply");
+            return reply is { Length: > 0 }
+                ? new JarvisResult(true, null, reply)
+                : Fail("no_reply", Text(json, "detail") ?? Text(json, "message") ?? $"HP menjawab HTTP {(int)response.StatusCode}.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return Fail("offline", $"HP {phone.Address} tidak menjawab ({ex.GetType().Name}).");
+        }
+    }
+
+    public JarvisResult UnpairPhone()
+    {
+        try
+        {
+            File.Delete(options.PhoneConfig);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Fail("io", ex.Message);
+        }
+        return new JarvisResult(true, null, "HP dilupakan.");
     }
 
     // ------------------------------------------------------------------ manifest and log

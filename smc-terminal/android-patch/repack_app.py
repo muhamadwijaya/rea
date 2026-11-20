@@ -1,8 +1,9 @@
 """Rebuilds Chaquopy's app.imy with the patched Python files (every other entry byte-identical, same compression)
 and records its new SHA-1 in build.json, so Chaquopy extracts the new code.
 
-Usage: python3 repack_app.py ORIGINAL_APP_IMY PATCHED_DIR OUT_APP_IMY BUILD_JSON
+Usage: python3 repack_app.py ORIGINAL_APP_IMY PATCHED_DIR OUT_APP_IMY BUILD_JSON [ADDED_DIR]
 PATCHED_DIR holds the patched files at their paths inside app.imy (android_gateway.py, app/article_retrieval.py).
+ADDED_DIR holds new modules at their paths inside app.imy (app/jarvis_remote.py); none of them may exist there yet.
 """
 import hashlib
 import json
@@ -11,19 +12,40 @@ import sys
 import zipfile
 
 src, patched, dst, build_json = sys.argv[1:5]
-changed = {}
-for root, _, files in os.walk(patched):
-    for name in files:
-        full = os.path.join(root, name)
-        changed[os.path.relpath(full, patched).replace(os.sep, "/")] = full
+added_dir = sys.argv[5] if len(sys.argv) > 5 else None
+
+
+def tree(folder):
+    found = {}
+    if not folder:
+        return found
+    for root, _, files in os.walk(folder):
+        for name in files:
+            full = os.path.join(root, name)
+            found[os.path.relpath(full, folder).replace(os.sep, "/")] = full
+    return found
+
+
+changed, added = tree(patched), tree(added_dir)
 with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst + ".new", "w") as zout:
     seen = set()
+    template = None
     for info in zin.infolist():
         data = zin.read(info.filename)
         if info.filename in changed:
             data = open(changed[info.filename], "rb").read()
             seen.add(info.filename)
+        if info.filename in added:
+            sys.exit(f"already in app.imy, patch it instead: {info.filename}")
+        if info.filename == "android_gateway.py":
+            template = info
         zout.writestr(info, data, compress_type=info.compress_type)
+    for name in sorted(added):
+        # same timestamp, permissions and compression as the gateway module
+        info = zipfile.ZipInfo(name, date_time=template.date_time)
+        info.external_attr = template.external_attr
+        info.create_system = template.create_system
+        zout.writestr(info, open(added[name], "rb").read(), compress_type=template.compress_type)
 missing = set(changed) - seen
 if missing:
     sys.exit(f"not in app.imy: {sorted(missing)}")

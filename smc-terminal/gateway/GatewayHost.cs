@@ -65,7 +65,8 @@ public static class GatewayHost
             Path.Combine(options.LogDirectory ?? Path.Combine(root, "logs"), "jarvis.log"),
             new Uri(options.JarvisArchiveUrl),
             options.JarvisPython,
-            options.JarvisDashboardPort));
+            options.JarvisDashboardPort,
+            Path.Combine(builder.Environment.ContentRootPath, "jarvis", "sharx_phone.py")));
         builder.Services.AddHttpClient(JarvisService.HttpName, client =>
         {
             client.Timeout = Timeout.InfiniteTimeSpan; // bounded by the download's own 10-minute limit

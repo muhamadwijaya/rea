@@ -23,7 +23,17 @@ public static class JarvisApi
         jarvis.MapPost("/cancel", (JarvisService service) => Reply(service.CancelInstall()));
         jarvis.MapPost("/start", async (JarvisService service, CancellationToken ct) => Reply(await service.LaunchAsync(ct)));
         jarvis.MapPost("/stop", async (JarvisService service) => Reply(await service.StopJarvisAsync(TimeSpan.FromSeconds(10))));
+        // PC → phone: JARVIS on the phone (SHARX Android) accepts requests from a paired PC
+        jarvis.MapPost("/phone/pair", async (PhonePairRequest body, JarvisService service, CancellationToken ct) =>
+            Reply(await service.PairPhoneAsync(body.Address, body.Key, ct)));
+        jarvis.MapPost("/phone/command", async (PhoneCommandRequest body, JarvisService service, CancellationToken ct) =>
+            Reply(await service.PhoneCommandAsync(body.Text, ct)));
+        jarvis.MapPost("/phone/unpair", (JarvisService service) => Reply(service.UnpairPhone()));
     }
+
+    public sealed record PhonePairRequest(string? Address, string? Key);
+
+    public sealed record PhoneCommandRequest(string? Text);
 
     private static IResult Reply(JarvisResult result) => result.Ok
         ? Results.Json(new { ok = true, message = result.Message })

@@ -41,3 +41,28 @@
    cancel() {
      this.generation++; this.current?.complete?.(false);
      for (const j of this.pending) j.complete?.(false);
+@@ -35,12 +53,24 @@
+     if (this.current) { this.pending.unshift(this.current); this.current = null; }
+     this.paused = false; this.changed(); this.drain();
+   }
++  // JARVIS on the phone takes the screen and the speaker while its conversation runs: the job in progress goes back to
++  // the front of the queue (a page the user opened is dropped), and the queue waits until the conversation ends.
++  hold() {
++    if (this.current) {
++      this.generation++; this.running = false;
++      if (this.current.transient) this.current.complete?.(false); else this.pending.unshift(this.current);
++      this.current = null; this.changed();
++    }
++    this.drain();
++  }
+   async drain() {
+     if (this.running || this.paused || this.restoring) return;
+     this.running = true; const generation = this.generation;
+     const active = () => this.generation === generation;
+     try {
+       while (this.pending.length && active()) {
++        while (window.__sharxJarvis?.busy?.() && active()) await new Promise((r) => setTimeout(r, 1000));
++        if (!active() || !this.pending.length) break;
+         const job = this.current = this.pending.shift(); this.changed();
+         let finished;
+         try { finished = await this.execute(job, active); }

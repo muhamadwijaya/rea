@@ -5,22 +5,29 @@
   def stats(self):
    rows=[r for r in (self.snapshot or {}).get('rows',[]) if not r.get('error')];recent=[i for i in list(self.news.values()) if date(i['published'])>=now()-timedelta(days=1)];qs=background.quotes('all');high=[e for e in self.events if e['impact']=='High' and date(e['date'])>=now()];local=now().astimezone();end=(local+timedelta(days=1)).replace(hour=0,minute=0,second=0,microsecond=0)
 -  return dict(priceData=price_feed.status(),appVersion="3.20-independent.9",generatedAt=iso(),engineOnline=True,engineError=None,screenerAt=self.screener_at,screenerTf=self.config.get('ScreenerTimeframe','4h'),instruments=len(rows),universe=len(qs.get('rows',[])),failed=(self.snapshot or {}).get('failures',0),bullish=sum('bullish' in r.get('direction','') for r in rows),bearish=sum('bearish' in r.get('direction','') for r in rows),neutral=sum(r.get('direction')=='neutral' for r in rows),chochRecent=sum((r.get('lastEvent') or {}).get('kind')=='CHoCH' and (r.get('lastEvent') or {}).get('barsAgo',999)<=6 for r in rows),nearOb=sum((r.get('nearby') or {}).get('ob',0) for r in rows),nearFvg=sum((r.get('nearby') or {}).get('fvg',0) for r in rows),inDiscount=sum((r.get('zone') or {}).get('area')=='discount' for r in rows),inPremium=sum((r.get('zone') or {}).get('area')=='premium' for r in rows),news24h=len(recent),newsByMarket={m:sum(m in n['markets'] for n in recent) for m in MARKETS},newsTotal=len(self.news),newsAt=self.news_at,feedsOk=sum(f['lastOk'] is not None and f['lastError'] is None for f in self.feeds),feedsTotal=len(self.feeds),highImpactToday=sum(date(e['date'])<end for e in high),highImpactWeek=len(high),nextHighImpact=next(iter(high),None),alerts24h=sum(date(a['time'])>=now()-timedelta(days=1) for a in self.alerts),analyses24h=sum(t>time.time()-86400 for t in self.analysis_times),metrics=list(self.metrics)[-60:])
-+  return dict(priceData=price_feed.status(),appVersion="3.20-independent.12",generatedAt=iso(),engineOnline=True,engineError=None,screenerAt=self.screener_at,screenerTf=self.config.get('ScreenerTimeframe','4h'),instruments=len(rows),universe=len(qs.get('rows',[])),failed=(self.snapshot or {}).get('failures',0),bullish=sum('bullish' in r.get('direction','') for r in rows),bearish=sum('bearish' in r.get('direction','') for r in rows),neutral=sum(r.get('direction')=='neutral' for r in rows),chochRecent=sum((r.get('lastEvent') or {}).get('kind')=='CHoCH' and (r.get('lastEvent') or {}).get('barsAgo',999)<=6 for r in rows),nearOb=sum((r.get('nearby') or {}).get('ob',0) for r in rows),nearFvg=sum((r.get('nearby') or {}).get('fvg',0) for r in rows),inDiscount=sum((r.get('zone') or {}).get('area')=='discount' for r in rows),inPremium=sum((r.get('zone') or {}).get('area')=='premium' for r in rows),news24h=len(recent),newsByMarket={m:sum(m in n['markets'] for n in recent) for m in MARKETS},newsTotal=len(self.news),newsAt=self.news_at,feedsOk=sum(f['lastOk'] is not None and f['lastError'] is None for f in self.feeds),feedsTotal=len(self.feeds),highImpactToday=sum(date(e['date'])<end for e in high),highImpactWeek=len(high),nextHighImpact=next(iter(high),None),alerts24h=sum(date(a['time'])>=now()-timedelta(days=1) for a in self.alerts),analyses24h=sum(t>time.time()-86400 for t in self.analysis_times),metrics=list(self.metrics)[-60:])
++  return dict(priceData=price_feed.status(),appVersion="3.20-independent.13",generatedAt=iso(),engineOnline=True,engineError=None,screenerAt=self.screener_at,screenerTf=self.config.get('ScreenerTimeframe','4h'),instruments=len(rows),universe=len(qs.get('rows',[])),failed=(self.snapshot or {}).get('failures',0),bullish=sum('bullish' in r.get('direction','') for r in rows),bearish=sum('bearish' in r.get('direction','') for r in rows),neutral=sum(r.get('direction')=='neutral' for r in rows),chochRecent=sum((r.get('lastEvent') or {}).get('kind')=='CHoCH' and (r.get('lastEvent') or {}).get('barsAgo',999)<=6 for r in rows),nearOb=sum((r.get('nearby') or {}).get('ob',0) for r in rows),nearFvg=sum((r.get('nearby') or {}).get('fvg',0) for r in rows),inDiscount=sum((r.get('zone') or {}).get('area')=='discount' for r in rows),inPremium=sum((r.get('zone') or {}).get('area')=='premium' for r in rows),news24h=len(recent),newsByMarket={m:sum(m in n['markets'] for n in recent) for m in MARKETS},newsTotal=len(self.news),newsAt=self.news_at,feedsOk=sum(f['lastOk'] is not None and f['lastError'] is None for f in self.feeds),feedsTotal=len(self.feeds),highImpactToday=sum(date(e['date'])<end for e in high),highImpactWeek=len(high),nextHighImpact=next(iter(high),None),alerts24h=sum(date(a['time'])>=now()-timedelta(days=1) for a in self.alerts),analyses24h=sum(t>time.time()-86400 for t in self.analysis_times),metrics=list(self.metrics)[-60:])
   def record(self,result):
    inst=result['instrument'];bias=result['bias'];rec=dict(symbol=inst['symbol'],name=inst['name'],tv=inst.get('tv',''),tf=result['tf'],score=bias['score'],label=bias['label'],direction=bias['direction'],time=iso(),summary=(result.get('narrative') or [None])[-1])
    self.analyses=deque([rec]+[a for a in self.analyses if (a['symbol'],a['tf'])!=(rec['symbol'],rec['tf'])],maxlen=20);self.analysis_times.append(time.time());self.publish('analysis',rec)
-@@ -278,8 +278,8 @@
+@@ -275,11 +275,15 @@
+   if p=='/ui/state':
+    from app import ui_state
+    return ui_state.state(b.get('items') if method=='POST' else None)
++  if p.startswith('/jarvis/'):
++   # JARVIS tab: Mark LVII's assistant (FatihMakes, CC BY-NC 4.0) on this phone, and its PC when paired
++   from app import jarvis_phone
++   return jarvis_phone.dispatch(self,method,p,q,b)
    if p=='/assistant/queue':
     from app import assistant_queue
     return assistant_queue.state(b.get('state') if method=='POST' else None)
 -  if p=='/health':return dict(appVersion='3.20-independent.9',priceData=price_feed.status(),gateway='ok',engine=dict(online=True,lastOk=iso(),error=None,supervisor=dict(managed=True,state='running',pid=os.getpid(),restarts=0,failure=None,logFile=None)),screenerAt=self.screener_at,directionAt=self.direction_at,news=dict(total=len(self.news),updated=self.news_at),calendar=dict(updated=self.calendar_at,error=self.calendar_error))
 -  if p=='/data/status':return dict(appVersion='3.20-independent.9',**price_feed.status())
-+  if p=='/health':return dict(appVersion='3.20-independent.12',priceData=price_feed.status(),gateway='ok',engine=dict(online=True,lastOk=iso(),error=None,supervisor=dict(managed=True,state='running',pid=os.getpid(),restarts=0,failure=None,logFile=None)),screenerAt=self.screener_at,directionAt=self.direction_at,news=dict(total=len(self.news),updated=self.news_at),calendar=dict(updated=self.calendar_at,error=self.calendar_error))
-+  if p=='/data/status':return dict(appVersion='3.20-independent.12',**price_feed.status())
++  if p=='/health':return dict(appVersion='3.20-independent.13',priceData=price_feed.status(),gateway='ok',engine=dict(online=True,lastOk=iso(),error=None,supervisor=dict(managed=True,state='running',pid=os.getpid(),restarts=0,failure=None,logFile=None)),screenerAt=self.screener_at,directionAt=self.direction_at,news=dict(total=len(self.news),updated=self.news_at),calendar=dict(updated=self.calendar_at,error=self.calendar_error))
++  if p=='/data/status':return dict(appVersion='3.20-independent.13',**price_feed.status())
    if p=='/stats':return self.stats()
    if p=='/quotes':instruments.by_market(market);return background.quotes(market)
    if p=='/instruments':return dict(market=market,scope=q.get('scope','core'),instruments=[i.to_json() for i in instruments.by_market(market,q.get('scope','core'))])
-@@ -305,6 +305,15 @@
+@@ -305,6 +309,15 @@
    if p=='/calendar':
     from app.calendar_analysis import affected
     return dict(updated=self.calendar_at,error=self.calendar_error,events=[dict(e,affectedAssets=[i.to_json() for i in affected(e['currency'])]) for e in self.events])
@@ -36,7 +43,7 @@
    if p=='/calendar/analyze':
     if method!='POST':raise ValueError('Gunakan POST untuk analisa kalender')
     from app.calendar_analysis import analyze as calendar_analyze
-@@ -332,6 +341,16 @@
+@@ -332,6 +345,16 @@
    if p=='/ai/news/targets':
     from app.ai.news_fast import targets
     return targets(q.get('id',''))

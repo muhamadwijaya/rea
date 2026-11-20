@@ -69,7 +69,7 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 | **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis, live chart trade virtual per aset |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
-| **JARVIS** | Asisten AI suara **Mark LVII** (FatihMakes, CC BY-NC 4.0): pasang & jalankan di PC ini, panel kendalinya tampil di tab ↓ [JARVIS](#jarvis-mark-lvii) |
+| **JARVIS** | Asisten AI suara **Mark LVII** (FatihMakes, CC BY-NC 4.0): pasang & jalankan di PC ini, panel kendalinya tampil di tab, dan PC ↔ HP saling kontrol ↓ [JARVIS](#jarvis-mark-lvii) |
 
 **Aset**: 57 aset inti (`config/watchlist.json`, dipindai SMC 1H/4H/1D) + **universe ±2.100 aset**
 (`config/universe.json`): seluruh S&P 500 + saham AS populer & ETF, seluruh saham BEI yang tersedia di Yahoo
@@ -197,6 +197,17 @@ kendalinya (dashboard Mark LVII) di dalam tab.
    JARVIS yang dijalankan dari tab ikut ditutup saat SHARX ditutup. JARVIS yang dijalankan di luar SHARX tetap
    terdeteksi dan panelnya tetap tampil.
 
+5. **KONTROL HP** (opsional): PC ini menyuruh JARVIS di HP (SHARX Android Fix13).
+   - Di HP: tab JARVIS → KONTROL PC → centang "Izinkan PC mengontrol HP ini". HP menampilkan alamatnya (port 8010)
+     dan kode sekali pakai.
+   - Di PC: isi keduanya di **KONTROL HP** → PASANGKAN HP. Token disimpan di
+     `jarvis\app\config\sharx_phone.json` (tidak terenkripsi, seperti Gemini key Mark LVII).
+   - Perintah dari kotak **PERINTAH UNTUK HP** masuk ke percakapan JARVIS di HP, dan jawaban HP tampil di sini.
+   - SHARX memasang plugin `phone_command` (`gateway/jarvis/sharx_phone.py`) ke folder `plugins` Mark LVII, sehingga
+     JARVIS di PC juga bisa menyuruh HP lewat suara (aktif setelah JARVIS dijalankan ulang).
+   - Arah sebaliknya (HP menyuruh PC) diatur di HP. JARVIS di HP sendiri berjalan tanpa PC; lihat
+     [android-patch/README.md](android-patch/README.md#fix13-jarvis-di-hp).
+
 - **Keamanan**: `/api/jarvis/*` hanya menerima permintaan dari halaman SHARX di loopback (Host loopback, koneksi dari
   PC ini, header `X-Sharx-Action` untuk aksi), jadi situs lain tidak bisa memicu pemasangan atau menjalankan program.
   Dashboard Mark LVII sendiri terbuka di jaringan lokal (port 8000) dan dijaga kode pairing-nya. Lewat HTTP biasa
@@ -209,6 +220,10 @@ kendalinya (dashboard Mark LVII) di dalam tab.
     selesai dalam 4 menit 40 detik, modul dashboard lengkap.
   - Unduhan langsung dari github.com diblokir proxy server ini (403), jadi belum diuji.
   - Jendela HUD dan Windows (CloseMainWindow, job object) belum dijalankan.
+  - Panel dashboard Mark LVII asli (`dashboard/server.py` dari pemasangan nyata, tanpa HUD) tampil di tab.
+  - KONTROL HP diuji terhadap server Python APK Fix13: pairing (kode salah/benar/dipakai ulang), perintah dengan dan
+    tanpa percakapan HP berjalan, plugin `phone_command` dijalankan dengan Python Mark LVII, HP yang melupakan PC, dan
+    izin yang dimatikan.
 
 ## Virtual trading & upgrade SMC otomatis (AI Training)
 
@@ -547,6 +562,7 @@ Engine Python — FastAPI (engine/)
 | `GET /api/symbol-news?symbol=AAPL` | Berita per simbol |
 | `GET /api/calendar` · `/api/alerts` · `/api/stats` · `/api/health` | Kalender, alert, KPI, status |
 | `GET /api/jarvis/status?after=N` · `POST /api/jarvis/install` · `/cancel` · `/start` · `/stop` | JARVIS (Mark LVII): status, log sejak baris N, pasang/perbarui, jalankan, hentikan. Hanya dari loopback; POST butuh header `X-Sharx-Action: 1` |
+| `POST /api/jarvis/phone/pair` `{"address":"192.168.1.7:8010","key":"ABCD2345"}` · `/phone/command` `{"text":"…"}` · `/phone/unpair` | PC → HP: pasangkan JARVIS di HP, kirim perintah (jawaban HP di `message`), lupakan HP |
 
 ## Sumber data & keterbatasan
 

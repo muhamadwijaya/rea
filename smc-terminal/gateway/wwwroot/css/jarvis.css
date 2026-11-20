@@ -26,6 +26,16 @@
 .jv-facts:empty { display: none; }
 .jv-facts dt { color: var(--muted); white-space: nowrap; }
 .jv-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
+.jv-sec { border: 1px solid var(--line); border-radius: 3px; background: var(--bg-2); }
+.jv-sec > summary { cursor: pointer; padding: 7px 10px; font: 700 10.5px var(--mono); letter-spacing: .14em; color: var(--text-2); list-style: none; }
+.jv-sec > summary::-webkit-details-marker { display: none; }
+.jv-sec > summary::before { content: '▸ '; color: var(--accent); }
+.jv-sec[open] > summary::before { content: '▾ '; }
+.jv-sec > :not(summary) { margin: 0 10px 10px; }
+.jv-sec .jv-form.jv-col { flex-direction: column; align-items: stretch; }
+.jv-note { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.jv-note:empty { display: none; }
+.jv-note b { color: var(--text); }
 .jv-steps { margin: 0; padding-left: 18px; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; }
 .jv-steps b { color: var(--text); }
 .jv-logbox { display: flex; flex-direction: column; gap: 4px; min-height: 0; }

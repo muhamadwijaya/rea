@@ -1,0 +1,29 @@
+--- a/assets/wwwroot/index.html
++++ b/assets/wwwroot/index.html
+@@ -8,6 +8,8 @@
+   <link rel="icon" href="img/sharx-icon.png" type="image/png">
+   <link href="fonts/jetbrains.css" rel="stylesheet">
+   <link rel="stylesheet" href="css/app.css">
++  <link rel="stylesheet" href="css/jarvis.css">
++  <link rel="stylesheet" href="css/jarvis-phone.css">
+   <script src="vendor/signalr-8.0.7.min.js"></script>
+   <script src="vendor/lightweight-charts-4.2.3.js"></script>
+ </head>
+@@ -34,6 +36,7 @@
+       <button class="tab-btn" data-tab="training">AI TRAINING</button>
+       <button class="tab-btn" data-tab="kalender">KALENDER</button>
+       <button class="tab-btn" data-tab="metode">METODOLOGI</button>
++      <button class="tab-btn" data-tab="jarvis" title="JARVIS: Mark LVII oleh FatihMakes (CC BY-NC 4.0)">JARVIS</button>
+     </nav>
+     <div class="top-right">
+       <div class="sessions" id="sessions"></div>
+@@ -134,6 +137,9 @@
+ 
+     <!-- ============================================================ METODOLOGI -->
+     <section class="tab-panel" id="tab-metode"><div class="panel tabbed fill" id="method"></div></section>
++
++    <!-- ============================================================ JARVIS (built by js/jarvis.js) -->
++    <section class="tab-panel" id="tab-jarvis"></section>
+   </main>
+ 
+   <footer class="statusbar">

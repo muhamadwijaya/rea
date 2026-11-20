@@ -1,0 +1,12 @@
+--- a/assets/wwwroot/js/voice-audio.js
++++ b/assets/wwwroot/js/voice-audio.js
+@@ -116,6 +116,9 @@
+   async say(text, lang = 'id', onPart) {
+     this.stop();
+     const token = this.token, settings = { ...this.a.settings };
++    // JARVIS on the phone has the speaker and the microphone while its conversation runs: news reading waits for it
++    while (window.__sharxJarvis?.busy?.() && token === this.token) await new Promise((r) => setTimeout(r, 400));
++    if (token !== this.token) return false;
+     const parts = chunks(text, settings.engine === 'android' ? 1600 : 600);
+     if (!parts.length) return true;
+     if (settings.engine === 'android') return this.nativeSay(parts, lang, token, settings, onPart);

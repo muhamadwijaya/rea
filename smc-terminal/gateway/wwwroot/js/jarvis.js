@@ -1,26 +1,25 @@
 // JARVIS tab: Mark LVII by FatihMakes (https://github.com/FatihMakes/Mark-LVII, CC BY-NC 4.0, non-commercial use only),
-// a voice AI assistant for the PC. Mark LVII stays its own program; this tab installs and starts it and shows its
-// control panel (the "dashboard" Mark LVII serves on port 8000).
-//   desktop (mode "local"):  the gateway installs and runs Mark LVII on this PC (/api/jarvis/install|start|stop).
-//   Android (mode "remote"): the panel of Mark LVII running on the user's PC, reached over the local network.
-// The panel asks for the one-time key of Mark LVII's "Remote Control" button before it shows anything.
+// a voice AI assistant.
+//   desktop (mode "local"): Mark LVII stays its own program; the gateway installs and runs it on this PC
+//     (/api/jarvis/install|start|stop) and this tab shows its control panel (the dashboard it serves on port 8000),
+//     signed in with the one-time key of Mark LVII's "Remote Control" button.
+//   Android (mode "phone"): Mark LVII's assistant runs on the phone itself (jarvis-phone.js, from the Android patch).
 import { $, esc, toast } from './util.js';
 
 const SOURCE = 'https://github.com/FatihMakes/Mark-LVII';
 const LICENSE = 'https://creativecommons.org/licenses/by-nc/4.0/';
 const KEY = /^[A-HJKMNP-Z2-9]{8}$/;           // alphabet of Mark LVII pairing keys (no O, I, L, 0, 1)
-const STORE_HOST = 'sharx.jarvis.host';
 const STORE_SIDE = 'sharx.jarvis.side';
-const STORE_ZOOM = 'sharx.jarvis.zoom.';
+const STORE_ZOOM = 'sharx.jarvis.zoom.local';
 const ZOOMS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 let root = null;
-let mode = null;            // 'local' | 'remote'
+let mode = null;            // 'local' | 'phone'
+let phone = null;           // jarvis-phone.js once loaded (Android)
 let status = null;
 let seq = 0;                // last log line received
 let timer = null;
 let base = null;            // dashboard URL shown in the frame (…:8000/)
-let remote = null;          // last probe of the PC (Android)
 
 const el = (name) => root.querySelector(`[data-jv="${name}"]`);
 const active = () => root?.classList.contains('active');
@@ -64,15 +63,25 @@ function build() {
             <button class="btn jv-stop" data-jv="stop">■ HENTIKAN</button>
             <button class="btn jv-stop" data-jv="cancel">BATALKAN</button>
           </div>
-          <form class="jv-form" data-jv="connect" hidden autocomplete="off">
-            <label>ALAMAT PC <input data-jv="host" inputmode="url" placeholder="192.168.1.5:8000" spellcheck="false"></label>
-            <button class="btn-primary" type="submit">SAMBUNGKAN</button>
-          </form>
           <dl class="jv-facts" data-jv="facts"></dl>
           <form class="jv-form" data-jv="pair" autocomplete="off">
             <label>KODE REMOTE CONTROL <input data-jv="key" maxlength="12" placeholder="8 karakter dari HUD" spellcheck="false" autocapitalize="characters"></label>
             <button class="btn" type="submit">MASUK</button>
           </form>
+          <details class="jv-sec" data-jv="phonesec"><summary>KONTROL HP <span data-jv="phonechip"></span></summary>
+            <form class="jv-form jv-col" data-jv="phoneform" autocomplete="off">
+              <label>ALAMAT HP <input data-jv="phoneaddr" inputmode="url" placeholder="192.168.1.7:8010" spellcheck="false"></label>
+              <label>KODE DARI HP <input data-jv="phonekey" maxlength="12" placeholder="8 karakter" spellcheck="false" autocapitalize="characters"></label>
+              <button class="btn-primary" type="submit">PASANGKAN HP</button>
+            </form>
+            <div class="jv-note" data-jv="phoneinfo"></div>
+            <form class="jv-form" data-jv="phonecmd" autocomplete="off">
+              <label>PERINTAH UNTUK HP <input data-jv="phonetext" placeholder="mis. pasang pengingat jam 8 cek emas" maxlength="2000"></label>
+              <button class="btn" type="submit">KIRIM</button>
+            </form>
+            <div class="jv-note" data-jv="phonereply"></div>
+            <button class="btn jv-stop" data-jv="phoneunpair">LUPAKAN HP</button>
+          </details>
           <ol class="jv-steps" data-jv="steps"></ol>
           <div class="jv-logbox" data-jv="logbox" hidden>
             <div class="jv-logtitle">LOG PEMASANGAN &amp; JARVIS</div>
@@ -102,10 +111,32 @@ function build() {
   el('cancel').addEventListener('click', () => act('cancel'));
   el('zoom-out').addEventListener('click', () => zoom(-1));
   el('zoom-in').addEventListener('click', () => zoom(1));
-  el('reload').addEventListener('click', () => {
-    if (base) frame(base);
-    else if (mode === 'remote') connect(el('host').value);
-    else refresh();
+  el('reload').addEventListener('click', () => (base ? frame(base) : refresh()));
+  el('phoneform').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const key = el('phonekey').value.trim().toUpperCase().replace(/[\s-]/g, '');
+    if (!KEY.test(key)) return toast('Kode tidak valid', 'Kode dari HP terdiri dari 8 huruf/angka (tanpa O, I, L, 0, 1).');
+    try {
+      const r = await call('phone/pair', { address: el('phoneaddr').value, key });
+      el('phonekey').value = '';
+      toast('JARVIS', r.message);
+    } catch (err) { toast('Kontrol HP', err.message); }
+    refresh();
+  });
+  el('phonecmd').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = el('phonetext').value.trim();
+    if (!text) return;
+    el('phonereply').textContent = 'Mengirim ke HP… (JARVIS di HP menjawab dalam beberapa detik)';
+    try {
+      const r = await call('phone/command', { text });
+      el('phonereply').textContent = `HP: ${r.message}`;
+      el('phonetext').value = '';
+    } catch (err) { el('phonereply').textContent = err.message; }
+  });
+  el('phoneunpair').addEventListener('click', async () => {
+    try { await call('phone/unpair', {}); } catch (err) { toast('Kontrol HP', err.message); }
+    refresh();
   });
   el('side').addEventListener('click', () => {
     const box = root.querySelector('.jv');
@@ -116,27 +147,21 @@ function build() {
     e.preventDefault();
     const key = el('key').value.trim().toUpperCase().replace(/[\s-]/g, '');
     if (!KEY.test(key)) return toast('Kode tidak valid', 'Kode Remote Control terdiri dari 8 huruf/angka (tanpa O, I, L, 0, 1).');
-    if (!base) return toast('Panel JARVIS belum tersambung', mode === 'remote' ? 'Sambungkan ke PC dulu.' : 'Jalankan JARVIS dulu.');
+    if (!base) return toast('Panel JARVIS belum tersambung', 'Jalankan JARVIS dulu.');
     el('key').value = '';
     // the key is used once: the dashboard's own auto-login page signs in and remembers this device until JARVIS restarts
     frame(`${base}auto-login?key=${encodeURIComponent(key)}`);
   });
-  el('connect').addEventListener('submit', (e) => {
-    e.preventDefault();
-    connect(el('host').value);
-  });
-  el('host').value = store.get(STORE_HOST) || '';
 }
 
 // ------------------------------------------------------------------ dashboard frame
 
-/** The panel is drawn at 1/zoom of the stage and scaled up: the Android app lays its page out 1600 px wide and shrinks
- *  it to the phone, which would leave Mark LVII's phone-sized panel unreadably small (default there: 2×). */
+/** The panel is drawn at 1/zoom of the stage and scaled up (Mark LVII's panel is laid out for a phone). */
 function zoom(step = 0) {
-  const saved = Number(store.get(STORE_ZOOM + mode));
-  let z = ZOOMS.includes(saved) ? saved : mode === 'remote' ? 2 : 1;
+  const saved = Number(store.get(STORE_ZOOM));
+  let z = ZOOMS.includes(saved) ? saved : 1;
   z = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + step))];
-  if (step) store.set(STORE_ZOOM + mode, String(z));
+  if (step) store.set(STORE_ZOOM, String(z));
   root.querySelector('.jv-stage').style.setProperty('--jv-zoom', String(z));
   el('zoom').textContent = `${Math.round(z * 100)}%`;
 }
@@ -155,7 +180,7 @@ function showDashboard(url, where) {
   }
   el('where').textContent = where || '';
   const open = el('open');
-  open.hidden = !url || mode !== 'local';
+  open.hidden = !url;
   if (url) open.href = url;
 }
 
@@ -221,6 +246,17 @@ function renderLocal(s) {
   if (job?.state === 'failed' || job?.state === 'canceled') rows.splice(1, 0, ['Pemasangan', job.error || job.state]);
   el('facts').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 
+  const phone = s.phone || {};
+  el('phonechip').textContent = phone.paired ? '· TERPASANG' : '';
+  el('phonechip').className = phone.paired ? 'up' : '';
+  if (phone.address && !el('phoneaddr').value) el('phoneaddr').value = phone.address;
+  el('phonecmd').hidden = !phone.paired;
+  el('phoneunpair').hidden = !phone.paired;
+  el('phoneinfo').innerHTML = phone.paired
+    ? `HP <b>${esc(phone.address)}</b> terpasang. JARVIS di PC bisa menyuruh HP lewat suara
+       (${phone.pluginInstalled ? 'plugin phone_command terpasang' : 'plugin terpasang saat PASANG/PERBARUI'}; jalankan ulang JARVIS bila baru dipasangkan).`
+    : 'Di HP: tab JARVIS → KONTROL PC → centang "Izinkan PC mengontrol HP ini", lalu isi alamat dan kode yang tampil di HP.';
+
   el('steps').innerHTML = [
     `<b>PASANG</b> (sekali): mengunduh Mark LVII, membuat virtualenv Python 3.11–3.13 khusus JARVIS, lalu menjalankan
      setup.py-nya (dependensi + browser Playwright, ±1–2 GB, 5–20 menit). Python tidak dipasang otomatis: bila belum
@@ -230,8 +266,10 @@ function renderLocal(s) {
      setup HUD. Key disimpan Mark LVII di folder JARVIS, tidak dikirim ke SHARX.`,
     `Di HUD tekan <b>Remote Control</b> → ketik kode 8 karakternya di <b>KODE REMOTE CONTROL</b> → panel kendali tampil di
      kanan. Windows bisa meminta izin firewall saat itu: izinkan bila HP juga dipakai.`,
-    `<b>HP Android</b>: tab JARVIS → alamat PC <b>${esc(dash.lanUrl ? dash.lanUrl.replace(/^http:\/\//, '').replace(/\/$/, '') : '(IP PC):8000')}</b>,
-     HP dan PC di Wi-Fi yang sama.`,
+    `<b>HP Android</b>: JARVIS jalan sendiri di HP. Untuk mengontrol PC ini dari HP: tab JARVIS di HP → KONTROL PC →
+     alamat <b>${esc(dash.lanUrl ? dash.lanUrl.replace(/^http:\/\//, '').replace(/\/$/, '') : '(IP PC):8000')}</b> + kode Remote
+     Control (HP dan PC di Wi-Fi yang sama).`,
+    `<b>KONTROL HP</b>: PC ini juga bisa menyuruh JARVIS di HP (pasang sekali dengan kode dari HP).`,
     `JARVIS yang dijalankan dari tab ini ikut ditutup saat SHARX ditutup.`,
   ].map((t) => `<li>${t}</li>`).join('');
 
@@ -265,69 +303,6 @@ function renderLocal(s) {
   }
 }
 
-// ------------------------------------------------------------------ Android: the panel of JARVIS on the PC
-
-function renderRemote() {
-  el('connect').hidden = false;
-  el('local-actions').hidden = true;
-  el('logbox').hidden = true;
-  const r = remote;
-  if (!r) chip(store.get(STORE_HOST) ? 'MENYAMBUNG…' : 'BELUM DIATUR', store.get(STORE_HOST) ? 'busy' : 'off');
-  else if (r.state === 'online') chip('TERSAMBUNG', 'on');
-  else if (r.state === 'https') chip('HTTPS', 'warn');
-  else chip('TIDAK TERSAMBUNG', 'off');
-
-  el('facts').innerHTML = r ? [
-    ['PC', r.address || '–'],
-    ['Status', r.state === 'online' ? 'dashboard JARVIS menjawab' : r.state === 'https' ? 'HTTPS, tidak bisa ditampilkan' : r.state === 'other' ? 'bukan dashboard JARVIS' : 'tidak tersambung'],
-  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('') : '';
-
-  el('steps').innerHTML = [
-    `Di PC: SHARX desktop → tab JARVIS → <b>PASANG</b> lalu <b>JALANKAN</b> (atau jalankan Mark LVII sendiri). Alamat untuk
-     HP tertulis di sana, mis. <b>192.168.1.5:8000</b>.`,
-    `HP dan PC di <b>Wi-Fi yang sama</b>. Isi <b>ALAMAT PC</b> → SAMBUNGKAN.`,
-    `Di HUD JARVIS (PC) tekan <b>Remote Control</b> → ketik kode 8 karakternya di <b>KODE REMOTE CONTROL</b> → MASUK.
-     HP ini diingat sampai JARVIS dijalankan ulang.`,
-    `Lewat HTTP biasa mikrofon HP tidak bisa dipakai dan perintah tidak dienkripsi (hanya kode pairing yang menjaga akses):
-     pakai di jaringan rumah sendiri. Perintah ketik, file dan status berjalan.`,
-  ].map((t) => `<li>${t}</li>`).join('');
-
-  if (r?.state === 'online') {
-    showDashboard(r.url, `PC ${r.address}`);
-  } else {
-    showDashboard(null);
-    empty(!store.get(STORE_HOST)
-      ? '<b>Isi alamat PC yang menjalankan JARVIS</b>, lalu SAMBUNGKAN.'
-      : !r
-        ? '<b>Menyambung ke PC…</b>'
-        : r.state === 'https'
-          ? `<b>Dashboard JARVIS di PC memakai HTTPS</b> dengan sertifikat buatan sendiri, jadi tidak bisa tampil di aplikasi.
-             Matikan <code>"dashboard_https"</code> di <code>config/api_keys.json</code> folder JARVIS di PC, lalu jalankan
-             ulang JARVIS.`
-          : `<b>${esc(r.detail || 'PC tidak menjawab.')}</b><br>Periksa: JARVIS berjalan di PC, HP dan PC satu Wi-Fi, alamat
-             benar, firewall Windows mengizinkan JARVIS (izin muncul saat Remote Control ditekan).`);
-  }
-}
-
-async function connect(address) {
-  const text = String(address || '').trim();
-  if (!text) {
-    remote = null;
-    store.set(STORE_HOST, '');
-    renderRemote();
-    return;
-  }
-  store.set(STORE_HOST, text);
-  remote = null;
-  renderRemote();
-  try {
-    remote = await call('probe', { address: text });
-  } catch (err) {
-    remote = { state: 'offline', address: text, detail: err.message };
-  }
-  renderRemote();
-}
-
 // ------------------------------------------------------------------ refresh
 
 async function refresh() {
@@ -336,19 +311,16 @@ async function refresh() {
   if (!active()) return;
   let delay = 4000;
   try {
-    if (mode === 'remote') {
-      // the PC is probed when the tab opens and after SAMBUNGKAN; an online panel is left alone
-      if (!remote && store.get(STORE_HOST)) await connect(store.get(STORE_HOST));
-      return;
-    }
+    if (mode === 'phone') return phone.showPhone();
     status = await call(`status?after=${seq}`);
     if (mode === null) {
       mode = status.mode;
-      zoom();
-      if (mode === 'remote') {
-        renderRemote();
-        return refresh();
+      if (mode === 'phone') {
+        phone = await import('./jarvis-phone.js');
+        phone.mountPhone(root, status);
+        return phone.showPhone();
       }
+      zoom();
     }
     renderLocal(status);
     const busy = status.job?.state === 'running' || status.process?.state === 'running' && status.dashboard?.state !== 'online';
@@ -358,7 +330,7 @@ async function refresh() {
     empty(`<b>${esc(err.message)}</b>`);
     delay = 8000;
   }
-  if (mode !== 'remote' && active()) timer = setTimeout(refresh, delay);
+  if (active()) timer = setTimeout(refresh, delay);
 }
 
 export default {
@@ -368,7 +340,6 @@ export default {
     empty('<b>Memuat…</b>');
   },
   show() {
-    if (mode === 'remote' && remote?.state !== 'online') remote = null; // a failed probe is tried again on every visit
     refresh();
   },
 };
