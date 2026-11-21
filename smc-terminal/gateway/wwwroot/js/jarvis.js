@@ -2,7 +2,8 @@
 //   desktop (mode "local"): Mark LVII stays its own program; the gateway installs and runs it on this PC
 //     (/api/jarvis/install|start|stop) and this tab shows its control panel (the dashboard it serves on port 8000),
 //     signed in with the one-time key of Mark LVII's "Remote Control" button.
-//   Android (mode "phone"): Mark LVII's assistant runs on the phone itself (jarvis-phone.js, from the Android patch).
+//   Android (mode "phone"): SHARX's own voice assistant runs on the phone itself (jarvis-phone.js, from the Android
+//     patch); it can start with the app, before this tab is opened (background()).
 import { $, esc, toast } from './util.js';
 
 const SOURCE = 'https://github.com/FatihMakes/Mark-LVII';
@@ -13,7 +14,7 @@ const ZOOMS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
 let root = null;
 let mode = null;            // 'local' | 'phone'
-let phone = null;           // jarvis-phone.js once loaded (Android)
+let phoneReady = null;      // jarvis-phone.js (Android) loading and mounted, shared by the tab and the start with the app
 let status = null;
 let seq = 0;                // last log line received
 let timer = null;
@@ -300,22 +301,28 @@ function renderLocal(s) {
 
 // ------------------------------------------------------------------ refresh
 
+function loadPhone(first) {
+  phoneReady ??= import('./jarvis-phone.js').then((m) => {
+    m.mountPhone(root, first);
+    return m;
+  });
+  return phoneReady;
+}
+
 async function refresh() {
   clearTimeout(timer);
   timer = null;
   if (!active()) return;
   let delay = 4000;
   try {
-    if (mode === 'phone') return phone.showPhone();
+    if (mode === 'phone') return (await phoneReady).showPhone();
     status = await call(`status?after=${seq}`);
     if (mode === null) {
       mode = status.mode;
-      if (mode === 'phone') {
-        phone = await import('./jarvis-phone.js');
-        phone.mountPhone(root, status);
-        return phone.showPhone();
-      }
+      if (mode === 'phone') return (await loadPhone(status)).showPhone();
       zoom();
+    } else if (mode === 'phone') {
+      return (await phoneReady).showPhone();  // it started with the app while this status was on its way
     }
     renderLocal(status);
     const busy = status.job?.state === 'running' || status.process?.state === 'running' && status.dashboard?.state !== 'online';
@@ -336,5 +343,21 @@ export default {
   },
   show() {
     refresh();
+  },
+  /** Android: called once when the app starts, so JARVIS can start with it (its "start automatically" setting).
+   *  Desktop: nothing; Mark LVII is started from this tab. */
+  async background() {
+    for (let tries = 0; tries < 20 && mode === null; tries++) {
+      try {
+        const first = await call('status');
+        if (mode === null) {
+          mode = first.mode;
+          if (mode === 'phone') await loadPhone(first);
+        }
+      } catch {
+        await new Promise((r) => setTimeout(r, 3000));  // the engine is still starting
+      }
+    }
+    if (mode === 'phone') (await phoneReady).autoStart();
   },
 };

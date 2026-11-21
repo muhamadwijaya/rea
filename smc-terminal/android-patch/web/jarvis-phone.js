@@ -20,6 +20,7 @@ const TOOL_LABEL = {
   open_map: 'peta', pc_command: 'perintah ke PC', pc_status: 'cek PC', shutdown_jarvis: 'selesai',
   analyze_asset: 'analisa lengkap', look_at_chart: 'melihat chart', read_news: 'membaca berita', open_page: 'buka halaman',
   read_screen: 'membaca layar', market_context: 'arah market & kalender', set_trading_plan: 'rencana JARVIS',
+  open_tab: 'buka tab',
   market_overview: 'arah market', screener: 'screener', alerts: 'alert', company_report: 'laporan perusahaan',
   dividends: 'dividen & benefit', training_stats: 'hasil training',
 };
@@ -146,6 +147,7 @@ const session = {
   // working: JARVIS is taking a request, running tools or answering; the news assistant waits until it is done
   working: false, quietUntil: 0, gate: false, gateTimer: null,
   turns: 0,  // answers finished in this conversation
+  pausedMic: false,  // the microphone was paused because the app went to the background
 
   get active() { return !!this.ws; },
 
@@ -173,6 +175,9 @@ const session = {
 
   setState(state) {
     this.state = state;
+    const nav = document.querySelector('.tab-btn[data-tab="jarvis"]');  // JARVIS is on, seen from any tab
+    nav?.classList.toggle('jv-live', this.active);
+    nav?.classList.toggle('jv-talk', this.active && (state === 'speaking' || state === 'thinking'));
     const label = q('state');
     if (!label) return;
     label.textContent = STATE_LABEL[state] || state.toUpperCase();
@@ -185,7 +190,7 @@ const session = {
     q('mic').textContent = mic ? '🎙 MIC ON' : '🔇 MIC OFF';
   },
 
-  async start({ mic = this.micWanted } = {}) {
+  async start({ mic = this.micWanted, greet = false } = {}) {
     if (this.active) return true;
     if (!status?.settings?.configured) {
       this.setState('nokey');
@@ -229,6 +234,7 @@ const session = {
           this.setState(this.micOn ? 'listening' : 'muted');
           if (this.micOn) this.startMic();
           while (this.queue.length) this.send(this.queue.shift());
+          if (greet) this.send({ type: 'app_started' });  // JARVIS says in one sentence that it is ready
           settle(true);
         } else this.onMessage(m, settle);
       };
@@ -309,6 +315,29 @@ const session = {
     }
     if (this.active) this.setState(on ? 'listening' : 'muted');
     else this.setState(this.state);
+  },
+
+  /** The app went to the background or came back: the microphone pauses meanwhile (Android gives a background app
+   *  no microphone, and nothing is sent to Gemini for nothing); the user's MIC choice stays. */
+  background(hidden) {
+    if (!this.active) return;
+    const talking = ['thinking', 'speaking'].includes(this.state);
+    if (hidden && this.micOn) {
+      this.pausedMic = true;
+      this.micOn = false;
+      if (status?.nativeMic) this.send({ type: 'mic', on: false });
+      else {
+        this.mic?.stop();
+        this.mic = null;
+        this.send({ type: 'audio_end' });
+      }
+      if (!talking) this.setState('muted');
+    } else if (!hidden && this.pausedMic) {
+      this.pausedMic = false;
+      this.micOn = true;
+      this.startMic();
+      if (!talking) this.setState('listening');
+    }
   },
 
   /** Tapping the orb: JARVIS and the news assistant stop talking, so the user can speak. */
@@ -411,6 +440,7 @@ const session = {
       else if (m.name === 'chart_capture') result = await captureChart(m.args || {});
       else if (m.name === 'reader_extract') result = await readerExtract(m.args || {});
       else if (m.name === 'screen_read') result = screenRead(m.args || {});
+      else if (m.name === 'tab_open') result = await openTab(m.args || {});
       else result = { result: `unknown client tool ${m.name}` };
     } catch (err) {
       result = { result: 'failed', detail: String(err.message || err) };
@@ -431,6 +461,7 @@ const session = {
     this.player = null;
     this.queue = [];
     this.forPc = false;
+    this.pausedMic = false;
     this.working = false;
     this.quietUntil = 0;
     clearInterval(this.gateTimer);
@@ -495,6 +526,30 @@ async function openPage({ page = 'dashboard', section, symbol, timeframe } = {})
 
 let captureSeq = 0;
 
+/** Waits until the analysis page shows `wanted` (or the asset the page resolved it to) with its data loaded. Stops
+ * when the analysis fails, the user leaves the page, or `still()` turns false. */
+async function analysisReady(wanted, ms, still = () => true) {
+  const until = performance.now() + ms;
+  let away = 0;
+  while (performance.now() < until) {
+    if (!still()) return { result: 'replaced by another chart' };
+    const panel = document.querySelector('.tab-panel.active .sub-panel[data-sub="analisa"]');
+    if (!panel || !/^#[^/]+\/analisa\//.test(location.hash)) {
+      if (++away > 8) return { result: 'the chart page was left before the chart had drawn' };
+      await sleep(400);
+      continue;
+    }
+    away = 0;
+    const failed = panel.querySelector('.an-card .error-box');
+    if (failed) return { result: 'the analysis failed', detail: failed.textContent.trim().slice(0, 200) };
+    const resolved = decodeURIComponent(location.hash.split('/')[2] || wanted).toUpperCase();
+    const shown = (panel.querySelector('.an-head .s')?.textContent || '').toUpperCase();
+    if (shown && shown === resolved && !panel.querySelector('.an-card .loading')) return { panel };
+    await sleep(400);
+  }
+  return { result: 'the chart did not finish loading' };
+}
+
 /** Opens the symbol's SMC chart, waits until it has drawn, and returns a JPEG of it (candles + SMC overlay). Stops when
  * the analysis fails, the user leaves the chart page, or JARVIS asks for another chart. */
 async function captureChart({ symbol, timeframe = '1h', waitMs = 45000 } = {}) {
@@ -506,24 +561,14 @@ async function captureChart({ symbol, timeframe = '1h', waitMs = 45000 } = {}) {
   const until = performance.now() + Math.max(1000, Math.min(120000, Number(waitMs) || 45000));
   let panel = null;
   let shell = null;
-  let away = 0;
   while (performance.now() < until) {
-    if (seq !== captureSeq) return { result: 'replaced by another chart' };
-    panel = document.querySelector('.tab-panel.active .sub-panel[data-sub="analisa"]');
-    if (!panel || !/^#[^/]+\/analisa\//.test(location.hash)) {
-      if (++away > 8) return { result: 'the chart page was left before the chart had drawn' };
-      await sleep(400);
-      continue;
-    }
-    away = 0;
-    const failed = panel.querySelector('.an-card .error-box');
-    if (failed) return { result: 'the analysis failed', detail: failed.textContent.trim().slice(0, 200) };
+    const ready = await analysisReady(wanted, until - performance.now(), () => seq === captureSeq);
+    if (!ready.panel) return ready;
+    panel = ready.panel;
     const smcView = panel.querySelector('.an-view [data-v="smc"]');
     if (smcView && !smcView.classList.contains('active')) smcView.click();  // TradingView mode cannot be captured
     shell = panel.querySelector('.chart-shell');
-    const resolved = decodeURIComponent(location.hash.split('/')[2] || wanted).toUpperCase();
-    const shown = (panel.querySelector('.an-head .s')?.textContent || '').toUpperCase();
-    if (shell && shell.offsetWidth > 200 && !panel.querySelector('.an-card .loading') && shown === resolved) break;
+    if (shell && shell.offsetWidth > 200) break;
     shell = null;
     await sleep(400);
   }
@@ -544,6 +589,53 @@ async function captureChart({ symbol, timeframe = '1h', waitMs = 45000 } = {}) {
   }
   const symbolShown = (panel.querySelector('.an-head .s')?.textContent || wanted).trim();
   return { image: out.toDataURL('image/jpeg', 0.8).split(',')[1], width: out.width, height: out.height, symbol: symbolShown };
+}
+
+// names JARVIS may use for the analysis side tabs
+const TAB_ALIAS = { MULTITIMEFRAME: 'mtf', TIMEFRAME: 'mtf', RENCANA: 'plan', TRADINGPLAN: 'plan', SKENARIO: 'plan',
+  NARRATIVE: 'narasi', NARASI: 'narasi', LEVELS: 'level', KEYLEVELS: 'level', REPORT: 'laporan', COMPANY: 'laporan',
+  TRADINGVIEW: 'tv', NEWS: 'berita', AIOUTLOOK: 'ai', OUTLOOK: 'ai' };
+const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** A tab of the page on screen, clicked as the user would: the analysis side tabs (BIAS … AI), any other panel's
+ * tabs, or a market page's sections. With a symbol, that asset's analysis page opens first. Returns what it shows. */
+async function openTab({ tab, symbol, timeframe } = {}) {
+  const want = norm(tab);
+  if (!want) return { result: 'no tab named' };
+  if (symbol) {
+    const wanted = String(symbol).toUpperCase();
+    markJarvisNav(wanted);
+    await window.SMC.openAnalysis(wanted, timeframe || '1h', { fromAssistant: true });
+    const ready = await analysisReady(wanted, 30000);
+    if (!ready.panel) return ready;
+  }
+  markJarvisNav(symbol);  // the clicks below are JARVIS's, not pages the user opened
+  const page = document.querySelector('.tab-panel.active');
+  const shownOnPage = (el) => el.offsetParent !== null;  // not inside a hidden section or pane
+  const label = (b) => norm([...b.childNodes].filter((n) => n.nodeType === 3).map((n) => n.nodeValue).join('') || b.textContent);
+  const alias = TAB_ALIAS[want];
+  const find = (list, key) => list.find((b) => norm(b.dataset[key]) === want || (alias && b.dataset[key] === alias))
+    || list.find((b) => label(b) === want) || list.find((b) => label(b).startsWith(want));
+  const tabs = [...(page?.querySelectorAll('.tabbed > .ptabs button[data-t]') || [])].filter(shownOnPage);
+  const button = find(tabs, 't');
+  if (button) {
+    button.click();
+    const pane = button.closest('.tabbed')?.querySelector(`:scope > .pane[data-t="${button.dataset.t}"]`);
+    for (let i = 0; i < 20 && pane?.querySelector('.loading'); i++) await sleep(400);  // e.g. LAPORAN loads when opened
+    const name = button.textContent.trim().replace(/\s+/g, ' ');
+    return { result: `tab ${name} is open on the screen`, tab: name, page: currentScreen(button.closest('.an-tabs') ? button.dataset.t : null).label,
+      shows: button.dataset.t === 'tv' ? '(a TradingView widget: not readable)' : shownText(pane, 1800) || '(empty)' };
+  }
+  const sections = [...(page?.querySelectorAll('.subtabs [data-sub]') || [])];
+  const section = find(sections, 'sub');
+  if (section) {
+    section.click();
+    await sleep(600);
+    return { result: `section ${section.textContent.trim()} is open on the screen`, page: currentScreen().label,
+      note: 'call read_screen to read it' };
+  }
+  return { result: 'no such tab on this page', page: currentScreen().label,
+    tabs: [...tabs, ...sections].map((b) => b.textContent.trim().replace(/\s+/g, ' ')) };
 }
 
 /** An article page opened in the app's reader, its text taken, and the page closed again (Android); null elsewhere. */
@@ -721,7 +813,7 @@ function endLine(role) { session.bubbles[role] = null; }
 function toolLine(m) {
   const label = TOOL_LABEL[m.name] || m.name;
   if (m.phase === 'start') {
-    const arg = m.args?.symbol || m.args?.city || m.args?.name || m.args?.command || m.args?.url || m.args?.query
+    const arg = (m.args?.tab && [m.args.tab, m.args.symbol].filter(Boolean).join(' · ')) || m.args?.symbol || m.args?.city || m.args?.name || m.args?.command || m.args?.url || m.args?.query
       || m.args?.action || m.args?.news_id || [m.args?.page, m.args?.section].filter(Boolean).join(' › ') || m.args?.market || '';
     const el = addLine('tool', `⚙ ${label}${arg ? ` · ${String(arg).slice(0, 80)}` : ''}`, true);
     if (el) el.dataset.id = m.id;
@@ -808,6 +900,8 @@ function build() {
             <label class="jp-check"><input type="checkbox" data-p="gsearch"> Pencarian Google untuk info terbaru</label>
             <label class="jp-check"><input type="checkbox" data-p="follow"> Tanggapi halaman yang dibuka: JARVIS langsung
               menganalisa tab yang Anda buka selama percakapan berjalan</label>
+            <label class="jp-check"><input type="checkbox" data-p="autostart"> Nyalakan JARVIS otomatis setiap aplikasi dibuka
+              (memakai kuota Gemini selama menyala; mikrofon jeda saat aplikasi di latar belakang)</label>
             <div class="jp-row"><button class="btn" data-p="saveset">SIMPAN PENGATURAN</button><button class="btn jv-stop" data-p="clearkey">HAPUS KEY</button></div>
           </details>
           <details class="jp-sec" data-p="pcsec"><summary>KONTROL PC <span class="jp-pcchip" data-p="pcchip"></span></summary>
@@ -828,7 +922,10 @@ function build() {
             <ol class="jv-steps">
               <li>Isi <b>Gemini API key</b> gratis dari <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
                 Key disimpan terenkripsi di HP dan tidak dikirim ke halaman.</li>
-              <li><b>▶ MULAI</b> lalu bicara. Atau ketik perintah di bawah percakapan. Ketuk orb untuk memotong JARVIS.</li>
+              <li>JARVIS <b>menyala sendiri</b> setiap aplikasi dibuka (setelah key diisi), lalu langsung mendengarkan. Titik
+                hijau di tombol JARVIS berarti JARVIS menyala. <b>■ SELESAI</b> mematikannya; <b>▶ MULAI</b> menyalakan lagi.
+                Bicara langsung, atau ketik perintah di bawah percakapan. Ketuk orb untuk memotong JARVIS.</li>
+              <li>"Buka tab MTF", "pindah ke NARASI", "lihat LAPORAN BBCA": JARVIS membuka tab itu dan menjelaskan isinya.</li>
               <li><b>"Analisa EURUSD"</b>: JARVIS membuka chart, melihat gambarnya, mengambil data SMC, membaca berita terbaru
                 (halaman berita terbuka dan tertutup sendiri), mengecek kalender ekonomi, lalu menyampaikan analisanya.</li>
               <li>JARVIS bisa membuka halaman mana pun di SHARX ("buka screener forex", "buka kalender"), membacakan berita,
@@ -901,6 +998,7 @@ function build() {
       status = await call('settings', {
         assistantName: q('aname').value, userName: q('uname').value, voice: q('voice').value,
         duplex: q('duplex').checked, googleSearch: q('gsearch').checked, followScreen: q('follow').checked,
+        autoStart: q('autostart').checked,
       });
       render();
       toast('JARVIS', session.active ? 'Tersimpan. Berlaku di percakapan berikutnya (SELESAI lalu MULAI).' : 'Pengaturan tersimpan.');
@@ -1030,6 +1128,7 @@ function render() {
   q('duplex').checked = !!s.duplex;
   q('gsearch').checked = s.googleSearch !== false;
   q('follow').checked = s.followScreen !== false;
+  q('autostart').checked = s.autoStart !== false;
   if (!s.configured) {
     q('setup').open = true;
     if (!session.active) session.setState('nokey');
@@ -1093,10 +1192,18 @@ export function mountPhone(element, first) {
   status = first;
   root.addEventListener('input', () => { lastKey = performance.now(); });
   followScreen();
+  document.addEventListener('visibilitychange', () => session.background(document.hidden));
   build();
   render();
   session.setState(status?.settings?.configured ? 'idle' : 'nokey');
   refresh();
+}
+
+/** At app start (jarvis.js background): JARVIS starts by itself when its key is set and "start automatically" is on,
+ *  and says in one sentence that it is ready. */
+export function autoStart() {
+  if (session.active || !status?.settings?.configured || status.settings.autoStart === false) return;
+  session.start({ greet: true });
 }
 
 export function showPhone() {

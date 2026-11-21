@@ -60,6 +60,7 @@ class Settings:
     """Names, voice and options in jarvis-settings.json; the Gemini key in the Android keystore vault."""
     defaults = dict(assistantName='JARVIS', userName='', voice='Charon', duplex=False, googleSearch=True,
                     followScreen=True,  # JARVIS hears which page the user opens and reacts to it
+                    autoStart=True,     # the conversation starts when the app opens (jarvis-phone.js autoStart)
                     allowPc=False, pcTokens=[])  # PC → phone (jarvis_lan): switch, SHA-256 of paired PC tokens
     internal = ('allowPc', 'pcTokens')
 
@@ -124,7 +125,7 @@ class Settings:
                 if body['voice'] not in VOICES:
                     raise ValueError('Suara JARVIS tidak dikenal.')
                 values['voice'] = body['voice']
-            for name in ('duplex', 'googleSearch', 'followScreen'):
+            for name in ('duplex', 'googleSearch', 'followScreen', 'autoStart'):
                 if name in body:
                     values[name] = bool(body[name])
             key = str(body.get('apiKey') or '').strip()
@@ -267,6 +268,9 @@ THE SHARX APP
 - To look at a chart alone: look_at_chart. To read an article: market_news gives each headline an [id]; read_news opens
   the article in the app, takes its text and closes it. Read it aloud when the user asks you to read it; otherwise
   summarise what matters.
+- open_tab switches to a tab when the user asks for one ("buka tab MTF", "pindah ke NARASI", "lihat LAPORAN BBCA"):
+  the side tabs of the analysis page, the tabs of other panels, or a market page's sections. It returns what the tab
+  shows: tell the user what matters in it. Never say a tab is open unless open_tab said so.
 - read_screen reads the page on the screen. market_context gives the market direction and calendar around one asset.
 - Other app data: market_overview, screener, alerts, company_report, dividends, training_stats, economic_calendar.
 - A message starting with "[CHART SCREENSHOT]" is the picture of the SHARX chart you asked for.
@@ -315,6 +319,8 @@ OUTSIDE CONTENT
 
 APP MESSAGES
 - "[REMINDER] ..." comes from the app when a reminder is due: tell the user in one short sentence.
+- "[APP STARTED] ..." means you started together with the app: greet the user in one short sentence that you are
+  ready, in Indonesian unless [MEMORY] says otherwise, and say nothing more.
 
 WHAT YOU CAN DO NOW
 {capabilities}
@@ -1101,6 +1107,16 @@ def t_read_screen(a, ctx):
     return out
 
 
+def t_open_tab(a, ctx):
+    """A tab of the page on screen (the analysis side tabs, other panels' tabs, a market page's sections), opened by
+    the page itself (jarvis-phone.js openTab), with what it shows."""
+    args = {k: str(a.get(k) or '').strip()[:40] for k in ('tab', 'symbol', 'timeframe') if a.get(k)}
+    shown = ctx['session'].client_call('tab_open', args, timeout=45)
+    if isinstance(shown, dict) and shown.get('shows'):
+        shown = dict(shown, shows=_untrusted('screen', shown['shows']))
+    return shown if isinstance(shown, dict) else {'result': 'the app did not answer'}
+
+
 def _price(value) -> float | None:
     try:
         v = float(value)
@@ -1293,6 +1309,14 @@ TOOLS = [
          _obj({'hours': dict(I, description='How many hours ahead, default 24'),
                'past_hours': dict(I, description='Also the last N hours with their results, default 1'),
                'currencies': _s('Optional comma-separated currencies, e.g. EUR,USD')}), t_calendar),
+    Tool('open_tab', 'Open a tab on the screen and read what it shows: the side tabs of an asset analysis page (BIAS, MTF, '
+         'PLAN, NARASI, LEVEL, LAPORAN, TV, BERITA, AI), the tabs of any other panel on the page, or a market page '
+         "section (ANALISA SMC, SCREENER, BERITA, ARAH MARKET, FUNDAMENTAL, DIVIDEN). With a symbol, that asset's "
+         'analysis page opens first.',
+         _obj({'tab': _s("The tab's name as shown, e.g. MTF, NARASI, LEVEL, LAPORAN"),
+               'symbol': _s('Optional: open this asset first'), 'timeframe': _s('Optional timeframe with the symbol',
+                                                                               ('5m', '15m', '1h', '4h', '1d'))},
+              ('tab',)), t_open_tab),
     Tool('read_screen', 'Read what the SHARX page on the screen shows now. On an asset analysis page: every side tab '
          '(bias, multi-timeframe, plan, narrative, levels, report, news, AI outlook), your saved plan, and the market '
          'direction and economic calendar that bear on that asset. On other pages: what the page lists.',
@@ -1802,12 +1826,15 @@ class LiveSession:
             return
         details = [f'{name} {clean(message.get(key), limit).upper()}' for key, name, limit in
                    (('symbol', 'symbol', 24), ('tf', 'timeframe', 8), ('sideTab', 'side tab', 12)) if message.get(key)]
-        text = (f"[SCREEN] The user opened: {label}{' (' + ', '.join(details) + ')' if details else ''}. "
-                'They opened it themselves. Follow THE SCREEN rules.')
+        self.tell(f"[SCREEN] The user opened: {label}{' (' + ', '.join(details) + ')' if details else ''}. "
+                  'They opened it themselves. Follow THE SCREEN rules.')
+
+    def tell(self, text: str):
+        """An app message for the model, given once it is free; a newer one replaces one not given yet."""
         with self.count_lock:
-            self.notice = (text, time.monotonic())  # a newer page replaces one not told yet
+            self.notice = (text, time.monotonic())
             if self.notice_thread is None:
-                self.notice_thread = threading.Thread(target=self._tell_screen, name='jarvis-screen', daemon=True)
+                self.notice_thread = threading.Thread(target=self._tell_when_free, name='jarvis-notice', daemon=True)
                 self.notice_thread.start()
 
     def _free(self) -> bool:
@@ -1818,7 +1845,7 @@ class LiveSession:
                 and not self.playing and now > self.playing_until + 0.3 and now - self.heard_at > 1.5
                 and now - self.model_at > 0.8)
 
-    def _tell_screen(self):
+    def _tell_when_free(self):
         while not self.stopping:
             send = dropped = None
             with self.count_lock:
@@ -1937,6 +1964,8 @@ class LiveSession:
                     self.pending[message['id']].set_result(result if isinstance(result, dict) else {'result': str(result)})
                 elif kind == 'screen':
                     self.screen(message)
+                elif kind == 'app_started':  # the conversation started by itself with the app (autoStart)
+                    self.tell('[APP STARTED] SHARX was just opened and you started with it. Follow the APP MESSAGES rule.')
                 elif kind == 'stop':
                     break
         finally:

@@ -195,6 +195,10 @@ Sejak Fix16, JARVIS di HP ikut layar:
 - JARVIS lalu menyimpan rencananya sendiri. Rencana itu tampil di tab PLAN sebagai RENCANA JARVIS, di atas skenario
   aplikasi.
 
+Sejak Fix17:
+- JARVIS bisa membuka tab apa pun yang diminta ("buka tab MTF", "lihat LAPORAN BBCA") dan menjelaskan isinya.
+- JARVIS menyala sendiri setiap aplikasi dibuka; bisa dimatikan di pengaturannya.
+
 1. **PASANG** (sekali, 5–20 menit, ±1–2 GB):
    - Mencari Python 3.11–3.13 (`py -3.12`, `-3.13`, `-3.11`, lalu `python`). Python tidak dipasang otomatis.
    - Mengunduh arsip `main` Mark LVII ke `%LOCALAPPDATA%\SharxInvest\jarvis\app` (commit tercatat dari arsip).

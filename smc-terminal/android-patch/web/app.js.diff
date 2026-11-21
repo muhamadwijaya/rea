@@ -82,3 +82,17 @@
    if (!location.hash) location.replace(readPref('route', '#dashboard') || '#dashboard');
    runBoot();
    desktopIntegration();
+@@ -453,6 +474,13 @@
+   setInterval(tick, 1000);
+   tv.tickerTape($('#tv-tape'));
+   route();
++  // JARVIS on the phone starts with the app (its "start automatically" setting), not only when its tab is opened
++  if (!initialized.has('jarvis')) {
++    initialized.add('jarvis');
++    modules.jarvis.init?.(store);
++    bindPanelTabs($('#tab-jarvis'), 'jarvis');
++  }
++  modules.jarvis.background?.();
+   connectRealtime();
+   refreshAll();
+   loadInstruments();

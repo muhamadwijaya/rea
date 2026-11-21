@@ -1,10 +1,10 @@
-# SHARX INVEST Android — patch Fix10–Fix16 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
+# SHARX INVEST Android — patch Fix10–Fix17 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
 
 Patch ini dipasang di atas APK Android **SHARX-INVEST-AI-Fix9.apk** (paket `com.sharx.trader`, versi
 3.20-independent.9). Source Android-nya tidak ada di repo ini. Patch dibuat dari APK itu: kode Java baru, hook smali di
 `MainActivity`, perubahan UI web (`assets/wwwroot`) dan engine Python (Chaquopy `app.imy`). Di aplikasi, status bar
-menampilkan versi **3.20-independent.16** (Fix16; Fix15 = .15, Fix14 = .14, Fix13 = .13, Fix12 = .12, Fix11 = .11,
-Fix10 = .10).
+menampilkan versi **3.20-independent.17** (Fix17; Fix16 = .16, Fix15 = .15, Fix14 = .14, Fix13 = .13, Fix12 = .12,
+Fix11 = .11, Fix10 = .10).
 
 ## Perubahan
 
@@ -206,6 +206,30 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
      - alasan, syarat dan masa berlaku (1H: 24 jam, 4H: 3 hari, 1D: 10 hari).
    - Tombol ✕ menghapusnya. Rencana disimpan di HP (`jarvis-plans.json`) dan tetap ada setelah aplikasi dibuka ulang.
 
+## Fix17: JARVIS membuka tab apa pun dan menyala sendiri
+
+1. **Buka tab lewat JARVIS** (alat `open_tab`): "buka tab MTF", "pindah ke NARASI", "lihat LAPORAN BBCA".
+   - Tab yang bisa dibuka:
+     - tab samping halaman analisa (BIAS, MTF, PLAN, NARASI, LEVEL, LAPORAN, TV, BERITA, AI);
+     - tab panel lain di halaman yang tampil, mis. SMC SCREENER / TRADINGVIEW SCREENER;
+     - bagian halaman pasar: ANALISA SMC, SCREENER, BERITA, ARAH MARKET, FUNDAMENTAL & AI, DIVIDEN & BENEFIT.
+   - Tab diklik seperti oleh pengguna. Bila tab memuat datanya saat dibuka (mis. LAPORAN), JARVIS menunggu sampai
+     selesai.
+   - Dengan nama aset, halaman analisa aset itu dibuka dulu.
+   - JARVIS langsung menerima isi tab itu dan menjelaskannya. Tab TV adalah widget TradingView dan tidak bisa dibaca.
+   - Bila tab tidak ada di halaman itu, JARVIS menerima daftar tab yang ada.
+   - Halaman dan tab yang dibuka JARVIS sendiri tidak dilaporkan balik sebagai halaman yang Anda buka.
+2. **JARVIS menyala sendiri** setiap aplikasi dibuka, setelah Gemini API key diisi:
+   - Percakapan dimulai di latar belakang tanpa membuka tab JARVIS. JARVIS menyapa satu kalimat ("JARVIS siap"), lalu
+     mendengarkan.
+   - Titik hijau di tombol JARVIS menandakan JARVIS menyala. Titik berdenyut saat JARVIS berpikir atau bicara.
+   - Saat aplikasi ke latar belakang atau layar mati, mikrofon dijeda: Android tidak memberi mikrofon ke aplikasi di
+     latar belakang, dan tidak ada audio yang dikirim ke Gemini sia-sia. Saat aplikasi kembali, mikrofon jalan lagi.
+     Pilihan MIC ON/OFF Anda tidak berubah.
+   - ■ SELESAI mematikan JARVIS sampai aplikasi dibuka lagi.
+   - Bisa dimatikan di PENGATURAN → "Nyalakan JARVIS otomatis setiap aplikasi dibuka".
+   - Selama menyala, percakapan Gemini Live terus terbuka dan memakai kuota API key Anda.
+
 ## Terukur dan diuji
 
 - **Kode Python APK dijalankan di server ini** terhadap 3 berita terbaru dari setiap 40 feed:
@@ -299,17 +323,29 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
 - Uji Fix13–Fix15 diulang dan lulus.
 - **Belum diuji di HP dan dengan Gemini asli:** apakah Gemini asli memanggil `read_screen` dan `set_trading_plan`
   sesuai aturan, dan seberapa sering ia bicara saat Anda berpindah halaman.
+- **Fix17 diuji di Chromium** dengan engine Python APK dan Gemini Live tiruan:
+  - Tanpa key, JARVIS tidak menyala.
+  - Dengan key, aplikasi dibuka di Dashboard. JARVIS menyala 0,5 detik kemudian tanpa tabnya dibuka, menyapa, lalu
+    mikrofon mengalir.
+  - Membuka tab JARVIS memakai percakapan yang sama.
+  - 9 perintah "buka tab" lulus: MTF EURUSD (dengan aset), NARASI, LAPORAN, BERITA, TV, PLAN, bagian SCREENER, tab
+    TRADINGVIEW di screener, dan nama tab yang tidak ada (JARVIS menerima daftar tab).
+  - Tidak ada pemberitahuan [SCREEN] untuk tab yang dibuka JARVIS.
+  - Aplikasi di latar belakang: 0 potongan mikrofon dalam 2,5 detik. Setelah kembali, mikrofon jalan lagi.
+  - Pengaturan "nyalakan otomatis" dimatikan: JARVIS tidak menyala saat aplikasi dibuka lagi.
+  - **Belum diuji di HP:** jeda mikrofon saat aplikasi benar-benar ke latar belakang (di tes, latar belakang
+    disimulasikan di halaman), dan izin mikrofon yang diminta saat JARVIS menyala pertama kali.
 
 ## Build
 
 ```bash
 APKTOOL=apktool_2.10.0.jar BUILD_TOOLS=build-tools/36 ANDROID_JAR=android-35/android.jar \
-  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix16.apk
+  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix17.apk
 ```
 
 Perlu Java 17+, python3 (dengan pip), npm (Readability.js 0.5.0, Apache-2.0, diunduh saat build), curl, unzip, zip dan
 patch. Wheel `websockets` dari PyPI dicek SHA-256. Resource
 dan manifest APK tidak diubah (apktool `-r`). APK hasil ditandatangani kunci baru. Kunci asli Fix9 tidak tersedia,
 jadi **Fix9 harus di-uninstall dulu** (API key AI perlu dimasukkan lagi). Fix11 dan Fix12 memakai kunci yang sama dengan
-Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13 sampai Fix16 juga). Simpan keystore itu di tempat aman
+Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13 sampai Fix17 juga). Simpan keystore itu di tempat aman
 dan pakai lagi untuk versi berikutnya. Keystore dan APK tidak disimpan di repo ini.
