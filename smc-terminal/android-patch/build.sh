@@ -20,12 +20,13 @@ java -jar "$APKTOOL" d -r -f "$orig" -o "$work/raw"
 python3 "$here/smali_patch.py" "$work/raw/smali/com/sharx/invest/MainActivity.smali"
 
 # 2) web UI: in-app reader, TradingView symbol route, reader flow of the voice assistant, JARVIS tab (jarvis.js and
-#    jarvis.css shared with the desktop app; JARVIS on the phone: jarvis-phone.js/.css, jarvis-worklet.js)
+#    jarvis.css shared with the desktop app; JARVIS on the phone: jarvis-phone.js/.css, jarvis-worklet.js, and
+#    jarvis-plan.js, JARVIS's own plan in the analysis PLAN tab)
 for d in "$here"/web/*.diff; do patch -p1 -d "$work/raw" < "$d"; done
 cp "$here/web/reader.js" "$work/raw/assets/wwwroot/js/reader.js"
 cp "$here/../gateway/wwwroot/js/jarvis.js" "$work/raw/assets/wwwroot/js/jarvis.js"
 cp "$here/../gateway/wwwroot/css/jarvis.css" "$work/raw/assets/wwwroot/css/jarvis.css"
-cp "$here/web/jarvis-phone.js" "$here/web/jarvis-worklet.js" "$work/raw/assets/wwwroot/js/"
+cp "$here/web/jarvis-phone.js" "$here/web/jarvis-worklet.js" "$here/web/jarvis-plan.js" "$work/raw/assets/wwwroot/js/"
 cp "$here/web/jarvis-phone.css" "$work/raw/assets/wwwroot/css/"
 
 # 3) page text extractor: Mozilla Readability (Apache-2.0) + extract.js

@@ -188,6 +188,13 @@ Sejak Fix15, JARVIS di HP memakai seluruh aplikasi:
   training.
 - Asisten berita diam selama JARVIS bekerja dan berbicara, lalu jalan lagi setelah JARVIS selesai.
 
+Sejak Fix16, JARVIS di HP ikut layar:
+- Halaman atau tab yang Anda buka langsung ditanggapi JARVIS.
+- Di halaman analisa, JARVIS membaca semua tab (BIAS, MTF, PLAN, NARASI, LEVEL, LAPORAN, BERITA, AI) dan
+  mencocokkannya dengan arah market dan kalender ekonomi.
+- JARVIS lalu menyimpan rencananya sendiri. Rencana itu tampil di tab PLAN sebagai RENCANA JARVIS, di atas skenario
+  aplikasi.
+
 1. **PASANG** (sekali, 5–20 menit, ±1–2 GB):
    - Mencari Python 3.11–3.13 (`py -3.12`, `-3.13`, `-3.11`, lalu `python`). Python tidak dipasang otomatis.
    - Mengunduh arsip `main` Mark LVII ke `%LOCALAPPDATA%\SharxInvest\jarvis\app` (commit tercatat dari arsip).

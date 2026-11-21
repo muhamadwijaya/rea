@@ -1,9 +1,10 @@
-# SHARX INVEST Android — patch Fix10–Fix15 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
+# SHARX INVEST Android — patch Fix10–Fix16 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
 
 Patch ini dipasang di atas APK Android **SHARX-INVEST-AI-Fix9.apk** (paket `com.sharx.trader`, versi
 3.20-independent.9). Source Android-nya tidak ada di repo ini. Patch dibuat dari APK itu: kode Java baru, hook smali di
 `MainActivity`, perubahan UI web (`assets/wwwroot`) dan engine Python (Chaquopy `app.imy`). Di aplikasi, status bar
-menampilkan versi **3.20-independent.15** (Fix15; Fix14 = .14, Fix13 = .13, Fix12 = .12, Fix11 = .11, Fix10 = .10).
+menampilkan versi **3.20-independent.16** (Fix16; Fix15 = .15, Fix14 = .14, Fix13 = .13, Fix12 = .12, Fix11 = .11,
+Fix10 = .10).
 
 ## Perubahan
 
@@ -162,6 +163,49 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
    - Mengetik di tab JARVIS menunda asisten berita selama ada teks yang belum terkirim, atau sampai 6 detik setelah
      ketikan terakhir.
 
+## Fix16: JARVIS ikut layar dan membuat rencana trading sendiri
+
+1. **JARVIS membaca layar** (alat `read_screen`):
+   - Di halaman analisa aset, JARVIS membaca teks yang tampil di semua tab samping: BIAS, MTF, PLAN, NARASI, LEVEL,
+     LAPORAN, BERITA dan AI, termasuk tab yang sedang tertutup. Tab TV tidak bisa dibaca karena isinya halaman
+     TradingView sendiri.
+   - Ditambah konteks aset itu (juga lewat alat `market_context`):
+     - suasana pasar (risk-on/risk-off);
+     - outlook penggeraknya beserta hubungannya, mis. Dolar AS berlawanan arah dengan EURUSD dan emas;
+     - kekuatan kedua mata uang untuk pair forex;
+     - kalender ekonomi mata uangnya: 12 jam terakhir dengan hasil rilisnya, dan 48 jam ke depan.
+   - Di halaman lain JARVIS membaca daftar atau ringkasan yang tampil (screener, berita, kalender, dashboard, dll.).
+2. **Ikut layar:** selama percakapan JARVIS berjalan, halaman atau tab samping yang Anda buka diberitahukan ke JARVIS,
+   dan JARVIS langsung menanggapi.
+   - Halaman analisa aset: JARVIS membaca semua tab, mencocokkannya dengan arah market dan kalender, lalu memberi
+     rencananya sendiri.
+   - Tab samping, mis. PLAN: JARVIS mulai dari isi tab itu. Bila aset itu baru saja dianalisa, JARVIS cukup menyebut
+     apa yang ditambahkan tab itu dan apakah rencananya berubah.
+   - Halaman lain: JARVIS menyebut yang menonjol, lalu bertanya aset mana yang mau dianalisa.
+   - Pemberitahuan dikirim setelah Anda diam 1,5 detik di halaman itu, jadi pindah tab cepat dihitung sekali. Untuk
+     halaman analisa, pemberitahuan menunggu sampai datanya selesai dimuat.
+   - JARVIS baru menanggapi setelah selesai bicara dan saat Anda tidak sedang bicara.
+   - Halaman yang dibuka JARVIS sendiri tidak dilaporkan balik. Halaman yang sama dilaporkan lagi paling cepat
+     3 menit kemudian.
+   - Asisten berita diam selama JARVIS menanggapi.
+   - Bisa dimatikan di PENGATURAN → "Tanggapi halaman yang dibuka".
+3. **Rencana JARVIS** (alat `set_trading_plan`):
+   - JARVIS boleh mempertahankan skenario aplikasi atau mengubahnya: arah (BUY, SELL atau TUNGGU), entry, stop dan
+     target, dengan alasannya.
+   - Bila ada rilis berdampak tinggi dalam beberapa jam, JARVIS diarahkan untuk menunggu sampai rilis lewat, atau
+     menyebut risikonya dengan jelas.
+   - Engine memeriksa rencana sebelum disimpan:
+     - stop dan target harus di sisi yang benar;
+     - entry paling jauh 15 ATR dari harga sekarang;
+     - stop minimal 0,1 ATR dari entry.
+   - Rencana yang salah ditolak beserta alasannya, lalu JARVIS memperbaikinya.
+   - Rencana tampil di tab PLAN sebagai **RENCANA JARVIS**, di atas skenario aplikasi yang tetap tidak diubah. Kartu
+     itu memuat:
+     - arah, dan "Mengubah skenario aplikasi: SELL → BUY" bila arahnya berbeda;
+     - entry, stop, target dan risk-reward;
+     - alasan, syarat dan masa berlaku (1H: 24 jam, 4H: 3 hari, 1D: 10 hari).
+   - Tombol ✕ menghapusnya. Rencana disimpan di HP (`jarvis-plans.json`) dan tetap ada setelah aplikasi dibuka ulang.
+
 ## Terukur dan diuji
 
 - **Kode Python APK dijalankan di server ini** terhadap 3 berita terbaru dari setiap 40 feed:
@@ -238,17 +282,34 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
   - Selama suara asisten berita terdengar, 0 potongan mikrofon terkirim; sesudahnya mikrofon jalan lagi.
   - Uji Fix13/Fix14 (15 langkah, kedua jalur mikrofon) dan PC → HP (10 langkah) diulang dan lulus.
   - **Belum diuji di HP:** penglihatan chart oleh Gemini asli, halaman baca otomatis dan suara di perangkat.
+- **Fix16 diuji di Chromium** dengan engine Python APK yang baru dinyalakan dan Gemini Live tiruan. 8 langkah lulus:
+  - Halaman analisa EURUSD dibuka. JARVIS diberi tahu 14 detik kemudian, setelah datanya dimuat, lalu membaca
+    kedelapan tab (4.150 karakter).
+  - Rencana yang salah ditolak. Rencana BUY tersimpan dan tampil di tab PLAN dengan "Mengubah skenario aplikasi:
+    SELL → BUY".
+  - Tab PLAN dibuka: hanya tab itu yang dibaca. BIAS lalu MTF dalam 0,25 detik: satu pemberitahuan (MTF).
+  - Halaman screener: JARVIS bertanya aset mana. Halaman yang dibuka JARVIS sendiri tidak dilaporkan.
+  - Halaman yang dibuka saat JARVIS bicara 6 detik dilaporkan 7 detik kemudian, setelah JARVIS selesai.
+  - Pengaturan dimatikan: tidak ada pemberitahuan.
+  - Rencana tetap ada setelah aplikasi dibuka ulang, dan ✕ menghapusnya.
+- **Arah market per aset** diuji dengan data arah asli dari engine untuk 13 aset (saat itu RISK-OFF). Contoh EURUSD:
+  Dolar AS naik kuat dan berlawanan arah dengan aset; kekuatan EUR −21 vs USD +35, jadi condong SELL.
+- **Pemeriksaan rencana** diuji dengan 9 kasus: stop atau target di sisi salah, entry 20 ATR, stop 0,05 ATR, tanpa
+  target, tanpa alasan, arah tak dikenal, alias "beli", target tidak urut, dan TUNGGU.
+- Uji Fix13–Fix15 diulang dan lulus.
+- **Belum diuji di HP dan dengan Gemini asli:** apakah Gemini asli memanggil `read_screen` dan `set_trading_plan`
+  sesuai aturan, dan seberapa sering ia bicara saat Anda berpindah halaman.
 
 ## Build
 
 ```bash
 APKTOOL=apktool_2.10.0.jar BUILD_TOOLS=build-tools/36 ANDROID_JAR=android-35/android.jar \
-  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix15.apk
+  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix16.apk
 ```
 
 Perlu Java 17+, python3 (dengan pip), npm (Readability.js 0.5.0, Apache-2.0, diunduh saat build), curl, unzip, zip dan
 patch. Wheel `websockets` dari PyPI dicek SHA-256. Resource
 dan manifest APK tidak diubah (apktool `-r`). APK hasil ditandatangani kunci baru. Kunci asli Fix9 tidak tersedia,
 jadi **Fix9 harus di-uninstall dulu** (API key AI perlu dimasukkan lagi). Fix11 dan Fix12 memakai kunci yang sama dengan
-Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13, Fix14 dan Fix15 juga). Simpan keystore itu di tempat aman
+Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13 sampai Fix16 juga). Simpan keystore itu di tempat aman
 dan pakai lagi untuk versi berikutnya. Keystore dan APK tidak disimpan di repo ini.

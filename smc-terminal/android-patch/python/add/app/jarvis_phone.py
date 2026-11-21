@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import socket
@@ -58,6 +59,7 @@ def data_root() -> Path:
 class Settings:
     """Names, voice and options in jarvis-settings.json; the Gemini key in the Android keystore vault."""
     defaults = dict(assistantName='JARVIS', userName='', voice='Charon', duplex=False, googleSearch=True,
+                    followScreen=True,  # JARVIS hears which page the user opens and reacts to it
                     allowPc=False, pcTokens=[])  # PC → phone (jarvis_lan): switch, SHA-256 of paired PC tokens
     internal = ('allowPc', 'pcTokens')
 
@@ -122,7 +124,7 @@ class Settings:
                 if body['voice'] not in VOICES:
                     raise ValueError('Suara JARVIS tidak dikenal.')
                 values['voice'] = body['voice']
-            for name in ('duplex', 'googleSearch'):
+            for name in ('duplex', 'googleSearch', 'followScreen'):
                 if name in body:
                     values[name] = bool(body[name])
             key = str(body.get('apiKey') or '').strip()
@@ -157,9 +159,70 @@ def memory():
         return _MEMORY
 
 
+PLAN_HOURS = {'5m': 4, '15m': 12, '1h': 24, '4h': 72, '1d': 240, '1w': 720}  # how long a plan of a timeframe holds
+
+
+class Plans:
+    """JARVIS's own trading plan per asset (the newest), in jarvis-plans.json. The app's rule-based SMC scenario is not
+    touched: the PLAN tab shows JARVIS's plan above it (web/jarvis-plan.js). Expired plans are not shown."""
+    LIMIT = 300
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = threading.RLock()
+
+    def _load(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save(self, data: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        tmp.replace(self.path)
+
+    def get(self, symbol: str) -> dict | None:
+        with self.lock:
+            plan = self._load().get(str(symbol).upper())
+        if not isinstance(plan, dict) or float(plan.get('validUntilTs') or 0) < time.time():
+            return None
+        return plan
+
+    def put(self, plan: dict) -> None:
+        with self.lock:
+            data = self._load()
+            data[plan['symbol']] = plan
+            if len(data) > self.LIMIT:  # the oldest go first
+                for old in sorted(data, key=lambda k: (data[k] or {}).get('createdTs', 0))[:len(data) - self.LIMIT]:
+                    data.pop(old, None)
+            self._save(data)
+
+    def clear(self, symbol: str) -> bool:
+        with self.lock:
+            data = self._load()
+            if data.pop(str(symbol).upper(), None) is None:
+                return False
+            self._save(data)
+            return True
+
+
+_PLANS = None
+
+
+def plans() -> Plans:
+    global _PLANS
+    with _LOCK:
+        if _PLANS is None:
+            _PLANS = Plans(data_root() / 'jarvis-plans.json')
+        return _PLANS
+
+
 PROMPT = """You are {name}, the voice assistant inside SHARX INVEST on the user's Android phone ({platform}).
 You talk with the user through the phone's microphone and speaker; the glowing orb on the JARVIS screen shows when you
-listen and when you speak. You see nothing except the SHARX chart screenshots you ask for.
+listen and when you speak. You see the SHARX screen only through read_screen and the chart screenshots you ask for.
 
 HOW YOU SPEAK
 - Answer in the language of the user's latest message, and keep one language per reply, whatever stored notes or tool
@@ -197,14 +260,39 @@ THE SHARX APP
 - For "analyse X" or "analisa X", say one short sentence, then call analyze_asset once. It opens the chart, sends you a
   screenshot of it, reads the newest related news (each article opens in the app and closes by itself) and checks the
   calendar. When the screenshot arrives, give the analysis: what the chart shows (trend, structure, key levels), the
-  SMC plan and what would cancel it, what the news says and its likely effect, upcoming events, and the risk. Keep it
-  to about 30 to 45 seconds of speech unless the user wants more. If the chart is still loading, give the analysis
-  from the data at once; when its screenshot follows later, add only what it changes.
+  SMC plan and what would cancel it, how it fits the market direction, what the news says and its likely effect,
+  upcoming events, and the risk. Then give your own plan (YOUR PLAN). Keep it to about 30 to 45 seconds of speech
+  unless the user wants more. If the chart is still loading, give the analysis from the data at once; when its
+  screenshot follows later, add only what it changes.
 - To look at a chart alone: look_at_chart. To read an article: market_news gives each headline an [id]; read_news opens
   the article in the app, takes its text and closes it. Read it aloud when the user asks you to read it; otherwise
   summarise what matters.
+- read_screen reads the page on the screen. market_context gives the market direction and calendar around one asset.
 - Other app data: market_overview, screener, alerts, company_report, dividends, training_stats, economic_calendar.
 - A message starting with "[CHART SCREENSHOT]" is the picture of the SHARX chart you asked for.
+
+THE SCREEN
+- A message starting with "[SCREEN]" comes from the app: the user just opened that page or tab themselves. React at
+  once, keen and brief, in the language the user speaks with you (Indonesian when nothing has been said yet):
+  - An asset's analysis page (Analisa SMC): call read_screen, then give a short analysis from what the page shows,
+    checked against the market direction and the calendar that read_screen adds. Then give your own plan (YOUR PLAN)
+    and save it with set_trading_plan.
+  - A side tab named in the message (BIAS, MTF, PLAN, NARASI, LEVEL, LAPORAN, BERITA, AI): start from what that tab
+    shows. If you analysed this asset in the last few minutes, call read_screen with part "tab" and say in one to three
+    sentences what this tab adds and whether it changes your plan.
+  - Any other page: call read_screen, say in one or two sentences what stands out there (the strongest setups, the
+    main headline, the next big event, the market mood) and ask which market the user wants analysed.
+- About 20 to 40 seconds of speech. Do not repeat a full analysis you gave in the last few minutes.
+
+YOUR PLAN
+- You may keep the app's rule-based scenario or change it: its direction (buy, sell or wait), entry, stop and targets.
+  Change it when the market direction, the higher timeframes, the news or a high-impact event in the next hours argue
+  against it, and say why in one sentence. When a high-impact event of the asset's currencies is due within hours,
+  prefer waiting until after it, or name the risk plainly.
+- Put the stop beyond the level that cancels the idea and the targets at real levels (liquidity, range high or low,
+  order blocks), and say the risk-reward.
+- set_trading_plan shows your plan in the PLAN tab as RENCANA JARVIS. It is your reading, not a certainty and not
+  financial advice: never promise an outcome. If it is rejected, fix what it says and save it again.
 
 THE USER'S PC
 - When the user's PC runs JARVIS and is paired, pc_command hands it any request that has to happen on the computer:
@@ -233,7 +321,7 @@ WHAT YOU CAN DO NOW
 
 WHAT YOU CANNOT DO
 - Anything that is not in the list above: say so in one sentence and offer the closest thing you can do.
-- See anything other than the SHARX chart screenshots you ask for: there is no camera or screen view.
+- See anything other than what read_screen and the chart screenshots give you: there is no camera.
 - Hear while the microphone is off; you cannot switch it on yourself.
 - Remember earlier conversations beyond [MEMORY], unless the user asked you to save something.
 """
@@ -280,6 +368,7 @@ def _obj(properties: dict | None = None, required: tuple = ()) -> dict:
 
 S = {'type': 'STRING'}
 I = {'type': 'INTEGER'}
+N = {'type': 'NUMBER'}
 
 
 def _s(description: str, enum: tuple | None = None) -> dict:
@@ -628,6 +717,7 @@ def _currencies(inst) -> list[str]:
 def t_calendar(a, ctx):
     state = ctx['state']
     hours = max(1, min(168, int(a.get('hours') or 24)))
+    past = max(0, min(48, int(a.get('past_hours') or 1)))  # released events with their results
     wanted = {c.strip().upper() for c in (a.get('currencies') or '').replace(';', ',').split(',') if c.strip()} \
         if isinstance(a.get('currencies'), str) else {str(c).upper() for c in a.get('currencies') or []}
     now = time.time()
@@ -639,10 +729,24 @@ def t_calendar(a, ctx):
             t = datetime.fromisoformat(str(e['date']).replace('Z', '+00:00'))
         except (KeyError, ValueError):
             continue
-        if now - 3600 <= t.timestamp() <= now + hours * 3600 and str(e.get('impact', '')).lower() in ('high', 'medium'):
-            rows.append({'time': t.astimezone().strftime('%a %d %b %H:%M'), 'currency': e.get('currency'), 'event': e.get('title'),
-                         'impact': e.get('impact'), 'forecast': e.get('forecast'), 'previous': e.get('previous'), 'actual': e.get('actual')})
-    return {'hours': hours, 'events': rows[:25]}
+        ts = t.timestamp()
+        if now - past * 3600 <= ts <= now + hours * 3600 and str(e.get('impact', '')).lower() in ('high', 'medium'):
+            if e.get('actual') not in (None, ''):
+                when = 'released'
+            elif ts > now:
+                when = f'in {_until(ts - now)}'
+            else:  # speeches and late results have no number
+                when = 'due now' if now - ts <= 900 else f'{_until(now - ts)} ago, no result published'
+            rows.append((ts, {'time': t.astimezone().strftime('%a %d %b %H:%M'), 'currency': e.get('currency'),
+                              'event': e.get('title'), 'impact': e.get('impact'), 'forecast': e.get('forecast'),
+                              'previous': e.get('previous'), 'actual': e.get('actual'), 'status': when}))
+    rows.sort(key=lambda r: r[0])
+    return {'hours': hours, 'pastHours': past, 'events': [r for _, r in rows][:25]}
+
+
+def _until(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f'{minutes} min' if minutes < 90 else f'{minutes / 60:.1f} h'
 
 
 # the rest of the SHARX app: its own endpoints, trimmed for speech
@@ -865,7 +969,7 @@ def t_analyze_asset(a, ctx):
     pool = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix='jarvis-analyze')
     try:
         smc = pool.submit(t_market_analysis, {'symbol': inst.symbol, 'timeframe': tf}, ctx)
-        calendar = pool.submit(t_calendar, {'hours': 48, 'currencies': _currencies(inst)}, ctx)
+        context = pool.submit(_asset_context, ctx, inst)
         news = _wait(pool.submit(_related_news, state, inst), 20, 'news')
         own, related = news if isinstance(news, tuple) else ([], [])
         out = {'symbol': inst.symbol, 'name': inst.name, 'timeframe': tf,
@@ -883,19 +987,188 @@ def t_analyze_asset(a, ctx):
                 articles.append(article)
         out['articles'] = articles
         out['smc'] = _wait(smc, until - time.monotonic(), 'SMC reading')
-        out['calendar'] = _wait(calendar, 3, 'calendar')
+        around = _wait(context, 3, 'market direction and calendar')
+        out['marketDirection'] = around.get('direction', around)
+        out['calendar'] = around.get('calendar', around)
     finally:
         pool.shutdown(wait=False)
     shot = _deliver_chart(session, chart, inst.symbol, tf, until - time.monotonic())
     if shot == 'sent':
         out['chart'] = 'open on the screen; its screenshot arrives as the next message'
         out['note'] = ('Say one short sentence that you are reading the chart, then wait for the screenshot. Then give the '
-                       'analysis: what the chart shows, the SMC plan and what cancels it, what the news says and its likely '
-                       'effect, upcoming events, and the risk.')
+                       'analysis: what the chart shows, the SMC plan and what cancels it, how it fits the market direction, '
+                       'what the news says, upcoming events, and the risk. Then give your own plan and save it with '
+                       'set_trading_plan.')
     else:
         out['chart'] = 'open on the screen but still loading; its screenshot follows when it has drawn' if shot == 'loading' else shot
-        out['note'] = ('Give the analysis now from this data: the SMC plan and what cancels it, what the news says and its '
-                       'likely effect, upcoming events, and the risk.')
+        out['note'] = ('Give the analysis now from this data: the SMC plan and what cancels it, how it fits the market '
+                       'direction, what the news says, upcoming events, and the risk. Then give your own plan and save it '
+                       'with set_trading_plan.')
+    return out
+
+
+# what the screen shows, the market around an asset, and JARVIS's own plan
+
+_OUTLOOK_OF_TAG = {'USD': 'usd', 'GOLD': 'gold', 'OIL': 'oil', 'US_EQ': 'us_equities', 'IDX': 'idx', 'CRYPTO': 'crypto'}
+
+
+def _direction_for(inst, d: dict) -> dict:
+    """The parts of SHARX's market direction (ARAH MARKET) that bear on one asset, each with how it relates to it."""
+    symbol, cls = inst.symbol.upper(), getattr(inst, 'asset_class', '')
+    tags = _news_assets(inst)
+    regime = d.get('regime') or {}
+    out = {'riskMood': regime.get('regime'), 'riskNote': regime.get('text'), 'summary': d.get('headline')}
+    view = next((v for v in d.get('instruments') or [] if v.get('symbol') == symbol), None)
+    if view:
+        out['thisAsset'] = {'score': view.get('score'), 'label': view.get('label'), 'aligned': view.get('aligned'),
+                            'daily': (view.get('d1') or {}).get('label'), 'h4': (view.get('h4') or {}).get('label')}
+    wanted = {_OUTLOOK_OF_TAG[t] for t in tags if t in _OUTLOOK_OF_TAG}
+    if 'US_EQ' in tags:
+        wanted.add('yields')
+    priced_in_usd = (cls == 'forex' and symbol.endswith('USD')) or cls in ('commodity', 'crypto')
+    yahoo = str(getattr(inst, 'yahoo', '') or '').upper()
+    rows = []
+    for o in d.get('outlooks') or []:
+        key = o.get('key')
+        if key not in wanted:
+            continue
+        if symbol in (o.get('symbols') or []):
+            relation = 'this asset itself'
+        elif key == 'usd':
+            relation = 'moves against this asset' if priced_in_usd else 'moves with this asset' if symbol.startswith('USD') else 'background'
+        elif key == 'yields' or (key == 'gold' and yahoo != 'GC=F'):
+            relation = 'background' if key == 'yields' else 'related market'
+        else:
+            relation = "this asset's market"
+        rows.append({'title': o.get('title'), 'label': o.get('label'), 'score': o.get('score'), 'relation': relation,
+                     'drivers': (o.get('drivers') or [])[:3]})
+    out['outlooks'] = rows
+    strength = {r.get('currency'): r.get('score') for r in d.get('currencyStrength') or [] if r.get('score') is not None}
+    base, quote = symbol[:3], symbol[3:]
+    if cls == 'forex' and len(symbol) == 6 and base in strength and quote in strength:
+        spread = round(float(strength[base]) - float(strength[quote]), 1)
+        out['currencyStrength'] = {base: strength[base], quote: strength[quote], 'spread': spread,
+                                   'favours': 'buy' if spread >= 10 else 'sell' if spread <= -10 else 'neither side clearly'}
+    if d.get('bestPair'):
+        out['strongestPairNow'] = d['bestPair']
+    return out
+
+
+def _asset_context(ctx, inst) -> dict:
+    """Around one asset: SHARX's market direction for what moves it, and the calendar of its currencies (the last 12
+    hours with their results, the next 48 hours)."""
+    d = _api(ctx, '/direction')
+    direction = _direction_for(inst, d) if isinstance(d, dict) and d.get('regime') else \
+        {'result': 'the market direction is not computed yet (the app started recently); try again in a few minutes'}
+    calendar = t_calendar({'hours': 48, 'past_hours': 12, 'currencies': _currencies(inst)}, ctx)
+    return {'direction': direction, 'calendar': calendar}
+
+
+def t_market_context(a, ctx):
+    from app import instruments
+    inst = instruments.resolve(str(a.get('symbol') or ''))
+    return dict(symbol=inst.symbol, **_asset_context(ctx, inst))
+
+
+def _plan_view(plan: dict) -> dict:
+    keys = ('timeframe', 'direction', 'entry', 'stop', 'targets', 'rr', 'condition', 'reason')
+    out = {k: plan.get(k) for k in keys if plan.get(k) not in (None, [], '')}
+    out['savedMinutesAgo'] = int((time.time() - float(plan.get('createdTs') or 0)) // 60)
+    return out
+
+
+def t_read_screen(a, ctx):
+    from app import instruments
+    session = ctx['session']
+    part = 'tab' if str(a.get('part') or '').lower() == 'tab' else 'all'
+    shown = session.client_call('screen_read', {'part': part}, timeout=10)
+    if not isinstance(shown, dict) or not shown.get('title'):
+        return shown if isinstance(shown, dict) else {'result': 'the app did not answer'}
+    out = {'page': shown['title']}
+    if shown.get('symbol'):
+        inst = instruments.resolve(str(shown['symbol']))
+        out.update(symbol=inst.symbol, timeframe=shown.get('tf'), sideTabOpen=shown.get('sideTab'))
+        if shown.get('loading'):
+            out['note'] = 'the analysis on the screen is still loading: what it shows may be partial or of the previous asset'
+        panes = '\n'.join(f"[{str(k).upper()}]\n{v}" for k, v in (shown.get('panes') or {}).items())
+        out['shown'] = _untrusted('screen', f"{shown.get('header') or ''}\n{panes}".strip())
+        mine = plans().get(inst.symbol)
+        out['yourPlan'] = _plan_view(mine) if mine else None
+        if part == 'all':
+            out.update(_asset_context(ctx, inst))
+    else:
+        out['shown'] = _untrusted('screen', str(shown.get('text') or '(nothing readable on this page)'))
+    return out
+
+
+def _price(value) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def t_set_plan(a, ctx):
+    """JARVIS's own plan for an asset: checked against the price now and the asset's ATR, saved, shown in the PLAN tab."""
+    from app import analysis, instruments, market_data
+    inst = instruments.resolve(str(a.get('symbol') or ''))
+    tf = _tf(a.get('timeframe'))
+    side = str(a.get('direction') or '').strip().lower()
+    side = {'long': 'buy', 'short': 'sell', 'beli': 'buy', 'jual': 'sell', 'tunggu': 'wait', 'none': 'wait'}.get(side, side)
+    reason = ' '.join(str(a.get('reason') or '').split())[:500]
+    condition = ' '.join(str(a.get('condition') or '').split())[:240]
+    if side not in ('buy', 'sell', 'wait'):
+        return {'result': 'rejected', 'why': 'direction must be buy, sell or wait'}
+    if len(reason) < 10:
+        return {'result': 'rejected', 'why': 'give the reason in one or two sentences'}
+    market_data.timeframe(tf)
+    j = analysis.to_json(analysis.run(inst, tf), bars_out=5, include_series=False)
+    price = float(j['price'])
+    atr = _price((j.get('indicators') or {}).get('atr')) or abs(price) * 0.002 or 1e-9
+    app = j.get('plan') or None
+    app_side = None
+    if app:
+        app_side = 'wait' if app.get('status') == 'wait' else {'bullish': 'buy', 'bearish': 'sell'}.get(app.get('direction'))
+    now = time.time()
+    plan = {'symbol': inst.symbol, 'name': inst.name, 'timeframe': tf, 'direction': side, 'reason': reason,
+            'condition': condition or None, 'price': price, 'atr': atr, 'decimals': (j.get('instrument') or {}).get('decimals'),
+            'createdTs': int(now), 'validUntilTs': int(now + PLAN_HOURS.get(tf, 24) * 3600),
+            'app': ({'direction': app_side, **{k: app.get(k) for k in ('entry', 'stop', 'targets', 'rr') if app.get(k) is not None}}
+                    if app else {'direction': 'none'})}
+    if side != 'wait':
+        entry, stop = _price(a.get('entry')), _price(a.get('stop'))
+        raw = a.get('targets')
+        raw = raw if isinstance(raw, list) else [raw] if raw is not None else []
+        targets = [t for t in (_price(x) for x in raw[:3]) if t is not None]
+        if entry is None or stop is None or not targets:
+            return {'result': 'rejected', 'why': 'a buy or sell plan needs entry, stop and at least one target'}
+        up = side == 'buy'
+        if (up and not stop < entry) or (not up and not stop > entry):
+            return {'result': 'rejected', 'why': f"for a {side} the stop must be {'below' if up else 'above'} the entry"}
+        if any((t <= entry) if up else (t >= entry) for t in targets):
+            return {'result': 'rejected', 'why': f"for a {side} every target must be {'above' if up else 'below'} the entry"}
+        if abs(entry - price) > 15 * atr:
+            return {'result': 'rejected', 'why': f'the entry is {abs(entry - price) / atr:.1f} ATR from the price now '
+                                                 f'({price:g}); use a level near the market'}
+        risk = abs(entry - stop)
+        if risk < 0.1 * atr:
+            return {'result': 'rejected', 'why': 'the stop is closer than 0.1 ATR to the entry; put it beyond the level '
+                                                 'that cancels the idea'}
+        targets.sort(key=lambda t: abs(t - entry))
+        plan.update(entry=entry, stop=stop, targets=targets, rr=[round(abs(t - entry) / risk, 2) for t in targets],
+                    stopAtr=round(risk / atr, 2))
+    plans().put(plan)
+    try:
+        ctx['state'].publish('jarvis', {'type': 'plan', 'symbol': inst.symbol})
+    except Exception:  # the page reads it when the PLAN tab is drawn again
+        pass
+    out = {'result': 'saved; the PLAN tab shows it as RENCANA JARVIS', 'symbol': inst.symbol, 'timeframe': tf,
+           'direction': side, 'appScenario': app_side or 'none'}
+    if side != 'wait':
+        out.update(rr=plan['rr'], stopAtr=plan['stopAtr'])
+    if app_side in ('buy', 'sell') and side != app_side:
+        out['note'] = f"Your plan changes the app's {app_side} scenario to {side}: say so and why."
     return out
 
 
@@ -1015,9 +1288,29 @@ TOOLS = [
     Tool('market_quote', 'Latest price and daily change of a market symbol.', _obj({'symbol': _s('Symbol')}, ('symbol',)), t_market_quote),
     Tool('market_news', 'Latest market headlines with sentiment, optionally for one symbol.',
          _obj({'symbol': _s('Optional symbol'), 'limit': dict(I, description='How many headlines, 1-10')}), t_market_news),
-    Tool('economic_calendar', 'Upcoming high and medium impact economic events (forecast, previous, actual).',
+    Tool('economic_calendar', 'High and medium impact economic events: upcoming ones and recent ones with their results '
+         '(forecast, previous, actual).',
          _obj({'hours': dict(I, description='How many hours ahead, default 24'),
+               'past_hours': dict(I, description='Also the last N hours with their results, default 1'),
                'currencies': _s('Optional comma-separated currencies, e.g. EUR,USD')}), t_calendar),
+    Tool('read_screen', 'Read what the SHARX page on the screen shows now. On an asset analysis page: every side tab '
+         '(bias, multi-timeframe, plan, narrative, levels, report, news, AI outlook), your saved plan, and the market '
+         'direction and economic calendar that bear on that asset. On other pages: what the page lists.',
+         _obj({'part': _s('all = every side tab plus market direction and calendar; tab = only the side tab that is open',
+                          ('all', 'tab'))}), t_read_screen),
+    Tool('market_context', 'For one asset: the SHARX market direction (risk mood, the outlook of what moves it, currency '
+         'strength) and the economic calendar of its currencies (last 12 hours with results, next 48 hours).',
+         _obj({'symbol': _s('Symbol')}, ('symbol',)), t_market_context),
+    Tool('set_trading_plan', 'Save your own trading plan for an asset. It shows in the PLAN tab as RENCANA JARVIS, above '
+         "the app's rule-based scenario, which stays as it is. buy or sell needs entry, stop and 1-3 targets; wait needs "
+         'the condition to wait for.',
+         _obj({'symbol': _s('Symbol'), 'timeframe': _s('Timeframe of the plan', ('5m', '15m', '1h', '4h', '1d')),
+               'direction': _s('Your direction', ('buy', 'sell', 'wait')),
+               'entry': dict(N, description='Entry price'), 'stop': dict(N, description='Stop loss, where the idea is wrong'),
+               'targets': {'type': 'ARRAY', 'items': N, 'description': 'Take-profit prices, nearest first'},
+               'reason': _s('Why, in one or two sentences: structure, market direction, calendar, news'),
+               'condition': _s('Optional: what must happen first, e.g. after the CPI release, or a 15m CHoCH up')},
+              ('symbol', 'timeframe', 'direction', 'reason')), t_set_plan),
     Tool('analyze_asset', 'Full analysis of a market symbol: opens its SHARX chart and sends you a screenshot, gets the SMC '
          'reading and plan, reads the newest related news articles in the app, and checks the economic calendar. Use it '
          'for "analyse X" / "analisa X".',
@@ -1229,6 +1522,14 @@ class LiveSession:
         self.noted: set[str] = set()
         self.pending_image = None  # (base64 JPEG, caption) waiting for the end of the model's turn
         self.chart_seq = 0  # the newest chart asked for (an older one drawn late is not sent)
+        # [SCREEN] notices: the newest page the user opened, given to the model once it is free
+        self.notice = None          # (text, queued at)
+        self.notice_thread = None
+        self.count_lock = threading.Lock()
+        self.model_active = False   # the model is producing a turn
+        self.model_at = 0.0         # its last output or the end of its turn
+        self.heard_at = 0.0         # the user's speech was last transcribed
+        self.tools_running = 0
 
     # -- upstream
 
@@ -1369,6 +1670,12 @@ class LiveSession:
     def handle_up(self, m: dict, ws):
         content = m.get('serverContent')
         if content:
+            if (content.get('modelTurn') or {}).get('parts') or (content.get('outputTranscription') or {}).get('text'):
+                self.model_active, self.model_at = True, time.monotonic()
+            if (content.get('inputTranscription') or {}).get('text'):
+                self.heard_at = time.monotonic()
+            if content.get('interrupted') or content.get('turnComplete'):
+                self.model_active, self.model_at = False, time.monotonic()
             for part in (content.get('modelTurn') or {}).get('parts') or []:
                 blob = part.get('inlineData')
                 if blob and str(blob.get('mimeType', '')).startswith('audio/pcm'):
@@ -1395,6 +1702,9 @@ class LiveSession:
                     self.reply_to, self.reply_text = None, []
         if 'toolCall' in m:
             calls = m['toolCall'].get('functionCalls') or []
+            self.model_active, self.model_at = True, time.monotonic()
+            with self.count_lock:
+                self.tools_running += 1  # counted before the pool runs them: no notice slips in between
             self.pool.submit(self.run_tools, calls)
         if 'toolCallCancellation' in m:
             self.cancelled.update(m['toolCallCancellation'].get('ids') or [])
@@ -1414,6 +1724,13 @@ class LiveSession:
             pass
 
     def run_tools(self, calls: list[dict]):
+        try:
+            self._run_tools(calls)
+        finally:
+            with self.count_lock:
+                self.tools_running -= 1
+
+    def _run_tools(self, calls: list[dict]):
         responses = []
         self.browser.send({'type': 'state', 'state': 'thinking'})
         for call in calls:
@@ -1469,6 +1786,59 @@ class LiveSession:
         if image:
             self.send_up({'clientContent': {'turns': [{'role': 'user', 'parts': [
                 {'inlineData': {'mimeType': 'image/jpeg', 'data': image[0]}}, {'text': image[1]}]}], 'turnComplete': True}})
+
+    # -- the page the user opened (jarvis-phone.js), told to the model when it is free
+
+    def screen(self, message: dict):
+        if not self.settings.values.get('followScreen', True):
+            self.browser.send({'type': 'screen_dropped'})
+            return
+
+        def clean(value, limit):
+            return ' '.join(''.join(c for c in str(value or '') if c.isprintable()).split())[:limit]
+        label = clean(message.get('label'), 160)
+        if not label:
+            self.browser.send({'type': 'screen_dropped'})
+            return
+        details = [f'{name} {clean(message.get(key), limit).upper()}' for key, name, limit in
+                   (('symbol', 'symbol', 24), ('tf', 'timeframe', 8), ('sideTab', 'side tab', 12)) if message.get(key)]
+        text = (f"[SCREEN] The user opened: {label}{' (' + ', '.join(details) + ')' if details else ''}. "
+                'They opened it themselves. Follow THE SCREEN rules.')
+        with self.count_lock:
+            self.notice = (text, time.monotonic())  # a newer page replaces one not told yet
+            if self.notice_thread is None:
+                self.notice_thread = threading.Thread(target=self._tell_screen, name='jarvis-screen', daemon=True)
+                self.notice_thread.start()
+
+    def _free(self) -> bool:
+        """The model is not answering, no tool runs, JARVIS's voice has ended and the user is not talking."""
+        now = time.monotonic()
+        answering = self.model_active and now - self.model_at < 20  # a turn that never ended does not block for ever
+        return (self.up is not None and not answering and self.tools_running == 0 and not self.pending_image
+                and not self.playing and now > self.playing_until + 0.3 and now - self.heard_at > 1.5
+                and now - self.model_at > 0.8)
+
+    def _tell_screen(self):
+        while not self.stopping:
+            send = dropped = None
+            with self.count_lock:
+                if self.notice is None:
+                    self.notice_thread = None
+                    return
+                text, queued = self.notice
+                if time.monotonic() - queued > 45:
+                    self.notice, dropped = None, True
+                elif self._free():
+                    self.notice, send = None, text
+            if dropped:
+                self.browser.send({'type': 'screen_dropped'})
+            elif send:
+                self.model_active, self.model_at = True, time.monotonic()
+                self.browser.send({'type': 'state', 'state': 'thinking'})
+                self.inject(send)
+            time.sleep(0.3)
+        with self.count_lock:
+            self.notice_thread = None
 
     # -- native microphone (Android)
 
@@ -1565,6 +1935,8 @@ class LiveSession:
                 elif kind == 'tool_result' and message.get('id') in self.pending:
                     result = message.get('result')
                     self.pending[message['id']].set_result(result if isinstance(result, dict) else {'result': str(result)})
+                elif kind == 'screen':
+                    self.screen(message)
                 elif kind == 'stop':
                     break
         finally:
@@ -1649,6 +2021,15 @@ def dispatch(state, method: str, p: str, q: dict, b: dict):
         if post:
             settings().update(b)
         return status(state)
+    if p == '/jarvis/plan':
+        symbol = str((b if post else q).get('symbol') or '').strip().upper()[:24]
+        if post and b.get('action') == 'clear' and symbol:
+            plans().clear(symbol)
+            try:
+                state.publish('jarvis', {'type': 'plan', 'symbol': symbol})
+            except Exception:
+                pass
+        return {'plan': plans().get(symbol) if symbol else None}
     if p == '/jarvis/memory':
         if post and b.get('action') == 'forget':
             memory().forget(str(b.get('category') or 'notes'), str(b.get('key') or ''))

@@ -1,12 +1,35 @@
 --- a/assets/wwwroot/js/analysis.js
 +++ b/assets/wwwroot/js/analysis.js
-@@ -1,4 +1,5 @@
+@@ -1,7 +1,9 @@
  import { readPref, writePref } from './ui-state.js';
 +import { rememberNews } from './reader.js';
++import { mountJarvisPlan } from './jarvis-plan.js';
  // Analisa SMC view of one market page: market watchlist + SMC chart / TradingView live + bias, MTF,
  // trade plan, narrative, key levels and symbol news.
- import { api, esc, on, badge, dirHex, dirClass, fmtPct, fmtPrice, fmtScore, fmtTime, segmented, timeAgo, trendText, arrow, divBar, CLASS_LABEL } from './util.js';
-@@ -417,6 +418,7 @@
+-import { api, esc, on, badge, dirHex, dirClass, fmtPct, fmtPrice, fmtScore, fmtTime, segmented, timeAgo, trendText, arrow, divBar, CLASS_LABEL } from './util.js';
++import { api, esc, emit, on, badge, dirHex, dirClass, fmtPct, fmtPrice, fmtScore, fmtTime, segmented, timeAgo, trendText, arrow, divBar, CLASS_LABEL } from './util.js';
+ import { SmcChart } from './smc-chart.js';
+ import { advancedChart, technicalGauge } from './tv.js';
+ import { rowsOf } from './markets.js';
+@@ -264,6 +266,7 @@
+       this.$('.an-updated').textContent = `analisa ${fmtTime(d.generatedAt)} · data ${timeAgo(d.fetchedAt)}`;
+       const hash = `#${this.cfg.key}/analisa/${encodeURIComponent(d.instrument.symbol)}/${tf}`;
+       if (this.visible() && location.hash !== hash) history.replaceState(null, '', hash);
++      if (!silent && this.visible()) emit('analysis-shown', { market: this.cfg.key, symbol: d.instrument.symbol, tf });
+       if (!silent&&!fromAssistant) window.SMC.voice?.analyzeAsset(d.instrument.symbol, { technical:d, onResult:r=>{
+         if (this.current.symbol===r.symbol) this.aiPanel?.setResult(r);
+       }});
+@@ -369,7 +372,8 @@
+         <div class="mtf-row" data-tf="${esc(t.tf)}" style="cursor:pointer" title="Buka TF ${esc(t.tf.toUpperCase())}"><b>${esc(t.tf.toUpperCase())}</b><span>${trendText(t.swingTrend)} <span class="dim">swing</span></span><span>${trendText(t.internalTrend)} <span class="dim">int</span></span><span class="num" style="text-align:right;color:${dirHex(t.direction)}">${fmtScore(t.score)}</span></div>`).join('')}
+       <div class="note">${mtf.aligned ? '✔ ' : '⚠ '}${esc(mtf.note)} Skor gabungan ${fmtScore(mtf.score)} (bobot 1D 45% · 4H 35% · 1H 20%). Klik baris untuk membuka timeframe itu.</div>` : '<div class="empty">Tidak tersedia.</div>');
+ 
+-    pane('plan', `<div class="an-train"></div><h5 class="an-plan-title">SKENARIO ZONA TERDEKAT</h5>${planHtml}<div class="note">Skenario dibuat otomatis dari aturan SMC — bukan saran investasi.</div>`);
++    pane('plan', `<div class="jvp-slot"></div><div class="an-train"></div><h5 class="an-plan-title">SKENARIO ZONA TERDEKAT</h5>${planHtml}<div class="note">Skenario dibuat otomatis dari aturan SMC — bukan saran investasi.</div>`);
++    mountJarvisPlan(this.$('.jvp-slot'), inst.symbol, inst.decimals);
+     this.planTraining = mountPlanTraining(this.$('.an-train'));
+     if (this.sideTab === 'plan') this.planTraining.load(inst.symbol, this.current.tf, inst.decimals);
+     pane('narasi', `<ul class="narr">${d.narrative.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`);
+@@ -417,6 +421,7 @@
      const target = () => this.$('.sym-news');
      try {
        const res = await api(`/api/symbol-news?symbol=${encodeURIComponent(symbol)}`);
