@@ -4,18 +4,15 @@
 #   APKTOOL=apktool_2.10.0.jar BUILD_TOOLS=build-tools/36 ANDROID_JAR=android-35/android.jar \
 #     ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix13.apk
 #
-# Needs Java 17+, python3 (with pip), npm, curl, unzip, zip and patch. The keystore signs the result: keep it private
+# Needs Java 17+, python3 (with pip), npm, unzip, zip and patch. The keystore signs the result: keep it private
 # and reuse it for later versions, otherwise Android asks to uninstall the app before installing an update.
 #
-# JARVIS on the phone bundles files of Mark LVII (FatihMakes, CC BY-NC 4.0, non-commercial use only) from the pinned
-# commit below: from a checkout given as MARK_LVII=/path/to/Mark-LVII, otherwise downloaded from GitHub. Their SHA-256
-# is checked, as is the websockets wheel (BSD-3-Clause) taken from PyPI.
+# JARVIS on the phone bundles the websockets wheel (BSD-3-Clause) from PyPI; its SHA-256 is checked.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 orig="$(realpath "$1")"; ks="$(realpath "$2")"; pass="$(realpath "$3")"; out="$(realpath -m "$4")"
 : "${APKTOOL:?path of apktool jar}" "${BUILD_TOOLS:?Android build-tools dir}" "${ANDROID_JAR:?android.jar of API 35}"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
-MARK_COMMIT=752ff618a4e6a4bf2e675866b993071d739cfce2
 check() { echo "$1  $2" | sha256sum -c --quiet - || { echo "checksum mismatch: $2" >&2; exit 1; }; }
 
 # 1) decode code and assets; resources stay as they are
@@ -39,20 +36,9 @@ cp "$work/package/LICENSE.md" "$work/raw/assets/reader/Readability-LICENSE.md"
 cp "$here/assets/reader/extract.js" "$work/raw/assets/reader/extract.js"
 
 # 4) engine (Chaquopy app.imy): the files named by the diffs (+++ b/<path>) are patched and repacked. New modules:
-#    python/add (JARVIS on the phone), Mark LVII's prompt and memory manager (mark_lvii/), websockets (Live API client)
-mkdir -p "$work/add/mark_lvii" "$work/wheels"
+#    python/add (JARVIS on the phone) and websockets (its Gemini Live client)
+mkdir -p "$work/add" "$work/wheels"
 cp -r "$here/python/add/." "$work/add/"
-mark="${MARK_LVII:-}"
-if [ -z "$mark" ]; then
-  curl -fsSL "https://github.com/FatihMakes/Mark-LVII/archive/$MARK_COMMIT.zip" -o "$work/mark.zip"
-  unzip -q "$work/mark.zip" -d "$work/mark"; mark="$work/mark/Mark-LVII-$MARK_COMMIT"
-fi
-check d44a83a20d2d515fd58318098ff8c91272bfd48647a69237da206253bd07f419 "$mark/core/prompt.txt"
-check 3ecf5a9d80484bec73eef67e54c7d7e2880c726e4bfac58d05b1a14b6e1988ce "$mark/memory/memory_manager.py"
-check 46089d78b1244dc7080e7da468e1c63c5a8cfe70c10b75870109c6e6d7458e6f "$mark/LICENSE"
-cp "$mark/core/prompt.txt" "$mark/memory/memory_manager.py" "$mark/LICENSE" "$work/add/mark_lvii/"
-cp "$here/python/mark_lvii/__init__.py" "$here/python/mark_lvii/NOTICE" "$work/add/mark_lvii/"
-echo "$MARK_COMMIT" > "$work/add/mark_lvii/COMMIT"
 python3 -m pip download "websockets==15.0.1" --no-deps --only-binary=:all: --platform any --python-version 3.13 -q -d "$work/wheels"
 check f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f "$work/wheels/websockets-15.0.1-py3-none-any.whl"
 unzip -q "$work/wheels/websockets-15.0.1-py3-none-any.whl" 'websockets/*' -x '*.c' '*.pyi' -d "$work/add"

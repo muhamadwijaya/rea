@@ -1,5 +1,4 @@
-// JARVIS tab: Mark LVII by FatihMakes (https://github.com/FatihMakes/Mark-LVII, CC BY-NC 4.0, non-commercial use only),
-// a voice AI assistant.
+// JARVIS tab: a voice AI assistant.
 //   desktop (mode "local"): Mark LVII stays its own program; the gateway installs and runs it on this PC
 //     (/api/jarvis/install|start|stop) and this tab shows its control panel (the dashboard it serves on port 8000),
 //     signed in with the one-time key of Mark LVII's "Remote Control" button.
@@ -7,7 +6,6 @@
 import { $, esc, toast } from './util.js';
 
 const SOURCE = 'https://github.com/FatihMakes/Mark-LVII';
-const LICENSE = 'https://creativecommons.org/licenses/by-nc/4.0/';
 const KEY = /^[A-HJKMNP-Z2-9]{8}$/;           // alphabet of Mark LVII pairing keys (no O, I, L, 0, 1)
 const STORE_SIDE = 'sharx.jarvis.side';
 const STORE_ZOOM = 'sharx.jarvis.zoom.local';
@@ -52,11 +50,8 @@ function build() {
       <div class="panel jv-side">
         <div class="panel-head"><span class="diamond">◆</span> JARVIS · MARK LVII<span class="right"><span class="jv-chip" data-jv="chip">…</span></span></div>
         <div class="jv-body">
-          <p class="jv-about">Asisten AI suara untuk PC (Gemini Live): perintah suara dan ketik, kendali PC, file, rutinitas.
-            Panel kendalinya tampil di kanan.</p>
-          <p class="jv-credit">Mark LVII oleh <a href="${SOURCE}" target="_blank" rel="noopener">FatihMakes</a> · lisensi
-            <a href="${LICENSE}" target="_blank" rel="noopener">CC BY-NC 4.0</a>: hanya untuk pemakaian non-komersial.
-            Program terpisah dari SHARX, diunduh dari repositorinya.</p>
+          <p class="jv-about">Asisten AI suara untuk PC (<a href="${SOURCE}" target="_blank" rel="noopener">Mark LVII</a>,
+            Gemini Live): perintah suara dan ketik, kendali PC, file, rutinitas. Panel kendalinya tampil di kanan.</p>
           <div class="jv-actions" data-jv="local-actions" hidden>
             <button class="btn-primary" data-jv="install">PASANG</button>
             <button class="btn" data-jv="start">▶ JALANKAN</button>

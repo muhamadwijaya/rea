@@ -69,7 +69,7 @@ watchlist) yang bergulir di dalam panelnya sendiri.
 | **AI Training** | Virtual trading sinyal SMC: win rate live & backtest out-of-sample (terkualifikasi dan semua) vs target 70% dan tujuan 99%, rincian per asal parameter & pasar, kurva ekuitas (R), papan akurasi per aset & timeframe, grup pasar, jurnal sinyal (muncul → terdeteksi → entry → hasil; trade AI atau bayangan), log upgrade SMC otomatis, live chart trade virtual per aset |
 | **Kalender** | Kalender ekonomi minggu ini + countdown event high-impact + kalender TradingView |
 | **Metodologi** | Tab CARA KERJA 7 LANGKAH · STRUKTUR · OB/FVG/LIKUIDITAS · SKOR · ARAH & BERITA · DATA & ARSITEKTUR |
-| **JARVIS** | Asisten AI suara **Mark LVII** (FatihMakes, CC BY-NC 4.0): pasang & jalankan di PC ini, panel kendalinya tampil di tab, dan PC ↔ HP saling kontrol ↓ [JARVIS](#jarvis-mark-lvii) |
+| **JARVIS** | Asisten AI suara di PC (Mark LVII): pasang & jalankan di PC ini, panel kendalinya tampil di tab, dan PC ↔ HP saling kontrol ↓ [JARVIS](#jarvis-mark-lvii) |
 
 **Aset**: 57 aset inti (`config/watchlist.json`, dipindai SMC 1H/4H/1D) + **universe ±2.100 aset**
 (`config/universe.json`): seluruh S&P 500 + saham AS populer & ETF, seluruh saham BEI yang tersedia di Yahoo
@@ -177,9 +177,9 @@ Tab **JARVIS** memasang dan menjalankan [**Mark LVII**](https://github.com/Fatih
 asisten AI suara untuk PC (Gemini Live: perintah suara dan ketik, kendali PC, file, rutinitas), lalu menampilkan panel
 kendalinya (dashboard Mark LVII) di dalam tab.
 
-> Mark LVII berlisensi [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/): hanya untuk pemakaian
-> **non-komersial**, dengan atribusi ke FatihMakes. Kodenya tidak ada di repo ini: tombol PASANG mengunduhnya dari
-> repositori aslinya.
+Mark LVII adalah proyek terpisah. Kodenya tidak ada di repo ini: tombol PASANG mengunduhnya dari repositori aslinya,
+dan lisensinya (CC BY-NC 4.0) berlaku untuk Mark LVII itu sendiri. JARVIS di HP (Android Fix14) adalah asisten SHARX
+sendiri dan tidak memakai kode Mark LVII.
 
 1. **PASANG** (sekali, 5–20 menit, ±1–2 GB):
    - Mencari Python 3.11–3.13 (`py -3.12`, `-3.13`, `-3.11`, lalu `python`). Python tidak dipasang otomatis.
@@ -197,7 +197,7 @@ kendalinya (dashboard Mark LVII) di dalam tab.
    JARVIS yang dijalankan dari tab ikut ditutup saat SHARX ditutup. JARVIS yang dijalankan di luar SHARX tetap
    terdeteksi dan panelnya tetap tampil.
 
-5. **KONTROL HP** (opsional): PC ini menyuruh JARVIS di HP (SHARX Android Fix13).
+5. **KONTROL HP** (opsional): PC ini menyuruh JARVIS di HP (SHARX Android Fix13/Fix14).
    - Di HP: tab JARVIS → KONTROL PC → centang "Izinkan PC mengontrol HP ini". HP menampilkan alamatnya (port 8010)
      dan kode sekali pakai.
    - Di PC: isi keduanya di **KONTROL HP** → PASANGKAN HP. Token disimpan di
@@ -206,7 +206,7 @@ kendalinya (dashboard Mark LVII) di dalam tab.
    - SHARX memasang plugin `phone_command` (`gateway/jarvis/sharx_phone.py`) ke folder `plugins` Mark LVII, sehingga
      JARVIS di PC juga bisa menyuruh HP lewat suara (aktif setelah JARVIS dijalankan ulang).
    - Arah sebaliknya (HP menyuruh PC) diatur di HP. JARVIS di HP sendiri berjalan tanpa PC; lihat
-     [android-patch/README.md](android-patch/README.md#fix13-jarvis-di-hp).
+     [android-patch/README.md](android-patch/README.md#fix13fix14-jarvis-di-hp).
 
 - **Keamanan**: `/api/jarvis/*` hanya menerima permintaan dari halaman SHARX di loopback (Host loopback, koneksi dari
   PC ini, header `X-Sharx-Action` untuk aksi), jadi situs lain tidak bisa memicu pemasangan atau menjalankan program.
@@ -221,7 +221,7 @@ kendalinya (dashboard Mark LVII) di dalam tab.
   - Unduhan langsung dari github.com diblokir proxy server ini (403), jadi belum diuji.
   - Jendela HUD dan Windows (CloseMainWindow, job object) belum dijalankan.
   - Panel dashboard Mark LVII asli (`dashboard/server.py` dari pemasangan nyata, tanpa HUD) tampil di tab.
-  - KONTROL HP diuji terhadap server Python APK Fix13: pairing (kode salah/benar/dipakai ulang), perintah dengan dan
+  - KONTROL HP diuji terhadap server Python APK Fix13/Fix14: pairing (kode salah/benar/dipakai ulang), perintah dengan dan
     tanpa percakapan HP berjalan, plugin `phone_command` dijalankan dengan Python Mark LVII, HP yang melupakan PC, dan
     izin yang dimatikan.
 

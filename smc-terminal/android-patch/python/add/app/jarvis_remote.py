@@ -1,4 +1,4 @@
-"""JARVIS on Android ↔ Mark LVII (FatihMakes, CC BY-NC 4.0) on the user's PC.
+"""JARVIS on Android ↔ JARVIS on the user's PC (Mark LVII, installed by SHARX desktop).
 
 The phone's own JARVIS (jarvis_phone) runs without the PC. When the PC runs Mark LVII, the phone reaches its dashboard
 (port 8000) over the local network:
@@ -23,13 +23,8 @@ import time
 import httpx
 
 PORT = 8000
-SOURCE = 'https://github.com/FatihMakes/Mark-LVII'
 _PRIVATE = [ipaddress.ip_network(n) for n in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16')]
 _ADDRESS = re.compile(r'^([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(?::(\d{1,5}))?$')
-
-
-def status() -> dict:
-    return dict(mode='remote', source=SOURCE, license='CC BY-NC 4.0', port=PORT)
 
 
 def parse(address) -> tuple[str, int]:
@@ -203,7 +198,7 @@ def _token(http: httpx.Client, address: str, fresh: bool = False) -> str:
 
 def _untrusted(text: str) -> str:
     text = str(text).replace('<<<', '‹‹‹').replace('>>>', '›››')
-    return f'<<<UNTRUSTED source=pc>>>\n{text}\n<<<END UNTRUSTED>>>'
+    return f'<<<EXTERNAL source=pc>>>\n{text}\n<<<END EXTERNAL>>>'
 
 
 def pc_command(text: str, wait: bool = True, timeout: float = 30.0) -> dict:

@@ -1,13 +1,20 @@
 package com.sharx.invest;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -17,13 +24,20 @@ import android.view.WindowManager;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Phone actions for JARVIS on the phone (app/jarvis_phone.py calls these through Chaquopy). Every method returns a
- * small JSON object for the assistant. Nothing here needs a permission the app does not already have: calls, messages
- * and e-mail open prefilled in their own apps and the user presses send; apps open through launcher intents.
+ * Phone side of JARVIS on the phone (app/jarvis_phone.py calls these through Chaquopy).
+ * <ul>
+ *   <li>Microphone: recorded here with AudioRecord (16 kHz mono 16-bit PCM, 100 ms chunks) and pulled by the engine,
+ *       because the WebView's getUserMedia fails on some phones (NotReadableError).</li>
+ *   <li>Phone actions: every method returns a small JSON object for the assistant. Calls, messages and e-mail open
+ *       prefilled in their own apps and the user presses send; apps open through launcher intents.</li>
+ * </ul>
+ * Nothing here needs a permission the app does not already declare (RECORD_AUDIO is requested at run time).
  */
 public final class JarvisHooks {
     private JarvisHooks() {
@@ -231,5 +245,161 @@ public final class JarvisHooks {
             return result("result", "not allowed");
         }
         return start(intent, "opened prefilled; waiting for the user to send");
+    }
+    // ------------------------------------------------------------------ microphone
+
+    private static final int RATE = 16000, CHUNK = 3200;  // 100 ms of 16-bit mono PCM
+    private static final LinkedBlockingQueue<byte[]> MIC = new LinkedBlockingQueue<>(50);
+    private static AudioRecord recorder;
+    private static Thread micThread;
+    private static volatile boolean micRunning;
+    private static volatile float micLevel;
+    private static volatile String micError;
+
+    /** Starts recording; echo cancelling source when JARVIS may be interrupted by voice on the speaker. */
+    public static synchronized String micStart(boolean echoCancel) {
+        Context c = context();
+        final Activity a = activity();
+        if (c == null || a == null) {
+            return result("result", "failed", "detail", "Aplikasi tidak terbuka.");
+        }
+        if (c.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            a.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    a.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 19);
+                }
+            });
+            return result("result", "permission", "detail", "Izinkan mikrofon untuk SHARX, lalu tekan MIC lagi.");
+        }
+        if (micRunning) {
+            return result("result", "ok");
+        }
+        int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        int size = Math.max(min, CHUNK * 4);
+        int[] sources = echoCancel
+                ? new int[]{MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.MIC}
+                : new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC};
+        AudioRecord r = null;
+        String used = null;
+        for (int source : sources) {
+            try {
+                AudioRecord candidate = new AudioRecord(source, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size);
+                if (candidate.getState() == AudioRecord.STATE_INITIALIZED) {
+                    r = candidate;
+                    used = source == MediaRecorder.AudioSource.MIC ? "mic"
+                            : source == MediaRecorder.AudioSource.VOICE_COMMUNICATION ? "voice_communication" : "voice_recognition";
+                    break;
+                }
+                candidate.release();
+            } catch (RuntimeException e) {
+                // try the next source
+            }
+        }
+        if (r == null) {
+            return result("result", "failed", "detail", "Mikrofon tidak bisa dibuka di HP ini.");
+        }
+        if (echoCancel && AcousticEchoCanceler.isAvailable()) {
+            AcousticEchoCanceler aec = AcousticEchoCanceler.create(r.getAudioSessionId());
+            if (aec != null) {
+                aec.setEnabled(true);
+            }
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            NoiseSuppressor ns = NoiseSuppressor.create(r.getAudioSessionId());
+            if (ns != null) {
+                ns.setEnabled(true);
+            }
+        }
+        try {
+            r.startRecording();
+        } catch (IllegalStateException e) {
+            r.release();
+            return result("result", "failed", "detail", "Mikrofon tidak bisa mulai merekam.");
+        }
+        if (r.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+            r.release();
+            return result("result", "failed", "detail", "Mikrofon sedang dipakai aplikasi lain.");
+        }
+        recorder = r;
+        micRunning = true;
+        micError = null;
+        MIC.clear();
+        final AudioRecord rec = r;
+        micThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                byte[] buffer = new byte[CHUNK];
+                while (micRunning) {
+                    int n = rec.read(buffer, 0, buffer.length);
+                    if (n < 0) {
+                        micError = "Rekaman mikrofon berhenti (kode " + n + ").";
+                        micRunning = false;
+                        break;
+                    }
+                    if (n == 0) {
+                        continue;
+                    }
+                    double sum = 0;
+                    for (int i = 0; i + 1 < n; i += 2) {
+                        short v = (short) ((buffer[i] & 0xff) | (buffer[i + 1] << 8));
+                        sum += (double) v * v;
+                    }
+                    micLevel = (float) Math.sqrt(sum / Math.max(1, n / 2)) / 32768f;
+                    byte[] chunk = Arrays.copyOf(buffer, n);
+                    if (!MIC.offer(chunk)) {
+                        MIC.poll();  // the engine fell behind: drop the oldest chunk, keep the latest audio
+                        MIC.offer(chunk);
+                    }
+                }
+            }
+        }, "jarvis-mic");
+        micThread.start();
+        return result("result", "ok", "source", used);
+    }
+
+    /** The next chunk of 16 kHz PCM, or null when none came within timeoutMs. */
+    public static byte[] micRead(int timeoutMs) {
+        try {
+            return MIC.poll(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    public static float micLevel() {
+        return micRunning ? micLevel : 0f;
+    }
+
+    /** Why recording stopped by itself, or null. */
+    public static String micError() {
+        return micError;
+    }
+
+    public static synchronized String micStop() {
+        micRunning = false;
+        Thread t = micThread;
+        micThread = null;
+        if (t != null) {
+            try {
+                t.join(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        AudioRecord r = recorder;
+        recorder = null;
+        if (r != null) {
+            try {
+                r.stop();
+            } catch (IllegalStateException e) {
+                // was not recording
+            }
+            r.release();
+        }
+        MIC.clear();
+        micLevel = 0f;
+        return result("result", "ok");
     }
 }

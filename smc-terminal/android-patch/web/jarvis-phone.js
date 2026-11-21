@@ -1,12 +1,10 @@
-// JARVIS on the phone (Android): the voice assistant core of Mark LVII by FatihMakes
-// (https://github.com/FatihMakes/Mark-LVII, CC BY-NC 4.0, non-commercial use only) running in SHARX without the PC.
-// The page captures the microphone as 16 kHz PCM, streams it to the app's engine over /api/jarvis/live and plays the
-// 24 kHz replies. The engine (app/jarvis_phone.py) talks to Gemini Live with the key kept in the Android keystore, runs
-// the tools, and hands PC work to JARVIS on the paired PC.
+// JARVIS on the phone (Android): SHARX's voice assistant, running in the app without the PC.
+// The page talks to the app's engine over /api/jarvis/live and plays the 24 kHz replies. On the phone the engine
+// records the microphone itself (Android AudioRecord); without that bridge (desktop tests) this page streams the
+// WebView microphone as 16 kHz PCM. The engine (app/jarvis_phone.py) talks to Gemini Live with the key kept in the
+// Android keystore, runs the tools, and hands PC work to JARVIS on the paired PC.
 import { esc, on, toast } from './util.js';
 
-const SOURCE = 'https://github.com/FatihMakes/Mark-LVII';
-const LICENSE = 'https://creativecommons.org/licenses/by-nc/4.0/';
 const KEY = /^[A-HJKMNP-Z2-9]{8}$/;
 const ZOOMS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const STATE_LABEL = {
@@ -97,18 +95,25 @@ class Player {
     this.at = Math.max(this.at, this.ctx.currentTime + 0.06);
     src.start(this.at);
     this.at += audio.duration;
+    const idle = !this.sources.size;
     this.sources.add(src);
+    if (idle) this.onPlaying?.(true);
     src.onended = () => {
       this.sources.delete(src);
-      if (!this.sources.size) this.lastEnd = performance.now();
+      if (!this.sources.size) {
+        this.lastEnd = performance.now();
+        this.onPlaying?.(false);
+      }
     };
   }
 
   flush() {
+    const busy = this.sources.size > 0;
     for (const s of this.sources) { try { s.stop(); } catch { /* already ended */ } }
     this.sources.clear();
     this.at = 0;
     this.lastEnd = performance.now();
+    if (busy) this.onPlaying?.(false);
   }
 
   get speaking() { return this.sources.size > 0; }
@@ -161,6 +166,8 @@ const session = {
     this.micOn = mic;
     this.ending = false;
     this.player = new Player();
+    // the engine pauses the phone's microphone while JARVIS talks on the speaker (it would hear itself)
+    this.player.onPlaying = (playing) => this.send({ type: 'playing', on: playing });
     await this.player.ctx.resume().catch(() => {});
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/jarvis/live`);
     ws.binaryType = 'arraybuffer';
@@ -202,6 +209,10 @@ const session = {
   },
 
   async startMic() {
+    if (status?.nativeMic) {
+      this.send({ type: 'mic', on: true });  // recorded by the app itself (see the 'mic' answer)
+      return;
+    }
     if (this.mic) return;
     const mic = new Mic();
     try {
@@ -255,7 +266,9 @@ const session = {
     this.micWanted = on;
     this.micOn = on;
     if (on && this.active) this.startMic();
-    if (!on) {
+    if (!on && status?.nativeMic) {
+      if (this.active) this.send({ type: 'mic', on: false });
+    } else if (!on) {
       this.mic?.stop();
       this.mic = null;
       this.send({ type: 'audio_end' });
@@ -272,6 +285,21 @@ const session = {
 
   onMessage(m, settle) {
     switch (m.type) {
+      case 'mic':
+        if (m.error) {
+          this.micOn = false;
+          toast('Mikrofon', `${m.error} Perintah ketik tetap berjalan.`);
+          addLine('note', `Mikrofon: ${m.error}`);
+        } else this.micOn = !!m.on;
+        if (this.active && !['thinking', 'speaking'].includes(this.state)) this.setState(this.micOn ? 'listening' : 'muted');
+        else this.setState(this.state);
+        break;
+      case 'level':
+        this.micLevel = Number(m.value) || 0;
+        break;
+      case 'note':
+        addLine('note', m.text);
+        break;
       case 'state':
         if (m.state === 'thinking' || m.state === 'connecting' || m.state === 'reconnecting') this.setState(m.state);
         break;
@@ -466,7 +494,7 @@ function build() {
   root.innerHTML = `
     <div class="jv jp ${store.get('sharx.jarvis.side') === 'hidden' ? 'jv-collapsed' : ''}">
       <div class="panel jv-side">
-        <div class="panel-head"><span class="diamond">◆</span> JARVIS · MARK LVII<span class="right"><span class="jv-chip" data-p="chip">SIAP</span></span></div>
+        <div class="panel-head"><span class="diamond">◆</span> JARVIS<span class="right"><span class="jv-chip" data-p="chip">SIAP</span></span></div>
         <div class="jv-body">
           <div class="jp-core">
             <canvas class="jp-orb" data-p="orb" width="320" height="320" title="Ketuk untuk memotong JARVIS"></canvas>
@@ -476,9 +504,6 @@ function build() {
               <button class="btn" data-p="mic">🎙 MIC ON</button>
             </div>
           </div>
-          <p class="jv-credit">Inti asisten <a href="${SOURCE}" target="_blank" rel="noopener">Mark LVII</a> oleh FatihMakes
-            (model Gemini Live, persona, memori) jalan di HP ini, tanpa PC. Lisensi
-            <a href="${LICENSE}" target="_blank" rel="noopener">CC BY-NC 4.0</a>: hanya non-komersial.</p>
           <details class="jp-sec" data-p="setup"><summary>PENGATURAN</summary>
             <form class="jv-form" data-p="keyform" autocomplete="off">
               <label>GEMINI API KEY <input data-p="key" type="password" placeholder="AIza…" spellcheck="false"></label>
@@ -512,9 +537,9 @@ function build() {
           <details class="jp-sec"><summary>CARA PAKAI</summary>
             <ol class="jv-steps">
               <li>Isi <b>Gemini API key</b> gratis dari <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
-                (sama seperti Mark LVII di PC). Key disimpan terenkripsi di HP dan tidak dikirim ke halaman.</li>
+                Key disimpan terenkripsi di HP dan tidak dikirim ke halaman.</li>
               <li><b>▶ MULAI</b> lalu bicara. Atau ketik perintah di bawah percakapan. Ketuk orb untuk memotong JARVIS.</li>
-              <li>JARVIS di HP bisa: percakapan dan memori seperti Mark LVII, cuaca, pengingat, membaca halaman web,
+              <li>JARVIS di HP bisa: percakapan suara dan memori, cuaca, pengingat, membaca halaman web,
                 pencarian Google, analisa SMC, harga, berita, kalender ekonomi, buka chart SHARX, volume/senter/baterai,
                 buka aplikasi atau tautan, siapkan panggilan/SMS/WhatsApp/email (Anda yang menekan kirim), peta.</li>
               <li><b>Kontrol PC</b> (opsional): jalankan JARVIS di PC (SHARX desktop → tab JARVIS), isi alamat PC dan kode
@@ -666,7 +691,7 @@ function zoom(step = 0) {
   q('zoom').textContent = `${Math.round(z * 100)}%`;
 }
 
-/** The PC's own Mark LVII panel; it signs in with its own Remote Control key (keys are single-use). */
+/** The PC's own JARVIS panel (Mark LVII's dashboard); it signs in with its own Remote Control key (single-use keys). */
 async function showPcPanel(force) {
   const frame = q('frame');
   const stage = root.querySelector('.jv-stage');
