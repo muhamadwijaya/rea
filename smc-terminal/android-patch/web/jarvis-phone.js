@@ -4,6 +4,7 @@
 // WebView microphone as 16 kHz PCM. The engine (app/jarvis_phone.py) talks to Gemini Live with the key kept in the
 // Android keystore, runs the tools, and hands PC work to JARVIS on the paired PC.
 import { esc, on, toast } from './util.js';
+import { extractPage } from './reader.js';
 
 const KEY = /^[A-HJKMNP-Z2-9]{8}$/;
 const ZOOMS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
@@ -17,6 +18,9 @@ const TOOL_LABEL = {
   market_quote: 'harga', market_news: 'berita pasar', economic_calendar: 'kalender ekonomi', open_chart: 'buka chart',
   phone_control: 'kontrol HP', open_app: 'buka aplikasi', open_link: 'buka tautan', phone_compose: 'siapkan pesan/panggilan',
   open_map: 'peta', pc_command: 'perintah ke PC', pc_status: 'cek PC', shutdown_jarvis: 'selesai',
+  analyze_asset: 'analisa lengkap', look_at_chart: 'melihat chart', read_news: 'membaca berita', open_page: 'buka halaman',
+  market_overview: 'arah market', screener: 'screener', alerts: 'alert', company_report: 'laporan perusahaan',
+  dividends: 'dividen & benefit', training_stats: 'hasil training',
 };
 
 let root = null;
@@ -138,8 +142,32 @@ const session = {
   // a request from the PC starts one without the microphone and leaves the choice alone)
   ws: null, mic: null, player: null, state: 'idle', micOn: true, micWanted: true, micLevel: 0, model: null, ending: false,
   queue: [], bubbles: { user: null, model: null }, forPc: false,
+  // working: JARVIS is taking a request, running tools or answering; the news assistant waits until it is done
+  working: false, quietUntil: 0, gate: false, gateTimer: null,
 
   get active() { return !!this.ws; },
+
+  busy() { return this.active && (this.working || !!this.player?.speaking || performance.now() < this.quietUntil); },
+
+  markWorking() {
+    const was = this.busy();
+    this.working = true;
+    if (!was) holdNews();
+  },
+
+  markDone() {
+    this.working = false;
+    this.quietUntil = performance.now() + 2500;  // a short pause before the news assistant talks again
+  },
+
+  /** The microphone pauses while JARVIS or the news assistant is talking (it would hear them as the user). */
+  updateGate() {
+    const gate = !!this.player?.speaking || newsSpeaking();
+    if (gate !== this.gate) {
+      this.gate = gate;
+      this.send({ type: 'playing', on: gate });
+    }
+  },
 
   setState(state) {
     this.state = state;
@@ -167,18 +195,18 @@ const session = {
     this.ending = false;
     this.player = new Player();
     // the engine pauses the phone's microphone while JARVIS talks on the speaker (it would hear itself)
-    this.player.onPlaying = (playing) => this.send({ type: 'playing', on: playing });
+    this.player.onPlaying = () => this.updateGate();
     await this.player.ctx.resume().catch(() => {});
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/jarvis/live`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
-    // the news assistant gives way while JARVIS has the conversation: its job goes back to the queue, its voice stops
-    try {
-      const news = window.SMC?.voice;
-      news?.tasks?.hold?.();
-      news?.speaker?.stop();
-      news?.hideCard?.();
-    } catch { /* the news assistant is not loaded */ }
+    // the news assistant gives way while the user starts talking: a few seconds now, then whenever JARVIS works
+    this.working = false;
+    this.quietUntil = performance.now() + 8000;
+    holdNews();
+    this.gate = false;
+    clearInterval(this.gateTimer);
+    this.gateTimer = setInterval(() => this.updateGate(), 250);
     this.setState('connecting');
     return new Promise((resolve) => {
       let settled = false;
@@ -186,6 +214,7 @@ const session = {
       ws.onopen = () => ws.send(JSON.stringify({ type: 'start' }));
       ws.onmessage = (e) => {
         if (typeof e.data !== 'string') {
+          this.markWorking();
           this.player?.play(e.data);
           if (this.state !== 'speaking') this.setState('speaking');
           return;
@@ -229,8 +258,9 @@ const session = {
   onMic(pcm, level) {
     this.micLevel = level;
     if (!this.ws || this.ws.readyState !== 1 || !this.micOn) return;
-    // speaker mode: the microphone pauses while JARVIS talks (it would hear itself); headset mode lets you cut in
-    if (!status?.settings?.duplex && this.player?.echoWindow) return;
+    // speaker mode: the microphone pauses while JARVIS talks (it would hear itself); headset mode lets you cut in.
+    // The news assistant's voice is never sent: JARVIS would answer it.
+    if (newsSpeaking() || (!status?.settings?.duplex && this.player?.echoWindow)) return;
     this.ws.send(pcm);
   },
 
@@ -244,6 +274,7 @@ const session = {
     if (!clean) return;
     addLine('user', clean, true);
     if (!this.active && !(await this.start({ mic: false }))) return;
+    this.markWorking();
     this.send({ type: 'text', text: clean });
     this.setState('thinking');
   },
@@ -258,6 +289,7 @@ const session = {
       if (!(await this.start({ mic: false }))) return;
       this.forPc = true;
     }
+    this.markWorking();
     this.send({ type: 'text', text: clean, replyTo });
     this.setState('thinking');
   },
@@ -277,7 +309,9 @@ const session = {
     else this.setState(this.state);
   },
 
+  /** Tapping the orb: JARVIS and the news assistant stop talking, so the user can speak. */
   interrupt() {
+    try { window.SMC?.voice?.speaker?.stop(); } catch { /* not loaded */ }
     if (!this.player?.speaking) return;
     this.player.flush();
     this.setState(this.micOn ? 'listening' : 'muted');
@@ -301,12 +335,14 @@ const session = {
         addLine('note', m.text);
         break;
       case 'state':
+        if (m.state === 'thinking') this.markWorking();
         if (m.state === 'thinking' || m.state === 'connecting' || m.state === 'reconnecting') this.setState(m.state);
         break;
       case 'audio_format':
         if (this.player) this.player.rate = m.rate;
         break;
       case 'transcript':
+        this.markWorking();
         streamLine(m.role === 'user' ? 'user' : 'model', m.text);
         break;
       case 'interrupted':
@@ -318,11 +354,13 @@ const session = {
         endLine('user');
         endLine('model');
         this.afterSpeech(() => {
+          this.markDone();
           if (this.active && this.state !== 'connecting') this.setState(this.micOn ? 'listening' : 'muted');
           if (this.ending || this.forPc) this.stop();
         });
         break;
       case 'tool':
+        if (m.phase === 'start') this.markWorking();
         toolLine(m);
         break;
       case 'client_tool':
@@ -357,12 +395,15 @@ const session = {
     try {
       if (m.name === 'open_chart') {
         const symbol = String(m.args?.symbol || '').toUpperCase();
-        await window.SMC?.openAnalysis?.(symbol, m.args?.timeframe || '1h');
+        await window.SMC?.openAnalysis?.(symbol, m.args?.timeframe || '1h', { fromAssistant: true });
         result = { result: 'chart shown on the phone screen', symbol };
       } else if (m.name === 'shutdown_jarvis') {
         this.ending = true;
         result = { result: 'conversation ends after this reply' };
-      } else result = { result: `unknown client tool ${m.name}` };
+      } else if (m.name === 'open_page') result = await openPage(m.args || {});
+      else if (m.name === 'chart_capture') result = await captureChart(m.args || {});
+      else if (m.name === 'reader_extract') result = await readerExtract(m.args || {});
+      else result = { result: `unknown client tool ${m.name}` };
     } catch (err) {
       result = { result: 'failed', detail: String(err.message || err) };
     }
@@ -382,6 +423,11 @@ const session = {
     this.player = null;
     this.queue = [];
     this.forPc = false;
+    this.working = false;
+    this.quietUntil = 0;
+    clearInterval(this.gateTimer);
+    this.gateTimer = null;
+    this.gate = false;
     endLine('user');
     endLine('model');
     this.setState(state);
@@ -390,11 +436,116 @@ const session = {
 };
 
 // The news assistant asks this before its next job and before speaking (analysis-queue.js, voice-audio.js): it waits
-// while a JARVIS conversation runs, or while the user is typing in the JARVIS tab.
-const TYPING = 'textarea, select, input:not([type]), input[type="text"], input[type="password"], input[type="search"]';
-window.__sharxJarvis = {
-  busy: () => session.active || (!!root?.contains(document.activeElement) && !!document.activeElement.matches?.(TYPING)),
-};
+// while JARVIS works or speaks, and while the user is typing in the JARVIS tab (text not sent yet, or a key in the
+// last few seconds; an empty field that kept the focus after sending does not count).
+const TYPING = 'textarea, input:not([type]), input[type="text"], input[type="password"], input[type="search"]';
+let lastKey = 0;
+function typing() {
+  const el = document.activeElement;
+  if (!root?.contains(el) || !el.matches?.(TYPING)) return false;
+  return !!String(el.value || '').trim() || performance.now() - lastKey < 6000;
+}
+window.__sharxJarvis = { busy: () => session.busy() || typing() };
+
+/** The news assistant gives way: its job in progress goes back to its queue and its voice stops. */
+function holdNews() {
+  try {
+    const news = window.SMC?.voice;
+    news?.tasks?.hold?.();
+    news?.speaker?.stop();
+    news?.hideCard?.();
+  } catch { /* the news assistant is not loaded */ }
+}
+
+/** The news assistant is speaking (Android voice, server voice or browser voice). */
+function newsSpeaking() {
+  const speaker = window.SMC?.voice?.speaker;
+  if (!speaker) return false;
+  return !!(speaker.nativeActive || (speaker.audio && !speaker.audio.paused && !speaker.audio.ended)
+    || ('speechSynthesis' in window && window.speechSynthesis.speaking));
+}
+
+// ------------------------------------------------------------------ the app, for JARVIS's tools
+
+const MARKET_PAGES = ['forex', 'saham-as', 'saham-idx', 'kripto'];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function openPage({ page = 'dashboard', section, symbol, timeframe } = {}) {
+  const tab = page === 'metodologi' ? 'metode' : page;
+  if (symbol && (!section || section === 'analisa')) {
+    // fromAssistant: JARVIS gives the analysis, the news assistant does not start its own on this chart
+    await window.SMC.openAnalysis(String(symbol).toUpperCase(), timeframe || '1h', { fromAssistant: true });
+  } else if (MARKET_PAGES.includes(tab)) {
+    window.SMC.go(tab, section || 'analisa');
+  } else {
+    window.SMC.go(tab);
+  }
+  await sleep(300);
+  return { result: 'shown on the screen', page: decodeURIComponent(location.hash.slice(1)) };
+}
+
+let captureSeq = 0;
+
+/** Opens the symbol's SMC chart, waits until it has drawn, and returns a JPEG of it (candles + SMC overlay). Stops when
+ * the analysis fails, the user leaves the chart page, or JARVIS asks for another chart. */
+async function captureChart({ symbol, timeframe = '1h', waitMs = 45000 } = {}) {
+  const wanted = String(symbol || '').toUpperCase();
+  if (!wanted) return { result: 'no symbol' };
+  const seq = ++captureSeq;
+  await window.SMC.openAnalysis(wanted, timeframe, { fromAssistant: true });
+  const until = performance.now() + Math.max(1000, Math.min(120000, Number(waitMs) || 45000));
+  let panel = null;
+  let shell = null;
+  let away = 0;
+  while (performance.now() < until) {
+    if (seq !== captureSeq) return { result: 'replaced by another chart' };
+    panel = document.querySelector('.tab-panel.active .sub-panel[data-sub="analisa"]');
+    if (!panel || !/^#[^/]+\/analisa\//.test(location.hash)) {
+      if (++away > 8) return { result: 'the chart page was left before the chart had drawn' };
+      await sleep(400);
+      continue;
+    }
+    away = 0;
+    const failed = panel.querySelector('.an-card .error-box');
+    if (failed) return { result: 'the analysis failed', detail: failed.textContent.trim().slice(0, 200) };
+    const smcView = panel.querySelector('.an-view [data-v="smc"]');
+    if (smcView && !smcView.classList.contains('active')) smcView.click();  // TradingView mode cannot be captured
+    shell = panel.querySelector('.chart-shell');
+    const resolved = decodeURIComponent(location.hash.split('/')[2] || wanted).toUpperCase();
+    const shown = (panel.querySelector('.an-head .s')?.textContent || '').toUpperCase();
+    if (shell && shell.offsetWidth > 200 && !panel.querySelector('.an-card .loading') && shown === resolved) break;
+    shell = null;
+    await sleep(400);
+  }
+  if (!shell) return { result: 'the chart did not finish loading' };
+  await sleep(900);  // the SMC overlay is drawn just after the candles
+  const box = shell.getBoundingClientRect();
+  const scale = Math.min(1, 1024 / box.width);
+  const out = document.createElement('canvas');
+  out.width = Math.round(box.width * scale);
+  out.height = Math.round(box.height * scale);
+  const g = out.getContext('2d');
+  g.fillStyle = '#001b33';
+  g.fillRect(0, 0, out.width, out.height);
+  for (const c of shell.querySelectorAll('canvas')) {
+    const r = c.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    try { g.drawImage(c, (r.left - box.left) * scale, (r.top - box.top) * scale, r.width * scale, r.height * scale); } catch { /* skip */ }
+  }
+  const symbolShown = (panel.querySelector('.an-head .s')?.textContent || wanted).trim();
+  return { image: out.toDataURL('image/jpeg', 0.8).split(',')[1], width: out.width, height: out.height, symbol: symbolShown };
+}
+
+/** An article page opened in the app's reader, its text taken, and the page closed again (Android); null elsewhere. */
+async function readerExtract({ url, item, timeoutMs = 40000 } = {}) {
+  try {
+    const page = await extractPage(url, item?.id ? item : null, { timeoutMs: Math.max(3000, Math.min(60000, Number(timeoutMs) || 40000)) });
+    if (!page?.text) return { result: 'no text from the page' };
+    return { text: String(page.text).slice(0, 24000), title: page.title, finalUrl: page.finalUrl };
+  } catch (err) {
+    return { result: 'failed', detail: String(err.message || err) };
+  }
+}
 
 // ------------------------------------------------------------------ conversation log
 
@@ -434,7 +585,8 @@ function endLine(role) { session.bubbles[role] = null; }
 function toolLine(m) {
   const label = TOOL_LABEL[m.name] || m.name;
   if (m.phase === 'start') {
-    const arg = m.args?.symbol || m.args?.city || m.args?.name || m.args?.command || m.args?.url || m.args?.query || m.args?.action || '';
+    const arg = m.args?.symbol || m.args?.city || m.args?.name || m.args?.command || m.args?.url || m.args?.query
+      || m.args?.action || m.args?.news_id || [m.args?.page, m.args?.section].filter(Boolean).join(' › ') || m.args?.market || '';
     const el = addLine('tool', `⚙ ${label}${arg ? ` · ${String(arg).slice(0, 80)}` : ''}`, true);
     if (el) el.dataset.id = m.id;
   } else {
@@ -539,16 +691,20 @@ function build() {
               <li>Isi <b>Gemini API key</b> gratis dari <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
                 Key disimpan terenkripsi di HP dan tidak dikirim ke halaman.</li>
               <li><b>▶ MULAI</b> lalu bicara. Atau ketik perintah di bawah percakapan. Ketuk orb untuk memotong JARVIS.</li>
-              <li>JARVIS di HP bisa: percakapan suara dan memori, cuaca, pengingat, membaca halaman web,
-                pencarian Google, analisa SMC, harga, berita, kalender ekonomi, buka chart SHARX, volume/senter/baterai,
-                buka aplikasi atau tautan, siapkan panggilan/SMS/WhatsApp/email (Anda yang menekan kirim), peta.</li>
+              <li><b>"Analisa EURUSD"</b>: JARVIS membuka chart, melihat gambarnya, mengambil data SMC, membaca berita terbaru
+                (halaman berita terbuka dan tertutup sendiri), mengecek kalender ekonomi, lalu menyampaikan analisanya.</li>
+              <li>JARVIS bisa membuka halaman mana pun di SHARX ("buka screener forex", "buka kalender"), membacakan berita,
+                dan memakai arah market, screener, alert, laporan perusahaan, dividen, hasil training, harga, cuaca,
+                pengingat, pencarian Google, volume/senter/baterai, aplikasi, tautan dan peta. Panggilan, SMS, WhatsApp dan
+                email hanya disiapkan; Anda yang menekan kirim.</li>
               <li><b>Kontrol PC</b> (opsional): jalankan JARVIS di PC (SHARX desktop → tab JARVIS), isi alamat PC dan kode
                 <b>Remote Control</b> dari HUD PC → PASANGKAN. Lalu minta, mis. "suruh PC buka Chrome": JARVIS HP meneruskan
                 ke PC dan membacakan jawabannya. Tanpa PC, JARVIS HP tetap jalan.</li>
               <li><b>PC mengontrol HP</b> (opsional): centang "Izinkan PC mengontrol HP ini". Di SHARX desktop → tab JARVIS →
                 KONTROL HP, isi alamat HP dan kode yang tampil di sini. Setelah itu JARVIS di PC bisa menyuruh HP (mis.
                 "suruh HP pasang pengingat jam 8"), selama aplikasi SHARX terbuka di HP.</li>
-              <li>Selama JARVIS aktif, asisten berita menunda bacaannya.</li>
+              <li>Selama JARVIS bekerja atau bicara, asisten berita berhenti dulu. Setelah JARVIS selesai, suara berita
+                jalan lagi. Ketuk orb untuk menghentikan suara JARVIS dan suara berita.</li>
             </ol>
           </details>
         </div>
@@ -791,6 +947,7 @@ async function refresh() {
 export function mountPhone(element, first) {
   root = element;
   status = first;
+  root.addEventListener('input', () => { lastKey = performance.now(); });
   build();
   render();
   session.setState(status?.settings?.configured ? 'idle' : 'nokey');

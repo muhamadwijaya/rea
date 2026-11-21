@@ -1,9 +1,9 @@
-# SHARX INVEST Android — patch Fix10–Fix14 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
+# SHARX INVEST Android — patch Fix10–Fix15 (halaman baca berita, isi berita, AI tanpa macet, chart TradingView, JARVIS)
 
 Patch ini dipasang di atas APK Android **SHARX-INVEST-AI-Fix9.apk** (paket `com.sharx.trader`, versi
 3.20-independent.9). Source Android-nya tidak ada di repo ini. Patch dibuat dari APK itu: kode Java baru, hook smali di
 `MainActivity`, perubahan UI web (`assets/wwwroot`) dan engine Python (Chaquopy `app.imy`). Di aplikasi, status bar
-menampilkan versi **3.20-independent.14** (Fix14; Fix13 = .13, Fix12 = .12, Fix11 = .11, Fix10 = .10).
+menampilkan versi **3.20-independent.15** (Fix15; Fix14 = .14, Fix13 = .13, Fix12 = .12, Fix11 = .11, Fix10 = .10).
 
 ## Perubahan
 
@@ -99,8 +99,8 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
      pernah dikirim ke halaman web.
    - Mode speaker HP: mikrofon jeda selama JARVIS bicara. Mode headset: bisa memotong dengan suara. Ketuk orb untuk
      memotong.
-   - Selama percakapan JARVIS berjalan, atau selama pengguna mengetik di tab JARVIS, asisten berita menunda pekerjaan
-     dan suaranya. Pekerjaan yang sedang jalan kembali ke antrean.
+   - Asisten berita menunda pekerjaan dan suaranya selama JARVIS bekerja atau berbicara (Fix15, lihat di bawah) dan
+     selama pengguna mengetik di tab JARVIS. Pekerjaan yang sedang jalan kembali ke antrean.
 4. **HP → PC** (bila JARVIS jalan di PC lewat SHARX desktop):
    - Pasangkan sekali dengan kode Remote Control dari HUD PC. Engine memakai halaman auto-login dashboard JARVIS PC dan
      menyimpan device token di Keystore.
@@ -123,6 +123,44 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
      masih hidup.
    - Lewat HTTP biasa di Wi-Fi, perintah antara HP dan PC tidak dienkripsi. Akses dijaga kode pairing dan token: pakai
      di jaringan rumah sendiri.
+
+## Fix15: JARVIS memakai seluruh aplikasi
+
+1. **"Analisa EURUSD"** (alat `analyze_asset`, satu panggilan):
+   - JARVIS membuka chart SMC aset itu, menunggu chart selesai digambar, lalu mengirim screenshot chart (candle dan
+     overlay SMC, JPEG maks. 1024 px) ke Gemini. JARVIS melihat chart itu sendiri sebelum menjelaskan.
+   - Bersamaan dengan itu engine mengambil:
+     - analisa SMC (bias, struktur, zona, rencana entry/SL/TP);
+     - kalender ekonomi 48 jam untuk mata uang yang menggerakkan aset itu;
+     - berita aset itu: feed BERITA-nya dan berita bertag aset itu dalam 24 jam.
+   - Bila berita aset itu sedikit, ditambah berita penggeraknya, mis. USD dan EUR untuk EURUSD, atau emas, minyak dan
+     kripto. Berita tambahan ini ditandai "bukan tentang aset itu sendiri".
+   - Dua artikel terbaru dibuka otomatis di halaman baca (di atas chart), teksnya diambil, lalu halaman ditutup
+     sendiri. Teks itu juga disimpan engine sebagai isi berita, sama seperti asisten berita.
+   - Batas waktunya 45 detik. Bila chart belum selesai dimuat, JARVIS menjawab dulu dari data, lalu screenshot
+     menyusul saat chart tergambar. Ini bisa terjadi saat aplikasi baru dibuka dan screener masih memindai pasar.
+     Screenshot susulan dikirim paling lambat 90 detik, dan hanya bila belum ada chart lain yang diminta.
+2. **Alat lain:**
+   - `look_at_chart`: membuka chart dan melihatnya saja.
+   - `read_news`: membuka satu berita (dari [id] `market_news`) di halaman baca, mengambil teksnya lalu menutupnya.
+     JARVIS membacakan isinya bila diminta, atau meringkasnya.
+   - `open_page`: membuka halaman mana pun:
+     - dashboard;
+     - forex, saham-as, saham-idx dan kripto, beserta bagian analisa, screener, berita, arah, fundamental dan benefit;
+     - training, kalender dan metodologi.
+   - Data aplikasi: `market_overview` (arah market dan sentimen berita), `screener`, `alerts`, `company_report`,
+     `dividends` dan `training_stats`. Hasilnya diringkas supaya pendek untuk diucapkan.
+   - Isi berita dan halaman web tetap ditandai sebagai konten luar: instruksi di dalamnya tidak diikuti.
+3. **Asisten berita mengalah ke JARVIS:**
+   - Saat JARVIS bekerja (berpikir, alat berjalan) atau berbicara, asisten berita menunda antreannya dan suaranya
+     berhenti. Pekerjaan yang sedang jalan kembali ke antrean.
+   - 2,5 detik setelah JARVIS selesai bicara, asisten berita boleh jalan lagi walaupun percakapan JARVIS masih terbuka.
+     Di Fix14 asisten berita ditunda selama percakapan terbuka.
+   - Chart yang dibuka JARVIS tidak memicu analisa suara asisten berita, karena JARVIS sudah menjawab.
+   - Mode speaker: selama suara asisten berita terdengar, mikrofon JARVIS jeda supaya JARVIS tidak mendengar suara itu.
+     Ketuk orb untuk menghentikan suara berita dan bicara ke JARVIS.
+   - Mengetik di tab JARVIS menunda asisten berita selama ada teks yang belum terkirim, atau sampai 6 detik setelah
+     ketikan terakhir.
 
 ## Terukur dan diuji
 
@@ -183,17 +221,34 @@ Tab **JARVIS** menjalankan asisten suara SHARX di HP itu sendiri, tanpa PC.
   Mikrofon WebView gagal dengan `NotReadableError`; karena itu Fix14 merekam mikrofon secara native.
 - **`JarvisHooks.java` hanya dikompilasi** (javac + d8). Mikrofon native, aksi HP dan suara di perangkat **belum diuji
   di HP**.
+- **Fix15 diuji di Chromium** dengan engine Python APK yang baru dinyalakan, Gemini Live tiruan dan halaman baca
+  tiruan (menjawab seperti `ReaderHooks`). 9 langkah lulus:
+  - "analisa EURUSD": alat selesai dalam 12 detik.
+    - Chart tergambar dan screenshot 968×388 (57 KB) terkirim sebagai pesan berikutnya.
+    - 7 judul berita, termasuk berita USD/EUR karena berita EURUSD sendiri kosong (hari Sabtu).
+    - 2 artikel dibuka otomatis dan dibaca dari halaman.
+    - Asisten berita tidak memulai analisa sendiri.
+  - "lihat chart emas": chart XAUUSD 4H dibuka, screenshot terkirim.
+  - "baca berita EURUSD": satu artikel dibuka di halaman baca, teksnya kembali ke JARVIS.
+  - Chart yang datanya ditahan 52 detik: JARVIS menjawab dari data pada detik ke-45, lalu screenshot menyusul pada
+    detik ke-64.
+  - Arah market, screener (masih memindai) dan halaman screener forex.
+  - Asisten berita ditahan selama JARVIS bekerja, lalu bebas lagi setelah JARVIS selesai, walaupun percakapan masih
+    terbuka.
+  - Selama suara asisten berita terdengar, 0 potongan mikrofon terkirim; sesudahnya mikrofon jalan lagi.
+  - Uji Fix13/Fix14 (15 langkah, kedua jalur mikrofon) dan PC → HP (10 langkah) diulang dan lulus.
+  - **Belum diuji di HP:** penglihatan chart oleh Gemini asli, halaman baca otomatis dan suara di perangkat.
 
 ## Build
 
 ```bash
 APKTOOL=apktool_2.10.0.jar BUILD_TOOLS=build-tools/36 ANDROID_JAR=android-35/android.jar \
-  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix14.apk
+  ./build.sh SHARX-INVEST-AI-Fix9.apk release.jks store-pass.txt SHARX-INVEST-AI-Fix15.apk
 ```
 
 Perlu Java 17+, python3 (dengan pip), npm (Readability.js 0.5.0, Apache-2.0, diunduh saat build), curl, unzip, zip dan
 patch. Wheel `websockets` dari PyPI dicek SHA-256. Resource
 dan manifest APK tidak diubah (apktool `-r`). APK hasil ditandatangani kunci baru. Kunci asli Fix9 tidak tersedia,
 jadi **Fix9 harus di-uninstall dulu** (API key AI perlu dimasukkan lagi). Fix11 dan Fix12 memakai kunci yang sama dengan
-Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13 dan Fix14 juga). Simpan keystore itu di tempat aman
+Fix10, jadi bisa dipasang di atas Fix10/Fix11 tanpa uninstall (Fix13, Fix14 dan Fix15 juga). Simpan keystore itu di tempat aman
 dan pakai lagi untuk versi berikutnya. Keystore dan APK tidak disimpan di repo ini.

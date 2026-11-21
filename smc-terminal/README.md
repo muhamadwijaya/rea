@@ -178,8 +178,15 @@ asisten AI suara untuk PC (Gemini Live: perintah suara dan ketik, kendali PC, fi
 kendalinya (dashboard Mark LVII) di dalam tab.
 
 Mark LVII adalah proyek terpisah. Kodenya tidak ada di repo ini: tombol PASANG mengunduhnya dari repositori aslinya,
-dan lisensinya (CC BY-NC 4.0) berlaku untuk Mark LVII itu sendiri. JARVIS di HP (Android Fix14) adalah asisten SHARX
-sendiri dan tidak memakai kode Mark LVII.
+dan lisensinya (CC BY-NC 4.0) berlaku untuk Mark LVII itu sendiri. JARVIS di HP (Android Fix14–Fix15) adalah asisten
+SHARX sendiri dan tidak memakai kode Mark LVII.
+
+Sejak Fix15, JARVIS di HP memakai seluruh aplikasi:
+- "Analisa EURUSD": JARVIS membuka chart dan melihat screenshot-nya, membuka berita terbaru di halaman baca (ditutup
+  sendiri), lalu mengecek kalender ekonomi.
+- JARVIS bisa membuka semua halaman dan membaca data screener, arah market, alert, laporan perusahaan, dividen dan
+  training.
+- Asisten berita diam selama JARVIS bekerja dan berbicara, lalu jalan lagi setelah JARVIS selesai.
 
 1. **PASANG** (sekali, 5–20 menit, ±1–2 GB):
    - Mencari Python 3.11–3.13 (`py -3.12`, `-3.13`, `-3.11`, lalu `python`). Python tidak dipasang otomatis.
@@ -197,7 +204,7 @@ sendiri dan tidak memakai kode Mark LVII.
    JARVIS yang dijalankan dari tab ikut ditutup saat SHARX ditutup. JARVIS yang dijalankan di luar SHARX tetap
    terdeteksi dan panelnya tetap tampil.
 
-5. **KONTROL HP** (opsional): PC ini menyuruh JARVIS di HP (SHARX Android Fix13/Fix14).
+5. **KONTROL HP** (opsional): PC ini menyuruh JARVIS di HP (SHARX Android Fix13 ke atas).
    - Di HP: tab JARVIS → KONTROL PC → centang "Izinkan PC mengontrol HP ini". HP menampilkan alamatnya (port 8010)
      dan kode sekali pakai.
    - Di PC: isi keduanya di **KONTROL HP** → PASANGKAN HP. Token disimpan di

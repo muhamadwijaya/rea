@@ -159,7 +159,7 @@ def memory():
 
 PROMPT = """You are {name}, the voice assistant inside SHARX INVEST on the user's Android phone ({platform}).
 You talk with the user through the phone's microphone and speaker; the glowing orb on the JARVIS screen shows when you
-listen and when you speak. On the phone you cannot see the screen or the camera.
+listen and when you speak. You see nothing except the SHARX chart screenshots you ask for.
 
 HOW YOU SPEAK
 - Answer in the language of the user's latest message, and keep one language per reply, whatever stored notes or tool
@@ -190,6 +190,22 @@ MARKETS
 - These are rule-based readings, not certainties and not financial advice. Say so briefly when the user is about to act
   on one, and never promise a win rate or a price.
 
+THE SHARX APP
+- You can use every part of the app. open_page shows a page: dashboard; the market pages forex, saham-as, saham-idx
+  and kripto with their sections (analisa = SMC chart, screener, berita = news, arah = market direction, fundamental,
+  benefit = dividends); training; kalender; metodologi; jarvis.
+- For "analyse X" or "analisa X", say one short sentence, then call analyze_asset once. It opens the chart, sends you a
+  screenshot of it, reads the newest related news (each article opens in the app and closes by itself) and checks the
+  calendar. When the screenshot arrives, give the analysis: what the chart shows (trend, structure, key levels), the
+  SMC plan and what would cancel it, what the news says and its likely effect, upcoming events, and the risk. Keep it
+  to about 30 to 45 seconds of speech unless the user wants more. If the chart is still loading, give the analysis
+  from the data at once; when its screenshot follows later, add only what it changes.
+- To look at a chart alone: look_at_chart. To read an article: market_news gives each headline an [id]; read_news opens
+  the article in the app, takes its text and closes it. Read it aloud when the user asks you to read it; otherwise
+  summarise what matters.
+- Other app data: market_overview, screener, alerts, company_report, dividends, training_stats, economic_calendar.
+- A message starting with "[CHART SCREENSHOT]" is the picture of the SHARX chart you asked for.
+
 THE USER'S PC
 - When the user's PC runs JARVIS and is paired, pc_command hands it any request that has to happen on the computer:
   its apps, files, browser, keyboard, mouse or screen. Tell the user what the PC answered.
@@ -217,7 +233,7 @@ WHAT YOU CAN DO NOW
 
 WHAT YOU CANNOT DO
 - Anything that is not in the list above: say so in one sentence and offer the closest thing you can do.
-- See anything: there is no camera or screen view on the phone.
+- See anything other than the SHARX chart screenshots you ask for: there is no camera or screen view.
 - Hear while the microphone is off; you cannot switch it on yourself.
 - Remember earlier conversations beyond [MEMORY], unless the user asked you to save something.
 """
@@ -523,23 +539,102 @@ def t_market_quote(a, ctx):
             'open': row.get('open'), 'updated': row.get('updated')}
 
 
+def _headline(i: dict) -> str:
+    return f"[{i.get('id')}] {str(i.get('published', ''))[:16]} · {i.get('source')} · {i.get('sentimentLabel') or 'neutral'} · {i.get('title')}"
+
+
 def t_market_news(a, ctx):
+    from app import instruments
     state = ctx['state']
-    query = {'limit': max(1, min(10, int(a.get('limit') or 6))), 'maxAgeMinutes': 24 * 60}
+    limit = max(1, min(10, int(a.get('limit') or 6)))
     if a.get('symbol'):
-        from app import instruments
-        query['symbol'] = instruments.resolve(str(a['symbol'])).symbol
-    items = state.news_query(query)
-    rows = [f"{i.get('published', '')[:16]} · {i.get('source')} · {i.get('sentimentLabel') or 'neutral'} · {i.get('title')}" for i in items]
-    return {'count': len(rows), 'headlines': _untrusted('news', '\n'.join(rows) or 'no headlines in the last 24 hours')}
+        inst = instruments.resolve(str(a['symbol']))
+        own, related = _related_news(state, inst, limit)
+        rows = own[:limit] + related
+        text = _headline_block(inst, own[:limit], related)
+    else:
+        rows = state.news_query({'limit': limit, 'maxAgeMinutes': 24 * 60})
+        text = '\n'.join(_headline(i) for i in rows)
+    return {'count': len(rows), 'headlines': _untrusted('news', text or 'no headlines in the last 24 hours'),
+            'note': 'The [id] of a headline is what read_news takes.'}
+
+
+# news tags of the engine (sentiment.ASSETS) for the instruments whose own symbol says nothing about them
+_TAG_BY_YAHOO = {'GC=F': 'GOLD', 'SI=F': 'GOLD', 'CL=F': 'OIL', 'BZ=F': 'OIL', '^JKSE': 'IDX', 'DX-Y.NYB': 'USD'}
+
+
+def _news_assets(inst) -> list[str]:
+    """What moves an instrument, as the engine tags news: its currencies, gold, oil, the stock market or crypto."""
+    symbol, cls = inst.symbol.upper(), getattr(inst, 'asset_class', '')
+    yahoo = str(getattr(inst, 'yahoo', '') or '').upper()
+    tag = _TAG_BY_YAHOO.get(yahoo)
+    if cls == 'forex' and len(symbol) == 6:
+        return [symbol[:3], symbol[3:]]
+    if cls == 'crypto':
+        return ['CRYPTO']
+    if cls == 'idx' or tag == 'IDX' or yahoo.endswith('.JK'):
+        return ['IDX', 'IDR']
+    if tag == 'USD':
+        return ['USD']
+    if tag:
+        return [tag, 'USD']
+    return ['USD'] if cls == 'commodity' else ['US_EQ', 'USD']
+
+
+def _related_news(state, inst, want: int = 6) -> tuple[list, list]:
+    """The instrument's own news (its BERITA panel's feed, then what the engine tagged with it in the last 24 h) and,
+    when that is thin, the news on what moves it (_news_assets), each newest first."""
+    seen: set = set()
+
+    def fresh(items):
+        out = []
+        for i in items or []:
+            if i.get('id') and i['id'] not in seen:
+                seen.add(i['id'])
+                out.append(i)
+        return out
+    try:
+        own = fresh((state.symbol_news(inst.symbol) or {}).get('items'))
+    except Exception:  # its feed is down: the engine's own news still count
+        own = []
+    own += fresh(state.news_query({'symbol': inst.symbol, 'limit': 25, 'maxAgeMinutes': 24 * 60}))
+    own.sort(key=lambda i: str(i.get('published') or ''), reverse=True)
+    related = []
+    if len(own) < want:
+        for asset in _news_assets(inst):
+            related += fresh(state.news_query({'asset': asset, 'limit': want, 'maxAgeMinutes': 24 * 60}))
+        related.sort(key=lambda i: str(i.get('published') or ''), reverse=True)
+    return own, related[:want - len(own)]
+
+
+def _headline_block(inst, own: list, related: list) -> str:
+    lines = [_headline(i) for i in own]
+    if related:
+        lines.append(f"(not about {inst.symbol} itself: news on {', '.join(_news_assets(inst))}, which move it)")
+        lines += [_headline(i) for i in related]
+    return '\n'.join(lines)
+
+
+def _currencies(inst) -> list[str]:
+    """Calendar currencies that move an instrument."""
+    symbol, cls = inst.symbol.upper(), getattr(inst, 'asset_class', '')
+    if cls == 'forex' and len(symbol) == 6:
+        return [symbol[:3], symbol[3:]]
+    if 'IDR' in _news_assets(inst):
+        return ['IDR', 'USD']
+    return ['USD']
 
 
 def t_calendar(a, ctx):
     state = ctx['state']
     hours = max(1, min(168, int(a.get('hours') or 24)))
+    wanted = {c.strip().upper() for c in (a.get('currencies') or '').replace(';', ',').split(',') if c.strip()} \
+        if isinstance(a.get('currencies'), str) else {str(c).upper() for c in a.get('currencies') or []}
     now = time.time()
     rows = []
     for e in getattr(state, 'events', []) or []:
+        if wanted and str(e.get('currency', '')).upper() not in wanted:
+            continue
         try:
             t = datetime.fromisoformat(str(e['date']).replace('Z', '+00:00'))
         except (KeyError, ValueError):
@@ -548,6 +643,260 @@ def t_calendar(a, ctx):
             rows.append({'time': t.astimezone().strftime('%a %d %b %H:%M'), 'currency': e.get('currency'), 'event': e.get('title'),
                          'impact': e.get('impact'), 'forecast': e.get('forecast'), 'previous': e.get('previous'), 'actual': e.get('actual')})
     return {'hours': hours, 'events': rows[:25]}
+
+
+# the rest of the SHARX app: its own endpoints, trimmed for speech
+
+def _api(ctx, path: str, **query):
+    try:
+        return ctx['state'].dispatch('GET', '/api' + path, {k: str(v) for k, v in query.items() if v not in (None, '')}, {}, b'')
+    except Exception as e:  # e.g. "still being computed" while the app warms up
+        return {'error': str(e)[:200] or type(e).__name__}
+
+
+_DROP = {'candles', 'ema', 'metrics', 'series', 'pivots', 'breaks', 'orderBlocks', 'fvgs', 'equalLevels', 'history',
+         'components', 'weights', 'tv', 'sources', 'calendarScan', 'generatedAt', 'priceData'}
+
+
+def _slim(value, depth=0, items=8):
+    """A copy small enough to speak from: no chart series, short lists, rounded numbers, no empty fields."""
+    if depth > 4:
+        return None
+    if isinstance(value, dict):
+        out = {k: _slim(v, depth + 1, items) for k, v in value.items() if k not in _DROP and v not in (None, '', [], {})}
+        return {k: v for k, v in out.items() if v not in (None, '', [], {})}
+    if isinstance(value, list):
+        return [_slim(v, depth + 1, items) for v in value[:items]]
+    if isinstance(value, float):
+        return round(value, 4 if abs(value) < 10 else 2)
+    if isinstance(value, str) and len(value) > 300:
+        return value[:300] + '…'
+    return value
+
+
+def _fit(data, limit=3500):
+    text = json.dumps(data, ensure_ascii=False, default=str)
+    return data if len(text) <= limit else {'data': text[:limit] + '…', 'note': 'shortened'}
+
+
+def t_market_overview(a, ctx):
+    market = str(a.get('market') or 'all')
+    return _fit({'direction': _slim(_api(ctx, '/direction'), items=6),
+                 'sentiment': _slim(_api(ctx, '/news/sentiment', market=None if market == 'all' else market), items=6)})
+
+
+def t_screener(a, ctx):
+    market = str(a.get('market') or 'all')
+    tf = _tf(a.get('timeframe'), '4h')
+    data = _api(ctx, '/screener', market=market, tf=tf)
+    rows = [r for r in (data.get('rows') or []) if not r.get('error')] if isinstance(data, dict) else []
+    direction = str(a.get('direction') or '')
+    if direction in ('bullish', 'bearish'):
+        rows = [r for r in rows if direction in str(r.get('direction', ''))]
+    rows.sort(key=lambda r: abs(r.get('score') or 0), reverse=True)
+    top = [{'symbol': (r.get('instrument') or {}).get('symbol'), 'name': (r.get('instrument') or {}).get('name'),
+            'bias': r.get('label'), 'score': r.get('score'), 'lastBreak': _slim(r.get('lastEvent')),
+            'zone': (r.get('zone') or {}).get('area')} for r in rows[:8]]
+    if rows:
+        return {'market': market, 'timeframe': tf, 'scanned': len(rows), 'strongest': top}
+    if isinstance(data, dict) and data.get('error'):
+        return {'result': data['error']}
+    return {'result': 'the screener is still scanning this market (the app started recently); it has no rows yet',
+            'status': data.get('status') if isinstance(data, dict) else None}
+
+
+def t_alerts(a, ctx):
+    data = _api(ctx, '/alerts', limit=max(1, min(10, int(a.get('limit') or 6))))
+    if not isinstance(data, list):
+        return data
+    return {'alerts': [{'time': x.get('time'), 'title': x.get('title'), 'detail': str(x.get('detail') or '')[:200]} for x in data]}
+
+
+def t_company(a, ctx):
+    from app import instruments
+    symbol = instruments.resolve(str(a.get('symbol') or '')).symbol
+    return _fit(_slim(_api(ctx, '/company', symbol=symbol), items=5))
+
+
+def t_dividends(a, ctx):
+    data = _api(ctx, '/benefits', market=str(a.get('market') or 'saham-idx'))
+    return _fit(_slim({k: data.get(k) for k in ('market', 'count', 'rows', 'halvings')} if isinstance(data, dict) else data, items=8))
+
+
+def t_training(a, ctx):
+    data = _api(ctx, '/training/summary')
+    keys = ('target', 'live', 'liveAll', 'backtest', 'backtestAll')
+    return _fit(_slim({k: data.get(k) for k in keys} if isinstance(data, dict) else data))
+
+
+def _tf(value, default='1h') -> str:
+    tf = str(value or default).lower().replace(' ', '')
+    return tf if tf in ('1m', '5m', '15m', '1h', '4h', '1d', '1w') else default
+
+
+CHART_WAIT = 45.0     # seconds a tool waits for the chart to draw; a chart drawn later still follows as a screenshot
+CHART_LATE = 90.0     # a screenshot drawn after this is not sent any more
+ANALYZE_SECONDS = 45  # the whole analyze_asset call
+
+
+def _capture(session, symbol: str, tf: str) -> futures.Future:
+    """The page opens the chart, waits until it has drawn and returns a JPEG of it (the job runs on its own thread)."""
+    session.chart_seq += 1
+    job = futures.Future()
+    job.seq = session.chart_seq
+    job.set_running_or_notify_cancel()
+
+    def run():
+        try:
+            job.set_result(session.client_call('chart_capture', {'symbol': symbol, 'timeframe': tf, 'waitMs': int(CHART_LATE * 1000)},
+                                               timeout=CHART_LATE + 5))
+        except Exception as e:
+            job.set_result({'result': 'failed', 'detail': type(e).__name__})
+    threading.Thread(target=run, name='jarvis-chart', daemon=True).start()
+    return job
+
+
+def _chart_caption(symbol: str, tf: str, late: bool) -> str:
+    text = (f'[CHART SCREENSHOT] {symbol} {tf.upper()} in SHARX: candles with the SMC overlay (structure breaks, order blocks, '
+            'fair value gaps, liquidity, premium/discount). ')
+    if late:
+        return text + ('It finished loading after your answer: add in one or two sentences what the chart shows that '
+                       'changes or confirms it. Say nothing if the user has moved on to something else.')
+    return text + 'Use what you see in your answer.'
+
+
+def _deliver_chart(session, job: futures.Future, symbol: str, tf: str, wait: float) -> str:
+    """Sends the screenshot to the model when it is there within `wait`, else when the chart draws later (unless the user
+    asked for another chart meanwhile). Returns what the tool tells the model about it."""
+    try:
+        shot = job.result(timeout=max(0.5, wait))
+    except futures.TimeoutError:
+        given = time.monotonic()
+
+        def late(done: futures.Future):
+            shot = done.result()
+            if (shot.get('image') and not session.stopping and session.chart_seq == job.seq
+                    and time.monotonic() - given < CHART_LATE):
+                session.queue_image(shot['image'], _chart_caption(shot.get('symbol') or symbol, tf, late=True))
+        job.add_done_callback(late)
+        return 'loading'
+    if shot.get('image'):
+        session.queue_image(shot['image'], _chart_caption(shot.get('symbol') or symbol, tf, late=False))
+        return 'sent'
+    return f"not captured ({shot.get('detail') or shot.get('result')})"
+
+
+def t_look_at_chart(a, ctx):
+    from app import instruments
+    session = ctx['session']
+    symbol, tf = instruments.resolve(str(a.get('symbol') or '')).symbol, _tf(a.get('timeframe'))
+    chart = _deliver_chart(session, _capture(session, symbol, tf), symbol, tf, CHART_WAIT)
+    if chart == 'sent':
+        return {'result': 'chart open on the screen', 'symbol': symbol, 'timeframe': tf,
+                'note': 'The screenshot arrives as the next message: say one short sentence that you are looking at it, then wait for it.'}
+    if chart == 'loading':
+        return {'result': 'the chart is open but still loading', 'symbol': symbol, 'timeframe': tf,
+                'note': 'Say that it is still loading; its screenshot follows as a message when it has drawn.'}
+    return {'result': 'chart could not be captured', 'detail': chart}
+
+
+def _read_article(ctx, item: dict | None, url: str, max_chars: int, timeout: float = 45.0, fallback: bool = True) -> dict:
+    """The article's text: from its page opened in the app (it opens and closes by itself), else the engine's fetch."""
+    session = ctx['session']
+    _public_url(url)
+    page = session.client_call('reader_extract', {'url': url, 'timeoutMs': int(max(3.0, timeout - 2) * 1000),
+                                                  'item': {k: (item or {}).get(k) for k in ('id', 'title', 'source', 'lang')}},
+                               timeout=timeout)
+    text, via = str(page.get('text') or '').strip(), 'page'
+    if len(text) >= 300 and item:
+        try:  # the same text the news assistant would analyse
+            from app import article_retrieval
+            article_retrieval.accept_page_text(url, page.get('finalUrl') or url, text, title=str(page.get('title') or ''),
+                                               expected=item.get('title') or '')
+        except Exception:
+            pass
+    if len(text) < 300 and fallback:
+        from app import voice
+        r = voice.article(url, (item or {}).get('title', ''), (item or {}).get('summary', ''), item=item)
+        text, via = str(r.get('text') or '').strip(), 'engine' if r.get('complete') else 'summary'
+    elif len(text) < 300:
+        text, via = str((item or {}).get('summary') or text).strip(), 'summary'
+    return {'title': (item or {}).get('title') or page.get('title'), 'source': (item or {}).get('source'),
+            'published': (item or {}).get('published'), 'via': via, 'text': _untrusted('news', text[:max_chars]) if text else None}
+
+
+def t_read_news(a, ctx):
+    state = ctx['state']
+    item = None
+    if a.get('news_id'):
+        try:
+            item = state.resolve_news(str(a['news_id']).strip(' []'))
+        except Exception:
+            item = None
+    url = (item or {}).get('link') or str(a.get('url') or '').strip()
+    if not url:
+        return {'result': 'news not found: call market_news and pass the [id] of a headline'}
+    out = _read_article(ctx, item, url, 7000)
+    if not out['text']:
+        return {'result': 'no readable text on that page', 'title': out['title']}
+    out['note'] = ('Read the article aloud in the language of the conversation when the user asked you to read it; '
+                   'otherwise summarise what matters for the market.')
+    return out
+
+
+def _wait(job: futures.Future, timeout: float, what: str):
+    try:
+        return job.result(timeout=max(0.5, timeout))
+    except futures.TimeoutError:
+        return {'result': f'{what} not ready in time'}
+    except Exception as e:
+        return {'result': f'{what} unavailable ({type(e).__name__})'}
+
+
+def t_analyze_asset(a, ctx):
+    """One call for "analyse X": the chart opened on the screen and its screenshot, the SMC reading, the calendar of the
+    currencies that move it, and its news with the newest articles opened in the app, read and closed again."""
+    from app import instruments
+    session, state = ctx['session'], ctx['state']
+    inst = instruments.resolve(str(a.get('symbol') or ''))
+    tf = _tf(a.get('timeframe'))
+    until = time.monotonic() + ANALYZE_SECONDS
+    chart = _capture(session, inst.symbol, tf)  # first: it is the slowest part while the app is still warming up
+    pool = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix='jarvis-analyze')
+    try:
+        smc = pool.submit(t_market_analysis, {'symbol': inst.symbol, 'timeframe': tf}, ctx)
+        calendar = pool.submit(t_calendar, {'hours': 48, 'currencies': _currencies(inst)}, ctx)
+        news = _wait(pool.submit(_related_news, state, inst), 20, 'news')
+        own, related = news if isinstance(news, tuple) else ([], [])
+        out = {'symbol': inst.symbol, 'name': inst.name, 'timeframe': tf,
+               'headlines': _untrusted('news', _headline_block(inst, own, related) or 'no headlines in the last 24 hours')}
+        articles = []
+        for item in (own + related)[:2]:  # the newest two: opened in the app (on top of the chart), read, closed
+            left = until - 6 - time.monotonic()
+            if left < 8 or not item.get('link'):
+                continue
+            try:
+                article = _read_article(ctx, item, item['link'], 2200, timeout=min(30.0, left), fallback=left > 20)
+            except Exception:
+                continue
+            if article.get('text'):
+                articles.append(article)
+        out['articles'] = articles
+        out['smc'] = _wait(smc, until - time.monotonic(), 'SMC reading')
+        out['calendar'] = _wait(calendar, 3, 'calendar')
+    finally:
+        pool.shutdown(wait=False)
+    shot = _deliver_chart(session, chart, inst.symbol, tf, until - time.monotonic())
+    if shot == 'sent':
+        out['chart'] = 'open on the screen; its screenshot arrives as the next message'
+        out['note'] = ('Say one short sentence that you are reading the chart, then wait for the screenshot. Then give the '
+                       'analysis: what the chart shows, the SMC plan and what cancels it, what the news says and its likely '
+                       'effect, upcoming events, and the risk.')
+    else:
+        out['chart'] = 'open on the screen but still loading; its screenshot follows when it has drawn' if shot == 'loading' else shot
+        out['note'] = ('Give the analysis now from this data: the SMC plan and what cancels it, what the news says and its '
+                       'likely effect, upcoming events, and the risk.')
+    return out
 
 
 # phone (Java bridge)
@@ -667,9 +1016,38 @@ TOOLS = [
     Tool('market_news', 'Latest market headlines with sentiment, optionally for one symbol.',
          _obj({'symbol': _s('Optional symbol'), 'limit': dict(I, description='How many headlines, 1-10')}), t_market_news),
     Tool('economic_calendar', 'Upcoming high and medium impact economic events (forecast, previous, actual).',
-         _obj({'hours': dict(I, description='How many hours ahead, default 24')}), t_calendar),
+         _obj({'hours': dict(I, description='How many hours ahead, default 24'),
+               'currencies': _s('Optional comma-separated currencies, e.g. EUR,USD')}), t_calendar),
+    Tool('analyze_asset', 'Full analysis of a market symbol: opens its SHARX chart and sends you a screenshot, gets the SMC '
+         'reading and plan, reads the newest related news articles in the app, and checks the economic calendar. Use it '
+         'for "analyse X" / "analisa X".',
+         _obj({'symbol': _s('Symbol, e.g. EURUSD, XAUUSD, BTCUSD, AAPL, BBCA'),
+               'timeframe': _s('Chart timeframe', ('5m', '15m', '1h', '4h', '1d'))}, ('symbol',)), t_analyze_asset),
+    Tool('look_at_chart', 'Open the SHARX chart of a symbol on the screen and look at it (you receive a screenshot).',
+         _obj({'symbol': _s('Symbol'), 'timeframe': _s('Timeframe', ('5m', '15m', '1h', '4h', '1d'))}, ('symbol',)), t_look_at_chart),
+    Tool('read_news', 'Open a news article in the app, take its text and close it again. Pass the [id] from market_news '
+         '(or a url).', _obj({'news_id': _s('The [id] of a headline'), 'url': _s('Article URL when there is no id')}), t_read_news),
     Tool('open_chart', 'Show the SHARX chart and analysis page of a symbol on the phone screen.',
          _obj({'symbol': _s('Symbol'), 'timeframe': _s('Timeframe', ('5m', '15m', '1h', '4h', '1d'))}, ('symbol',)), client=True),
+    Tool('open_page', 'Show any page of the SHARX app: dashboard, a market page and its section, AI training, calendar, '
+         'methodology or JARVIS.',
+         _obj({'page': _s('Page', ('dashboard', 'forex', 'saham-as', 'saham-idx', 'kripto', 'training', 'kalender', 'metodologi', 'jarvis')),
+               'section': _s('Section of a market page', ('analisa', 'screener', 'berita', 'arah', 'fundamental', 'benefit')),
+               'symbol': _s('Symbol for the analisa section'), 'timeframe': _s('Timeframe for the analisa section')}, ('page',)),
+         client=True),
+    Tool('market_overview', 'Market direction and news sentiment from SHARX (regime, breadth, currency strength, mood).',
+         _obj({'market': _s('Market', ('all', 'forex', 'saham-as', 'saham-idx', 'kripto'))}), t_market_overview),
+    Tool('screener', 'Strongest Smart Money Concept setups of a market from the SHARX screener.',
+         _obj({'market': _s('Market', ('all', 'forex', 'saham-as', 'saham-idx', 'kripto')),
+               'timeframe': _s('Timeframe', ('15m', '1h', '4h', '1d')), 'direction': _s('Only one side', ('bullish', 'bearish'))}),
+         t_screener),
+    Tool('alerts', 'Latest SHARX alerts (new structure breaks, bias changes, strong news, events soon).',
+         _obj({'limit': dict(I, description='How many, 1-10')}), t_alerts),
+    Tool('company_report', 'Company facts of a stock or crypto: valuation, growth, analysts, earnings, holders.',
+         _obj({'symbol': _s('Stock or crypto symbol')}, ('symbol',)), t_company),
+    Tool('dividends', 'Upcoming dividends and other benefits (splits, buybacks, halvings, rate decisions) of a market.',
+         _obj({'market': _s('Market', ('forex', 'saham-as', 'saham-idx', 'kripto'))}), t_dividends),
+    Tool('training_stats', 'Results of the SHARX AI training and virtual trading: win rates, expectancy, totals.', _obj(), t_training),
     Tool('phone_control', 'Control this phone: media volume, flashlight, battery level, device info, keeping the screen '
          'awake, or opening a settings screen.',
          _obj({'action': _s('What to do', ('volume_set', 'volume_up', 'volume_down', 'mute', 'unmute', 'flashlight_on',
@@ -849,6 +1227,8 @@ class LiveSession:
         self.playing_until = 0.0
         self.duplex = bool(self.settings.values.get('duplex'))
         self.noted: set[str] = set()
+        self.pending_image = None  # (base64 JPEG, caption) waiting for the end of the model's turn
+        self.chart_seq = 0  # the newest chart asked for (an older one drawn late is not sent)
 
     # -- upstream
 
@@ -1007,6 +1387,8 @@ class LiveSession:
                 self.browser.send({'type': 'interrupted'})
             if content.get('turnComplete'):
                 self.browser.send({'type': 'turn_complete'})
+                if self.pending_image:
+                    self.flush_image()
                 if self.reply_to:
                     from app import jarvis_lan
                     jarvis_lan.deliver_reply(self.reply_to, ' '.join(''.join(self.reply_text).split()))
@@ -1045,7 +1427,7 @@ class LiveSession:
                 elif tool.client:
                     result = self.client_tool(cid, name, args)
                 else:
-                    result = tool.handler(args, {'state': self.state})
+                    result = tool.handler(args, {'state': self.state, 'session': self})
             except Exception as e:
                 log.warning('JARVIS tool %s failed: %s', name, type(e).__name__)
                 result = {'result': 'failed', 'detail': f'{type(e).__name__}: {str(e)[:200]}'}
@@ -1059,16 +1441,34 @@ class LiveSession:
         if responses:
             self.send_up({'toolResponse': {'functionResponses': responses}})
 
-    def client_tool(self, cid, name, args) -> dict:
+    def client_tool(self, cid, name, args, timeout: float = 20.0) -> dict:
         future: futures.Future = futures.Future()
         self.pending[cid] = future
         self.browser.send({'type': 'client_tool', 'id': cid, 'name': name, 'args': args})
         try:
-            return future.result(timeout=20)
+            return future.result(timeout=timeout)
         except futures.TimeoutError:
             return {'result': 'the app did not answer'}
         finally:
             self.pending.pop(cid, None)
+
+    def client_call(self, name: str, args: dict, timeout: float = 20.0) -> dict:
+        """Something only the page can do (open a page, capture the chart, read an article), asked by a tool."""
+        return self.client_tool('app-' + uuid.uuid4().hex[:10], name, args, timeout)
+
+    def queue_image(self, b64: str, text: str):
+        """An image for the model as the next user turn: after its current turn (it first says it is looking), as the
+        user's own pictures arrive; sent anyway when no turn ends within 6 s."""
+        self.pending_image = (b64, text)
+        timer = threading.Timer(6.0, self.flush_image)
+        timer.daemon = True
+        timer.start()
+
+    def flush_image(self):
+        image, self.pending_image = self.pending_image, None
+        if image:
+            self.send_up({'clientContent': {'turns': [{'role': 'user', 'parts': [
+                {'inlineData': {'mimeType': 'image/jpeg', 'data': image[0]}}, {'text': image[1]}]}], 'turnComplete': True}})
 
     # -- native microphone (Android)
 
