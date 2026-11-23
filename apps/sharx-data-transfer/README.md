@@ -108,6 +108,20 @@ mencetak tiap 2 detik) dan simulator server (port 9000, mengirim beberapa job). 
 **Settings → Koneksi** isi server `127.0.0.1:9000` dan printer `127.0.0.1:9100`, simpan,
 lalu **Start Transfer**.
 
+## Printer belum start
+
+Jika printer terhubung tetapi print belum di-start, printer membalas `P_Status 12` (_Print not
+started_). Data **tidak dianggap error**: statusnya **MENUNGGU** (kuning) dan disimpan.
+
+- Software mengecek printer tiap 2 detik (perintah `14` Request Printer Status; bisa diatur di
+  _Flow Mapping Data → Cek printer sudah start tiap_). Begitu printer di-start dari panel printer,
+  job (change template + field data) langsung dikirim otomatis.
+- Halaman **Data Transfer → Printer CIJ** punya tombol **Start Print** (`11`) dan **Stop Print** (`12`).
+  Setelah Stop Print, job dikirim ulang otomatis saat printer start lagi.
+- Centang **"Start print otomatis jika printer belum start"** jika software boleh men-start printer sendiri.
+- Simulator: `SharxSimulator printer --started false` meniru printer yang belum start (tekan `S` di
+  jendela simulator untuk start/stop dari "panel").
+
 ## Catatan pemasangan printer TIJ
 
 - Printer TIJ hanya menerima **satu** klien TCP; jangan sambungkan software lain bersamaan.
