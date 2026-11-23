@@ -53,6 +53,16 @@ public interface IPrinterDriver
     /// <summary>Kirim field data (operator, counter, ...) untuk satu cetakan.</summary>
     Task SendFieldsAsync(PrinterCall call, IReadOnlyList<FieldValue> fields, OutputContext context);
 
+    /// <summary>true jika driver bisa mengirim Start Print / Stop Print.</summary>
+    bool SupportsPrintControl(PrinterSettings printer);
+
+    Task StartPrintAsync(PrinterCall call);
+
+    Task StopPrintAsync(PrinterCall call);
+
+    /// <summary>true = printer sudah start, false = belum, null = tidak bisa ditanyakan.</summary>
+    Task<bool?> IsPrintStartedAsync(PrinterCall call);
+
     /// <summary>Info tambahan saat test koneksi (mis. daftar template di printer).</summary>
     Task<string?> InspectAsync(PrinterSession session, PrinterSettings printer, CancellationToken ct);
 

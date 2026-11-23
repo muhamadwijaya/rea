@@ -59,6 +59,8 @@ public sealed class SettingsStore
         g.AckPattern ??= "";
         g.NakPattern ??= "";
         g.PrintDonePattern ??= "";
+        g.StartCommand ??= "";
+        g.StopCommand ??= "";
         s.Feedback.Template ??= "";
         foreach (var field in s.Mapping.Fields)
         {
@@ -257,6 +259,11 @@ public static partial class SettingsValidator
         if (p.Lookahead is < 1 or > 10)
         {
             errors.Add("Jumlah antrean data di printer harus 1-10");
+        }
+
+        if (p.ReadyPollSeconds is < 1 or > 60)
+        {
+            errors.Add("Interval cek printer start 1-60 detik");
         }
 
         foreach (var error in OutputFormatter.Validate(p.TemplateName, keys))

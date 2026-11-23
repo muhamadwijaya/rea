@@ -595,6 +595,16 @@
                       <div class="info-value" id="printerEndpoint">-</div>
                     </div>
                   </div>
+                  <div class="print-state">
+                    <span class="info-label">Status print</span>
+                    <b id="printState">-</b>
+                    <button class="btn btn-sm btn-primary" id="btnPrintStart">
+                      <svg><use href="#i-play" /></svg>Start Print
+                    </button>
+                    <button class="btn btn-sm btn-danger" id="btnPrintStop">
+                      <svg><use href="#i-stop" /></svg>Stop Print
+                    </button>
+                  </div>
                   <div class="printer-msg" id="printerMsg"></div>
                   <div class="mini-stats">
                     <div>
@@ -1088,6 +1098,21 @@
                     data-bind="printer.clearOnJobChange"
                   />Kosongkan antrean printer saat job berubah</label
                 >
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="printer.autoStartPrint"
+                  />Start print otomatis jika printer belum start</label
+                >
+                <label
+                  >Cek printer sudah start tiap (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="60"
+                    data-bind="printer.readyPollSeconds"
+                    data-type="int"
+                /></label>
                 <div class="show-group" data-show="printer.protocol=Tij">
                   <label
                     >Slave address (-1 = byte terakhir IP)<input
@@ -1104,12 +1129,6 @@
                       data-bind="printer.tij.updateAfterLoad"
                     />Kirim 01 Update Print Contents setelah change
                     template</label
-                  >
-                  <label class="check"
-                    ><input
-                      type="checkbox"
-                      data-bind="printer.tij.startPrintAfterLoad"
-                    />Kirim 11 Start Print setelah change template</label
                   >
                 </div>
               </div>
@@ -1168,6 +1187,18 @@
                     >Sinyal selesai cetak (feedback)<input
                       class="input mono"
                       data-bind="printer.generic.printDonePattern"
+                      placeholder="kosong = tidak ada"
+                  /></label>
+                  <label
+                    >Perintah Start Print<input
+                      class="input mono"
+                      data-bind="printer.generic.startCommand"
+                      placeholder="kosong = tidak ada"
+                  /></label>
+                  <label
+                    >Perintah Stop Print<input
+                      class="input mono"
+                      data-bind="printer.generic.stopCommand"
                       placeholder="kosong = tidak ada"
                   /></label>
                 </div>

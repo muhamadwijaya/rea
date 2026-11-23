@@ -873,6 +873,10 @@ code {
   color: #ff8a8a;
 }
 
+.data-table tbody tr.row-wait td:last-child {
+  color: var(--amber);
+}
+
 .data-table tbody tr.row-new td {
   animation: flash 0.6s ease-out;
 }
@@ -1193,18 +1197,23 @@ code {
   --card-border: linear-gradient(135deg, #8cff2c 0%, #2f74e6 25%, #2c6be0 100%);
 }
 
+#page-transfer .top-row {
+  height: auto;
+  min-height: 288px;
+}
+
 .job-body {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.1fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   padding: 22px 24px 8px;
 }
 
 .job-value {
   margin-top: 4px;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .job-counter-value {
@@ -1233,6 +1242,26 @@ code {
   flex-direction: column;
   gap: 14px;
   padding: 22px 28px;
+}
+
+.print-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.print-state b {
+  margin-right: auto;
+  font-size: 18px;
+}
+
+.print-state b.ok {
+  color: #8ef75a;
+}
+
+.print-state b.wait {
+  color: var(--amber);
 }
 
 .printer-msg {
@@ -1297,6 +1326,11 @@ code {
 .status-tag.Printed {
   background: rgba(47, 151, 255, 0.2);
   color: #7cc0ff;
+}
+
+.status-tag.Waiting {
+  background: rgba(255, 197, 58, 0.18);
+  color: var(--amber);
 }
 
 .status-tag.Monitor {

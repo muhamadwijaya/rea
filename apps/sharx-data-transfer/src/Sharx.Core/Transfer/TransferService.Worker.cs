@@ -27,6 +27,10 @@ public sealed partial class TransferService
 
     private sealed record SettingsChangedItem(AppSettings Previous, AppSettings Next) : WorkItem;
 
+    private sealed record ReadyCheckItem : WorkItem;
+
+    private sealed record PrintControlItem(bool Start, TaskCompletionSource<ConnectionTestResult> Result) : WorkItem;
+
     /// <summary>Job aktif: record terakhir dari server yang menentukan template &amp; operator.</summary>
     private sealed record ActiveJob(ParsedRecord Record);
 
@@ -53,13 +57,15 @@ public sealed partial class TransferService
 
     private Task HandleAsync(WorkItem item, CancellationToken ct) => item switch
     {
-        ServerFrameItem f => ProcessServerFrameAsync(f.Frame, ct),
+        ServerFrameItem f => ProcessServerFrameAsync(f.Frame, replay: false, ct),
         ServerConnectedItem => FlushFeedbackAsync(ct),
         PrinterFrameItem p => OnPrinterFrameAsync(p, ct),
         PrinterClosedItem c => OnPrinterClosedAsync(c),
         EnsurePrinterItem => EnsurePrinterAndResyncAsync(ct),
         ResyncItem r => ResyncAsync(r.Reason, ct),
         SettingsChangedItem s => OnSettingsChangedAsync(s, ct),
+        ReadyCheckItem => CheckPrinterReadyAsync(ct),
+        PrintControlItem p => OnPrintControlAsync(p, ct),
         _ => Task.CompletedTask,
     };
 
@@ -87,14 +93,21 @@ public sealed partial class TransferService
         _log.Write(LogStatus.Info, $"Melanjutkan job terakhir: template {state.ActiveTemplate}, operator {state.ActiveOperator}");
     }
 
-    private async Task ProcessServerFrameAsync(Frame frame, CancellationToken ct)
+    /// <summary>
+    /// Proses satu record dari server. <paramref name="replay"/> = record yang sebelumnya menunggu printer start.
+    /// Mengembalikan false jika record masih harus menunggu printer start.
+    /// </summary>
+    private async Task<bool> ProcessServerFrameAsync(Frame frame, bool replay, CancellationToken ct)
     {
         var settings = _settings;
         var text = TextEncodings.Resolve(settings.Server.Encoding).GetString(frame.Data);
         var seq = Interlocked.Increment(ref _sequence);
         var now = _time.GetLocalNow();
-        _stats.RecordReceived();
-        _log.Write(LogStatus.Ok, $"Data received: {frame.Data.Length} bytes");
+        if (!replay)
+        {
+            _stats.RecordReceived();
+            _log.Write(LogStatus.Ok, $"Data received: {frame.Data.Length} bytes");
+        }
 
         var parsed = RecordParser.Parse(text, settings.Mapping);
         var record = new TransferRecord
@@ -121,19 +134,25 @@ public sealed partial class TransferService
             _stats.RecordFailed();
             _log.Write(LogStatus.Error, $"Data ditolak: {message}");
             Publish(record with { Status = RecordStatus.Rejected, Message = message });
-            return;
+            return true;
         }
 
         var decision = _counter.Evaluate(parsed.Record, settings.Counter);
         if (!settings.Printer.Enabled)
         {
             ProcessMonitorOnly(settings, parsed.Record, decision, record);
-            return;
+            return true;
         }
 
         var trace = new List<SentCommand>();
         try
         {
+            if (!replay && !UsesPrintCounting(settings) && _waitingFrames.Count > 0)
+            {
+                // Urutan data dijaga: data lama yang menunggu printer start dikirim dulu.
+                throw new PrinterNotReadyException("Masih ada data yang menunggu printer start");
+            }
+
             if (settings.Counter.IncrementOn == CounterIncrement.Print)
             {
                 var changed = await StartJobAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
@@ -146,13 +165,37 @@ public sealed partial class TransferService
                         Counter = _nextToSendText,
                         CounterNote = "Job sama dengan yang aktif; tidak ada perintah dikirim",
                     });
-                    return;
+                    return true;
                 }
             }
             else
             {
                 await SendRecordAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
             }
+        }
+        catch (PrinterNotReadyException ex)
+        {
+            MarkPrintNotStarted();
+            if (replay)
+            {
+                return false;
+            }
+
+            if (!UsesPrintCounting(settings))
+            {
+                DeferFrame(frame);
+            }
+
+            Publish(record with
+            {
+                Status = RecordStatus.Waiting,
+                Counter = decision.Text,
+                CounterNote = "Printer belum start: data disimpan dan dikirim otomatis saat printer start",
+                Commands = trace,
+                Message = ex.Message,
+            });
+            RaiseStatus();
+            return false;
         }
         catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
         {
@@ -174,7 +217,7 @@ public sealed partial class TransferService
                 Message = ex.Message,
             });
             RaiseStatus();
-            return;
+            return true;
         }
 
         _stats.RecordForwarded();
@@ -188,6 +231,7 @@ public sealed partial class TransferService
             Commands = trace,
         });
         RaiseStatus();
+        return true;
     }
 
     private void ProcessMonitorOnly(AppSettings settings, ParsedRecord parsed, CounterDecision decision, TransferRecord record)

@@ -289,6 +289,12 @@ public static class SharxWebHost
             return Results.Json(new { stopped = true, status = service.Status }, JsonOptions);
         });
 
+        app.MapPost("/api/printer/start", async (CancellationToken ct) =>
+            Results.Json(await service.PrintControlAsync(true, ct), JsonOptions));
+
+        app.MapPost("/api/printer/stop", async (CancellationToken ct) =>
+            Results.Json(await service.PrintControlAsync(false, ct), JsonOptions));
+
         app.MapGet("/api/settings", () => Results.Json(new
         {
             settings = service.Settings,

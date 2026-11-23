@@ -35,10 +35,31 @@ public sealed class TijDriver : IPrinterDriver
             await RequestAsync(call, TijProtocol.CmdUpdatePrint, TijProtocol.Command(slave, TijProtocol.CmdUpdatePrint), "", 0x00, 0x12);
         }
 
-        if (p.Tij.StartPrintAfterLoad)
-        {
-            await RequestAsync(call, TijProtocol.CmdStartPrint, TijProtocol.Command(slave, TijProtocol.CmdStartPrint), "", 0x00, 0x11);
-        }
+    }
+
+    public bool SupportsPrintControl(PrinterSettings printer) => true;
+
+    public Task StartPrintAsync(PrinterCall call) =>
+        RequestAsync(call, TijProtocol.CmdStartPrint,
+            TijProtocol.Command(SlaveAddress(call.Printer), TijProtocol.CmdStartPrint), "", 0x00, 0x11);
+
+    public Task StopPrintAsync(PrinterCall call) =>
+        RequestAsync(call, TijProtocol.CmdStopPrint,
+            TijProtocol.Command(SlaveAddress(call.Printer), TijProtocol.CmdStopPrint), "", 0x00, TijProtocol.StatusPrintNotStarted);
+
+    /// <summary>14 Request Printer Status: P_Status 12 = print belum start (tersedia sejak firmware v1277).</summary>
+    public async Task<bool?> IsPrintStartedAsync(PrinterCall call)
+    {
+        var payload = TijProtocol.Command(SlaveAddress(call.Printer), TijProtocol.CmdPrinterStatus);
+        var reply = await call.Session.RequestAsync(
+            payload,
+            f => f.Kind is PrinterFrameKind.Ack or PrinterFrameKind.Nak && f.Command == TijProtocol.CmdPrinterStatus,
+            call.ResponseTimeout,
+            call.Cancellation).ConfigureAwait(false);
+        call.Stats.AddSent(payload.Length);
+        return reply is { Kind: PrinterFrameKind.Ack }
+            ? reply.Status != TijProtocol.StatusPrintNotStarted
+            : null;
     }
 
     public Task ClearAsync(PrinterCall call, OutputContext context) =>
@@ -81,11 +102,6 @@ public sealed class TijDriver : IPrinterDriver
         if (p.Tij.UpdateAfterLoad)
         {
             list.Add(new("Update Print Contents (01)", "", TijProtocol.Command(slave, TijProtocol.CmdUpdatePrint)));
-        }
-
-        if (p.Tij.StartPrintAfterLoad)
-        {
-            list.Add(new("Start Print (11)", "", TijProtocol.Command(slave, TijProtocol.CmdStartPrint)));
         }
 
         if (p.ClearOnJobChange)
@@ -140,7 +156,10 @@ public sealed class TijDriver : IPrinterDriver
 
         if (!okStatuses.Contains(frame.Status))
         {
-            throw new PrinterException($"{name}: {TijProtocol.PrinterStatusText(frame.Status)} (P_Status {frame.Status:X2})");
+            var text = $"{name}: {TijProtocol.PrinterStatusText(frame.Status)} (P_Status {frame.Status:X2})";
+            throw frame.Status == TijProtocol.StatusPrintNotStarted
+                ? new PrinterNotReadyException(text)
+                : new PrinterException(text);
         }
 
         // 42 (buffer now full) normal saat buffer 1D terisi; status lain yang diterima dicatat.

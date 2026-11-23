@@ -31,6 +31,8 @@ public enum RecordStatus
     Rejected,
     /// <summary>Pengiriman ke printer gagal.</summary>
     PrinterError,
+    /// <summary>Printer belum start; data disimpan dan dikirim otomatis saat printer start.</summary>
+    Waiting,
 }
 
 public sealed record SentCommand(int Step, string Name, string Data, int Bytes, string? Response);
@@ -78,11 +80,26 @@ public sealed record TransferStatus(
     string? PrinterMessage,
     string? LastError,
     JobStatus? Job,
-    int FeedbackQueued);
+    int FeedbackQueued,
+    PrintState PrintState,
+    bool WaitingForPrinter,
+    int WaitingRecords,
+    bool CanControlPrint);
 
 public sealed record SettingsApplyResult(bool Ok, IReadOnlyList<string> Errors, bool Reconnecting);
 
 public sealed record ConnectionTestResult(bool Ok, string Message, long ElapsedMs);
 
 /// <summary>Printer menolak perintah / membalas status gagal.</summary>
-public sealed class PrinterException(string message, Exception? inner = null) : Exception(message, inner);
+public class PrinterException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>Printer terhubung tetapi print belum di-start; data ditahan sampai printer start.</summary>
+public sealed class PrinterNotReadyException(string message) : PrinterException(message);
+
+/// <summary>Status print di printer.</summary>
+public enum PrintState
+{
+    Unknown,
+    Started,
+    NotStarted,
+}

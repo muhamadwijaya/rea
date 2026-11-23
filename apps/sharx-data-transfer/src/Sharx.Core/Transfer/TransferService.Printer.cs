@@ -22,6 +22,11 @@ public sealed partial class TransferService
         long Epoch);
 
     private readonly LinkedList<PendingPrint> _pending = new();
+    private readonly Queue<Frame> _waitingFrames = new();
+    private volatile int _waitingCount;
+    private volatile PrintState _printState = PrintState.Unknown;
+    private DateTimeOffset _lastReadyCheck;
+    private bool _waitingNoticeLogged;
     private readonly Queue<byte[]> _outbox = new();
     private PrinterSession? _printer;
     private string? _printerKey;
@@ -40,6 +45,222 @@ public sealed partial class TransferService
     private long _nextToSend;
 
     private bool PrinterConnected => _printer?.IsConnected == true;
+
+    /// <summary>Printer terhubung tetapi belum start, dan ada job / data yang menunggu.</summary>
+    private bool WaitingForPrinter =>
+        _running && _settings.Printer.Enabled
+        && ((_printState == PrintState.NotStarted && _job is not null && !_jobArmed && UsesPrintCounting(_settings))
+            || _waitingCount > 0);
+
+    // ------------------------------------------------------------------ printer belum start
+
+    private void MarkPrintStarted()
+    {
+        if (_printState == PrintState.NotStarted && _waitingNoticeLogged)
+        {
+            _log.Write(LogStatus.Ok, "Printer sudah start");
+        }
+
+        _printState = PrintState.Started;
+        _waitingNoticeLogged = false;
+    }
+
+    private void MarkPrintNotStarted()
+    {
+        _printState = PrintState.NotStarted;
+        _jobArmed = false;
+        if (!_waitingNoticeLogged)
+        {
+            _waitingNoticeLogged = true;
+            _log.Write(LogStatus.Warn,
+                "Printer belum start (Print not started): data disimpan dan dikirim otomatis begitu printer di-start "
+                + "(dari panel printer atau tombol Start Print)");
+        }
+    }
+
+    private void DeferFrame(Frame frame)
+    {
+        while (_waitingFrames.Count >= 10000)
+        {
+            _waitingFrames.Dequeue();
+        }
+
+        _waitingFrames.Enqueue(frame);
+        _waitingCount = _waitingFrames.Count;
+    }
+
+    /// <summary>Kirim data yang menunggu printer start (mode counter per data), berurutan.</summary>
+    private async Task DrainWaitingAsync(CancellationToken ct)
+    {
+        var sent = 0;
+        while (_waitingFrames.TryPeek(out var frame))
+        {
+            if (!await ProcessServerFrameAsync(frame, replay: true, ct).ConfigureAwait(false))
+            {
+                break;
+            }
+
+            _waitingFrames.Dequeue();
+            _waitingCount = _waitingFrames.Count;
+            sent++;
+        }
+
+        if (sent > 0)
+        {
+            _log.Write(LogStatus.Ok, $"{sent} data yang menunggu printer start sudah dikirim");
+        }
+    }
+
+    /// <summary>
+    /// Jalankan langkah job. Jika printer belum start dan "Start print otomatis" aktif,
+    /// kirim Start Print lalu ulangi sekali.
+    /// </summary>
+    private async Task RunWithAutoStartAsync(
+        PrinterSession session,
+        AppSettings s,
+        List<SentCommand> trace,
+        CancellationToken ct,
+        Func<Task> action)
+    {
+        var driver = PrinterDrivers.For(s.Printer);
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        catch (PrinterNotReadyException) when (s.Printer.AutoStartPrint && driver.SupportsPrintControl(s.Printer))
+        {
+            _log.Write(LogStatus.Info, "Printer belum start: mengirim Start Print otomatis");
+            await driver.StartPrintAsync(Call(session, s, trace, ct)).ConfigureAwait(false);
+            await action().ConfigureAwait(false);
+        }
+
+        MarkPrintStarted();
+    }
+
+    /// <summary>Cek berkala saat ada data menunggu: jika printer sudah start, langsung kirim.</summary>
+    private async Task CheckPrinterReadyAsync(CancellationToken ct)
+    {
+        var s = _settings;
+        if (!WaitingForPrinter || _printer is not { IsConnected: true } session)
+        {
+            return;
+        }
+
+        bool? started;
+        try
+        {
+            started = await PrinterDrivers.For(s.Printer).IsPrintStartedAsync(Call(session, s, [], ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or PrinterException)
+        {
+            started = null; // Firmware lama tanpa perintah 14: langsung coba kirim.
+        }
+
+        if (started == false && !s.Printer.AutoStartPrint)
+        {
+            return;
+        }
+
+        if (UsesPrintCounting(s))
+        {
+            await ResyncAsync("printer start", ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await DrainWaitingAsync(ct).ConfigureAwait(false);
+        }
+
+        RaiseStatus();
+    }
+
+    /// <summary>Tombol Start Print / Stop Print.</summary>
+    public async Task<ConnectionTestResult> PrintControlAsync(bool start, CancellationToken ct)
+    {
+        if (_running)
+        {
+            var result = new TaskCompletionSource<ConnectionTestResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Enqueue(new PrintControlItem(start, result));
+            return await result.Task.WaitAsync(TimeSpan.FromSeconds(20), ct).ConfigureAwait(false);
+        }
+
+        // Transfer belum jalan: pakai koneksi sementara.
+        var s = _settings;
+        var driver = PrinterDrivers.For(s.Printer);
+        var watch = Stopwatch.StartNew();
+        if (!driver.SupportsPrintControl(s.Printer))
+        {
+            return new ConnectionTestResult(false, "Perintah Start/Stop Print belum diatur untuk protokol ini", 0);
+        }
+
+        try
+        {
+            await using var session = await PrinterSession.OpenAsync(_printerFactory(s.Printer), driver.CreateParser(s.Printer), _ => { }, null, ct)
+                .ConfigureAwait(false);
+            var call = Call(session, s, [], ct);
+            await (start ? driver.StartPrintAsync(call) : driver.StopPrintAsync(call)).ConfigureAwait(false);
+            _printState = start ? PrintState.Started : PrintState.NotStarted;
+            _log.Write(LogStatus.Ok, start ? "Start Print dikirim ke printer" : "Stop Print dikirim ke printer");
+            RaiseStatus();
+            return new ConnectionTestResult(true, start ? "Printer start" : "Printer stop", watch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
+        {
+            return new ConnectionTestResult(false, ex.Message, watch.ElapsedMilliseconds);
+        }
+    }
+
+    private async Task OnPrintControlAsync(PrintControlItem item, CancellationToken ct)
+    {
+        var s = _settings;
+        var driver = PrinterDrivers.For(s.Printer);
+        var watch = Stopwatch.StartNew();
+        if (!s.Printer.Enabled || !driver.SupportsPrintControl(s.Printer))
+        {
+            item.Result.TrySetResult(new ConnectionTestResult(false, "Perintah Start/Stop Print belum diatur untuk protokol ini", 0));
+            return;
+        }
+
+        try
+        {
+            var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
+            var call = Call(session, s, [], ct);
+            if (item.Start)
+            {
+                await driver.StartPrintAsync(call).ConfigureAwait(false);
+                _log.Write(LogStatus.Ok, "Start Print dikirim ke printer");
+                MarkPrintStarted();
+                if (UsesPrintCounting(s) && _job is not null && !_jobArmed)
+                {
+                    await ResyncAsync("printer start", ct).ConfigureAwait(false);
+                }
+                else if (_waitingFrames.Count > 0)
+                {
+                    await DrainWaitingAsync(ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await driver.StopPrintAsync(call).ConfigureAwait(false);
+                _log.Write(LogStatus.Ok, "Stop Print dikirim ke printer; job dikirim ulang otomatis saat printer start lagi");
+                _printState = PrintState.NotStarted;
+                _jobArmed = false;
+                _waitingNoticeLogged = true;
+            }
+
+            item.Result.TrySetResult(new ConnectionTestResult(true, item.Start ? "Printer start" : "Printer stop", watch.ElapsedMilliseconds));
+        }
+        catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
+        {
+            if (ex is not PrinterException)
+            {
+                await ClosePrinterAsync(PrinterState.Error, ex.Message).ConfigureAwait(false);
+            }
+
+            item.Result.TrySetResult(new ConnectionTestResult(false, ex.Message, watch.ElapsedMilliseconds));
+        }
+
+        RaiseStatus();
+    }
 
     // ------------------------------------------------------------------ koneksi printer
 
@@ -104,6 +325,7 @@ public sealed partial class TransferService
         Interlocked.Increment(ref _printerGeneration);
         _printerNeedsJob = true;
         _jobArmed = false;
+        _printState = PrintState.Unknown;
         if (session is not null)
         {
             await session.DisposeAsync().ConfigureAwait(false);
@@ -147,6 +369,10 @@ public sealed partial class TransferService
         {
             await ResyncAsync("printer terhubung", ct).ConfigureAwait(false);
         }
+        else if (_waitingFrames.Count > 0)
+        {
+            await DrainWaitingAsync(ct).ConfigureAwait(false);
+        }
     }
 
     private async Task OnPrinterClosedAsync(PrinterClosedItem item)
@@ -171,9 +397,11 @@ public sealed partial class TransferService
         switch (item.Frame.Kind)
         {
             case PrinterFrameKind.PrintEnd:
+                MarkPrintStarted();
                 await OnPrintEndAsync(ct).ConfigureAwait(false);
                 break;
             case PrinterFrameKind.PrintStart:
+                MarkPrintStarted();
                 break;
             case PrinterFrameKind.Text:
                 _log.Write(LogStatus.Info, $"Printer: {item.Frame.Describe()}");
@@ -276,9 +504,18 @@ public sealed partial class TransferService
         _jobArmed = false;
         var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
         var changeTemplate = decision.TemplateChanged || _printerNeedsJob || firstJob;
-        await PrepareJobAsync(session, s, record, changeTemplate, s.Printer.ClearOnJobChange, trace, ct).ConfigureAwait(false);
-        ResetQueue(_counter.NextValue(record.Template, s.Counter) ?? decision.Value);
-        await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
+        if (changeTemplate)
+        {
+            // Jika gagal (mis. printer belum start), template di-load ulang saat dikirim ulang.
+            _printerNeedsJob = true;
+        }
+
+        await RunWithAutoStartAsync(session, s, trace, ct, async () =>
+        {
+            await PrepareJobAsync(session, s, record, changeTemplate, s.Printer.ClearOnJobChange, trace, ct).ConfigureAwait(false);
+            ResetQueue(_counter.NextValue(record.Template, s.Counter) ?? decision.Value);
+            await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
         _jobArmed = true;
         _printerNeedsJob = false;
         return true;
@@ -294,14 +531,23 @@ public sealed partial class TransferService
     {
         var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
         var changeTemplate = decision.TemplateChanged || _printerNeedsJob || _job is null;
-        await PrepareJobAsync(session, s, record, changeTemplate, false, trace, ct).ConfigureAwait(false);
-        var pending = await SendFieldsAsync(session, s, record, decision.Value, trace, ct).ConfigureAwait(false);
+        if (changeTemplate)
+        {
+            _printerNeedsJob = true;
+        }
+
+        PendingPrint? pending = null;
+        await RunWithAutoStartAsync(session, s, trace, ct, async () =>
+        {
+            await PrepareJobAsync(session, s, record, changeTemplate, false, trace, ct).ConfigureAwait(false);
+            pending = await SendFieldsAsync(session, s, record, decision.Value, trace, ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
         if (!_counter.Commit(decision))
         {
             _log.Write(LogStatus.Warn, $"Counter direset saat pengiriman; nilai {decision.Text} tidak disimpan");
         }
 
-        AddPending(pending);
+        AddPending(pending!);
         _job = new ActiveJob(record);
         _jobArmed = true;
         _printerNeedsJob = false;
@@ -364,14 +610,22 @@ public sealed partial class TransferService
 
             var trace = new List<SentCommand>();
             _jobArmed = false;
-            await PrepareJobAsync(session, s, job.Record, _printerNeedsJob, true, trace, ct).ConfigureAwait(false);
-            ResetQueue(_counter.NextValue(job.Record.Template, s.Counter) ?? decision.Value);
-            await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
+            var changeTemplate = _printerNeedsJob;
+            await RunWithAutoStartAsync(session, s, trace, ct, async () =>
+            {
+                await PrepareJobAsync(session, s, job.Record, changeTemplate, true, trace, ct).ConfigureAwait(false);
+                ResetQueue(_counter.NextValue(job.Record.Template, s.Counter) ?? decision.Value);
+                await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
+            }).ConfigureAwait(false);
             _jobArmed = true;
             _printerNeedsJob = false;
             _lastPrinterError = null;
-            _log.Write(LogStatus.Info,
-                $"Printer disinkronkan ({reason}): {job.Record.Template} / {job.Record.Operator}, counter berikutnya {_nextToSendText}");
+            _log.Write(LogStatus.Ok,
+                $"Job dikirim ke printer ({reason}): {job.Record.Template} / {job.Record.Operator}, counter berikutnya {_nextToSendText}");
+        }
+        catch (PrinterNotReadyException)
+        {
+            MarkPrintNotStarted();
         }
         catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
         {

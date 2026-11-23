@@ -105,7 +105,11 @@ public sealed partial class TransferService : IAsyncDisposable
                 _printerMessage,
                 _lastError,
                 jobStatus,
-                _outboxCount);
+                _outboxCount,
+                _printState,
+                WaitingForPrinter,
+                _waitingCount,
+                Printing.PrinterDrivers.For(s.Printer).SupportsPrintControl(s.Printer));
         }
     }
 
@@ -508,6 +512,18 @@ public sealed partial class TransferService : IAsyncDisposable
         }
 
         var now = _time.GetUtcNow();
+        if (WaitingForPrinter && PrinterConnected)
+        {
+            // Printer belum start: cek berkala, kirim begitu printer start.
+            if (now - _lastReadyCheck >= TimeSpan.FromSeconds(Math.Max(1, s.Printer.ReadyPollSeconds)))
+            {
+                _lastReadyCheck = now;
+                Enqueue(new ReadyCheckItem());
+            }
+
+            return;
+        }
+
         if (now - _lastPrinterAttempt < TimeSpan.FromSeconds(Math.Max(1, s.Printer.ReconnectDelaySeconds)))
         {
             return;

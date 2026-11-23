@@ -12,9 +12,12 @@ using Sharx.Core.Transport;
 namespace Sharx.Core.Tests;
 
 /// <summary>Printer TIJ di memori: mencatat perintah, membalas ACK, dan bisa "mencetak" (kirim AB).</summary>
-internal sealed class FakeTijLink(ConcurrentQueue<string> commands) : IPrinterLink
+internal sealed class FakeTijLink(ConcurrentQueue<string> commands, bool started = true) : IPrinterLink
 {
     private readonly Channel<byte[]> _toHost = Channel.CreateUnbounded<byte[]>();
+
+    /// <summary>false = print belum start: 1E/1D/14 dibalas P_Status 12.</summary>
+    public bool Started { get; set; } = started;
 
     public string Endpoint => "fake";
 
@@ -24,8 +27,30 @@ internal sealed class FakeTijLink(ConcurrentQueue<string> commands) : IPrinterLi
     {
         var command = data[3];
         var payload = data.AsSpan(4, data.Length - 7);
-        commands.Enqueue(Describe(command, payload));
-        _toHost.Writer.TryWrite(TijProtocolTests.Reply(TijProtocol.Ack, 0x00, command));
+        byte status = 0x00;
+        if (!Started && command is TijProtocol.CmdLoadMessage or TijProtocol.CmdRemoteFields or TijProtocol.CmdPrinterStatus)
+        {
+            status = TijProtocol.StatusPrintNotStarted;
+        }
+        else
+        {
+            if (command == TijProtocol.CmdStartPrint)
+            {
+                Started = true;
+            }
+
+            if (command == TijProtocol.CmdStopPrint)
+            {
+                Started = false;
+            }
+
+            if (command != TijProtocol.CmdPrinterStatus)
+            {
+                commands.Enqueue(Describe(command, payload));
+            }
+        }
+
+        _toHost.Writer.TryWrite(TijProtocolTests.Reply(TijProtocol.Ack, status, command));
         return Task.CompletedTask;
     }
 
@@ -316,5 +341,103 @@ public class GenericProtocolTests
         Assert.Equal("ANANDA02,867892,001", await reader.ReadLineAsync(timeout.Token));
         await service.StopAsync();
         listener.Stop();
+    }
+}
+
+public class PrintNotStartedTests
+{
+    private static async Task WaitUntil(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Menunggu: {what}");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
+    private sealed class Rig : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+
+        public Rig(bool autoStart)
+        {
+            _listener.Start();
+            var settings = new AppSettings();
+            settings.Server.Host = "127.0.0.1";
+            settings.Server.Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            settings.Printer.AutoStartPrint = autoStart;
+            settings.Printer.ReadyPollSeconds = 1;
+            var time = TimeProvider.System;
+            Service = new TransferService(settings, null, new CounterEngine(null, time), new TransferLog(null, time),
+                new TransferStats(), time, _ => Printer = new FakeTijLink(Commands, started: false));
+            Service.RecordProcessed += Records.Enqueue;
+        }
+
+        public ConcurrentQueue<string> Commands { get; } = new();
+        public ConcurrentQueue<TransferRecord> Records { get; } = new();
+        public FakeTijLink? Printer { get; private set; }
+        public TransferService Service { get; }
+
+        public async Task SendJobAsync(string line)
+        {
+            Service.StartBackground();
+            Service.Start();
+            var server = await _listener.AcceptTcpClientAsync();
+            await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes(line + "\r\n"));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Service.DisposeAsync();
+            _listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task Job_waits_without_error_and_is_sent_when_printer_is_started_from_panel()
+    {
+        await using var rig = new Rig(autoStart: false);
+        await rig.SendJobAsync("ANANDA02,867892,000");
+
+        await WaitUntil(() => !rig.Records.IsEmpty, "record");
+        Assert.Equal(RecordStatus.Waiting, rig.Records.Single().Status);
+        Assert.Equal(PrintState.NotStarted, rig.Service.Status.PrintState);
+        Assert.True(rig.Service.Status.WaitingForPrinter);
+        Assert.DoesNotContain(rig.Commands, c => c.StartsWith("1D", StringComparison.Ordinal));
+
+        rig.Printer!.Started = true; // operator menekan start di panel printer
+        await WaitUntil(() => rig.Commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim otomatis");
+        Assert.Contains("1E:867892", rig.Commands);
+        Assert.Equal(PrintState.Started, rig.Service.Status.PrintState);
+    }
+
+    [Fact]
+    public async Task Start_print_button_starts_printer_and_sends_waiting_job()
+    {
+        await using var rig = new Rig(autoStart: false);
+        await rig.SendJobAsync("ANANDA02,867892,000");
+        await WaitUntil(() => !rig.Records.IsEmpty, "record");
+
+        var result = await rig.Service.PrintControlAsync(true, CancellationToken.None);
+
+        Assert.True(result.Ok, result.Message);
+        await WaitUntil(() => rig.Commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+        Assert.Equal("11", rig.Commands.First());
+    }
+
+    [Fact]
+    public async Task Auto_start_sends_start_print_before_loading_template()
+    {
+        await using var rig = new Rig(autoStart: true);
+        await rig.SendJobAsync("ANANDA02,867892,000");
+
+        await WaitUntil(() => rig.Commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+        Assert.Equal(["11", "1E:867892", "01", "21", "1D:0=ANANDA02;1=001"], rig.Commands.ToArray());
+        Assert.Equal(RecordStatus.Ok, rig.Records.Single().Status);
     }
 }

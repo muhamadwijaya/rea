@@ -19,6 +19,11 @@ public static class TijProtocol
 
     public const byte CmdUpdatePrint = 0x01;
     public const byte CmdStartPrint = 0x11;
+    public const byte CmdStopPrint = 0x12;
+    public const byte CmdPrinterStatus = 0x14;
+
+    /// <summary>P_Status: print belum di-start.</summary>
+    public const byte StatusPrintNotStarted = 0x12;
     public const byte CmdRemoteFields = 0x1D;
     public const byte CmdLoadMessage = 0x1E;
     public const byte CmdMessageNames = 0x1F;

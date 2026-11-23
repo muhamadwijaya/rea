@@ -10,8 +10,10 @@ using Sharx.Core.Transport;
 //       Server TCP: mengirim job (satu baris per job) ke SHARX dan menampilkan feedback after print.
 //
 //   SharxSimulator printer [--port 9100] [--messages 867892,555111] [--print-interval 2] [--buffer 1]
-//       Printer TIJ palsu (protokol 4.8): membalas 1E/1D/01/11/21/1F dan mengirim Print End (AB)
-//       setiap kali "mencetak".
+//                          [--started true|false]
+//       Printer TIJ palsu (protokol 4.8): membalas 1E/1D/01/11/12/14/21/1F dan mengirim Print End (AB)
+//       setiap kali "mencetak". --started false = printer belum start (balas P_Status 12) sampai
+//       menerima 11 Start Print, atau tekan tombol S di jendela simulator.
 var mode = args.FirstOrDefault() ?? "";
 var options = ParseOptions(args.Skip(1).ToArray());
 using var cts = new CancellationTokenSource();
@@ -126,6 +128,7 @@ static async Task RunPrinterAsync(Dictionary<string, string> o, CancellationToke
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     var interval = double.Parse(o.GetValueOrDefault("print-interval", "2"), CultureInfo.InvariantCulture);
     var bufferSize = int.Parse(o.GetValueOrDefault("buffer", "1"), CultureInfo.InvariantCulture);
+    var started = !string.Equals(o.GetValueOrDefault("started", "true"), "false", StringComparison.OrdinalIgnoreCase);
     var listener = new TcpListener(IPAddress.Loopback, port);
     listener.Start();
     Log("PRINTER", $"TIJ listen 127.0.0.1:{port}, message: {(messages.Length == 0 ? "(semua)" : string.Join(",", messages))}, buffer {bufferSize}");
@@ -133,14 +136,15 @@ static async Task RunPrinterAsync(Dictionary<string, string> o, CancellationToke
     {
         using var client = await listener.AcceptTcpClientAsync(ct);
         Log("PRINTER", "host terhubung");
-        await new FakeTijPrinter(client.GetStream(), messages, interval, bufferSize).RunAsync(ct);
+        await new FakeTijPrinter(client.GetStream(), messages, interval, bufferSize, started).RunAsync(ct);
         Log("PRINTER", "host terputus");
     }
 }
 
 /// <summary>Printer TIJ palsu: cukup untuk menguji alur 1E → 1D → AB.</summary>
-internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, double interval, int bufferSize)
+internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, double interval, int bufferSize, bool started)
 {
+    private bool _started = started;
     private readonly object _gate = new();
     private readonly Queue<string> _buffer = new();
     private readonly SemaphoreSlim _write = new(1, 1);
@@ -152,6 +156,8 @@ internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, do
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var printing = PrintLoopAsync(linked.Token);
+        var keys = KeyLoopAsync(linked.Token);
+        Log("PRINTER", _started ? "status: print started" : "status: print BELUM start (tekan S untuk start/stop)");
         var buffer = new byte[4096];
         var pending = new List<byte>();
         try
@@ -179,7 +185,7 @@ internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, do
         await linked.CancelAsync();
         try
         {
-            await printing;
+            await Task.WhenAll(printing, keys);
         }
         catch (OperationCanceledException)
         {
@@ -233,8 +239,27 @@ internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, do
         var data = frame.AsSpan(4, frame.Length - 7).ToArray();
         byte status = 0x00;
         byte[] reply = [];
+        if (!_started && command is TijProtocol.CmdLoadMessage or TijProtocol.CmdRemoteFields or TijProtocol.CmdPrinterStatus)
+        {
+            Log("PRINTER", $"perintah {command:X2} ditolak: print belum start (P_Status 12)");
+            await SendAsync(TijProtocol.Ack, TijProtocol.StatusPrintNotStarted, command, [], ct);
+            return;
+        }
+
         switch (command)
         {
+            case TijProtocol.CmdStartPrint:
+                status = _started ? (byte)0x11 : (byte)0x00;
+                _started = true;
+                Log("PRINTER", "11 start print");
+                break;
+            case TijProtocol.CmdStopPrint:
+                status = _started ? (byte)0x00 : TijProtocol.StatusPrintNotStarted;
+                _started = false;
+                Log("PRINTER", "12 stop print");
+                break;
+            case TijProtocol.CmdPrinterStatus:
+                break;
             case TijProtocol.CmdLoadMessage:
                 var name = Encoding.UTF8.GetString(data, 1, data[0]);
                 if (messages.Length > 0 && !messages.Contains(name))
@@ -319,7 +344,7 @@ internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, do
             string? printed;
             lock (_gate)
             {
-                if (_message is null)
+                if (_message is null || !_started)
                 {
                     continue;
                 }
@@ -335,6 +360,25 @@ internal sealed class FakeTijPrinter(NetworkStream stream, string[] messages, do
 
             Log("PRINTER", $"*** PRINT {_message}: {printed}");
             await SendAsync(TijProtocol.Ack, 0x00, TijProtocol.SignalPrintEnd, [], ct);
+        }
+    }
+
+    /// <summary>Tombol S di jendela simulator = start / stop print dari "panel printer".</summary>
+    private async Task KeyLoopAsync(CancellationToken ct)
+    {
+        if (Console.IsInputRedirected)
+        {
+            return;
+        }
+
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(100, ct);
+            if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.S)
+            {
+                _started = !_started;
+                Log("PRINTER", _started ? "panel: START print" : "panel: STOP print");
+            }
         }
     }
 

@@ -195,6 +195,15 @@ public sealed class PrinterSettings
     /// <summary>Jumlah data yang diantrikan di printer menunggu dicetak (1-10).</summary>
     public int Lookahead { get; set; } = 1;
 
+    /// <summary>
+    /// Jika printer belum start (print not started), software mengirim perintah Start Print sendiri.
+    /// false = data disimpan dan dikirim otomatis begitu printer di-start dari panel / tombol Start Print.
+    /// </summary>
+    public bool AutoStartPrint { get; set; }
+
+    /// <summary>Interval cek apakah printer sudah start, saat ada data menunggu (detik).</summary>
+    public int ReadyPollSeconds { get; set; } = 2;
+
     /// <summary>Field data yang dikirim untuk setiap cetakan.</summary>
     public List<PrinterField> Fields { get; set; } =
     [
@@ -226,9 +235,6 @@ public sealed class TijSettings
 
     /// <summary>Kirim perintah 01 (Update Print Contents) setelah load message.</summary>
     public bool UpdateAfterLoad { get; set; } = true;
-
-    /// <summary>Kirim perintah 11 (Start Print) setelah load message.</summary>
-    public bool StartPrintAfterLoad { get; set; }
 }
 
 /// <summary>
@@ -260,6 +266,12 @@ public sealed class GenericProtocolSettings
 
     /// <summary>Jeda antar perintah (ms).</summary>
     public int CommandDelayMs { get; set; }
+
+    /// <summary>Perintah start print. Kosong = tombol Start Print tidak tersedia.</summary>
+    public string StartCommand { get; set; } = "";
+
+    /// <summary>Perintah stop print. Kosong = tombol Stop Print tidak tersedia.</summary>
+    public string StopCommand { get; set; } = "";
 }
 
 /// <summary>Laporan ke server setiap printer selesai mencetak.</summary>

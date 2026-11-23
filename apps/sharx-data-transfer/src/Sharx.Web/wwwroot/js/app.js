@@ -275,6 +275,20 @@
     $("#printerEndpoint").textContent =
       `${s.printerEndpoint} · ${s.printerProtocol}`;
     $("#printerMsg").textContent = s.printerMessage || "";
+    const printState = $("#printState");
+    const printText = {
+      Started: ["Started", "ok"],
+      NotStarted: ["Belum start", "wait"],
+      Unknown: ["-", ""],
+    }[s.printState] || ["-", ""];
+    printState.textContent = s.waitingForPrinter
+      ? `${printText[0]} — menunggu (${s.waitingRecords || 1} data)`
+      : printText[0];
+    printState.className = s.waitingForPrinter ? "wait" : printText[1];
+    $("#btnPrintStart").disabled =
+      !s.canControlPrint || s.printer === "Disabled";
+    $("#btnPrintStop").disabled =
+      !s.canControlPrint || s.printer === "Disabled";
     const job = s.job;
     $("#jobNext").textContent = job?.nextCounter || "-";
     const queue = [];
@@ -309,6 +323,7 @@
     const failed =
       record.status === "Rejected" || record.status === "PrinterError";
     if (failed) tr.className = "row-error";
+    if (record.status === "Waiting") tr.className = "row-wait";
     tr.title = recordTooltip(record);
     tr.innerHTML = `<td></td><td>${esc(timeText(record.time))}</td><td>${esc(record.source)}</td><td>${esc(record.data)}</td>`;
     return tr;
@@ -344,6 +359,7 @@
         Printed: "PRINTED",
         Monitor: "MONITOR",
         Rejected: "DITOLAK",
+        Waiting: "MENUNGGU",
         PrinterError: "GAGAL",
       }[status] || status
     );
@@ -1015,6 +1031,16 @@
       if (e.target.checked) $("#incomingScroll").scrollTop = 0;
     };
     $("#btnResetAll").onclick = () => resetCounter(null);
+    const printControl = async (action) => {
+      try {
+        const r = await api("POST", `/api/printer/${action}`);
+        toast(r.message, !r.ok);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    $("#btnPrintStart").onclick = () => printControl("start");
+    $("#btnPrintStop").onclick = () => printControl("stop");
     $("#btnResetAll2").onclick = () => resetCounter(null);
 
     $("#logDate").onchange = () =>

@@ -50,6 +50,24 @@ public sealed class GenericDriver : IPrinterDriver
         }
     }
 
+    public bool SupportsPrintControl(PrinterSettings printer) =>
+        !string.IsNullOrEmpty(printer.Generic.StartCommand) && !string.IsNullOrEmpty(printer.Generic.StopCommand);
+
+    public Task StartPrintAsync(PrinterCall call) =>
+        string.IsNullOrEmpty(call.Printer.Generic.StartCommand)
+            ? throw new PrinterException("Perintah Start Print belum diisi di Settings")
+            : SendAsync(call, "Start print", Render(call.Printer.Generic.StartCommand, EmptyContext(), []));
+
+    public Task StopPrintAsync(PrinterCall call) =>
+        string.IsNullOrEmpty(call.Printer.Generic.StopCommand)
+            ? throw new PrinterException("Perintah Stop Print belum diisi di Settings")
+            : SendAsync(call, "Stop print", Render(call.Printer.Generic.StopCommand, EmptyContext(), []));
+
+    public Task<bool?> IsPrintStartedAsync(PrinterCall call) => Task.FromResult<bool?>(null);
+
+    private static OutputContext EmptyContext() =>
+        new(new ParsedRecord("", [], new Dictionary<string, string>()), 0, "", "", DateTimeOffset.Now, 0);
+
     public Task<string?> InspectAsync(PrinterSession session, PrinterSettings printer, CancellationToken ct) =>
         Task.FromResult<string?>(null);
 
@@ -113,6 +131,8 @@ public sealed class GenericDriver : IPrinterDriver
 
         Check("change template", g.TemplateCommand, [TemplateNameKey]);
         Check("kosongkan antrean", g.ClearCommand, []);
+        Check("start print", g.StartCommand, []);
+        Check("stop print", g.StopCommand, []);
         Check("perintah per field", g.FieldCommand, [FieldIdKey, FieldNameKey, FieldValueKey]);
         Check("perintah data", g.DataCommand, fieldValueKeys);
         return errors;
