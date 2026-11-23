@@ -37,6 +37,10 @@ public sealed record TemplateCounter
     public long Value { get; init; }
 
     public long Records { get; init; }
+
+    /// <summary>Jumlah digit counter template ini (0 = tanpa zero padding).</summary>
+    public int Width { get; init; }
+
     public string? LastOperator { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
 }

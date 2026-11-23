@@ -76,12 +76,12 @@ public class CounterEngineTests
         Assert.True(engine.CommitJob(decision));
         Assert.Equal(1, engine.NextValue("867892", s));
 
-        Assert.True(engine.CommitPrint("867892", "ANANDA02", 1, engine.Epoch));
+        Assert.True(engine.CommitPrint("867892", "ANANDA02", 1, 3, engine.Epoch));
         Assert.Equal(2, engine.NextValue("867892", s));
 
         var staleEpoch = engine.Epoch;
         engine.Reset(null);
-        Assert.False(engine.CommitPrint("867892", "ANANDA02", 2, staleEpoch));
+        Assert.False(engine.CommitPrint("867892", "ANANDA02", 2, 3, staleEpoch));
         Assert.Null(engine.NextValue("867892", s));
     }
 
@@ -102,6 +102,21 @@ public class CounterEngineTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void Counter_digits_follow_the_server_counter_when_not_fixed()
+    {
+        var engine = new CounterEngine(null, new ManualTime(Morning));
+        var s = new CounterSettings(); // Digits = 0: ikuti server
+
+        Assert.Equal("00006", Use(engine, "SITI AMINAH,TPL-A1,00005", s));
+        Assert.Equal("1", Use(engine, "BUDI,X9,0", s));
+        Assert.Equal("101", Use(engine, "BUDI,Y7,100", s));
+        Assert.Equal("00007", Use(engine, "ANA,TPL-A1,", s)); // tanpa counter server: pakai digit tersimpan
+
+        var fixedDigits = new CounterEngine(null, new ManualTime(Morning));
+        Assert.Equal("0006", Use(fixedDigits, "SITI,TPL-A1,00005", new CounterSettings { Digits = 4 }));
     }
 
     [Fact]

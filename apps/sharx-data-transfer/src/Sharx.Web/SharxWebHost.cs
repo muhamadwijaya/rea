@@ -251,7 +251,7 @@ public static class SharxWebHost
             state.BusinessDate,
             state.ActiveTemplate,
             state.ActiveOperator,
-            ActiveValue = active is null ? null : CounterEngine.Format(active.Value, digits),
+            ActiveValue = active is null ? null : CounterEngine.Format(active.Value, active.Width > 0 ? active.Width : digits),
             PersistError = service.Counter.LastPersistError,
             Templates = state.Templates
                 .OrderByDescending(kv => kv.Value.UpdatedAt)
@@ -259,7 +259,7 @@ public static class SharxWebHost
                 {
                     Template = kv.Key,
                     kv.Value.Value,
-                    Text = CounterEngine.Format(kv.Value.Value, digits),
+                    Text = CounterEngine.Format(kv.Value.Value, kv.Value.Width > 0 ? kv.Value.Width : digits),
                     kv.Value.Records,
                     kv.Value.LastOperator,
                     kv.Value.UpdatedAt,

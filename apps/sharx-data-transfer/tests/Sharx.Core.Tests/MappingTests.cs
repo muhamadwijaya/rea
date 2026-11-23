@@ -19,6 +19,19 @@ public class MappingTests
         Assert.Equal("000", result.Record.ServerCounter);
     }
 
+    [Theory]
+    [InlineData("ANANDA02,867892,000", "ANANDA02", "867892", "000")]
+    [InlineData("SITI AMINAH,TPL-A1/2026,00015", "SITI AMINAH", "TPL-A1/2026", "00015")]
+    [InlineData("B,7,1", "B", "7", "1")]
+    [InlineData(" OPR_99 , 1234567890ABC , 42 ", "OPR_99", "1234567890ABC", "42")]
+    public void Delimited_fields_have_no_fixed_length(string raw, string op, string template, string counter)
+    {
+        var result = RecordParser.Parse(raw, new MappingSettings());
+
+        Assert.True(result.Ok);
+        Assert.Equal((op, template, counter), (result.Record.Operator, result.Record.Template, result.Record.ServerCounter));
+    }
+
     [Fact]
     public void Positions_can_be_rearranged()
     {
@@ -114,6 +127,19 @@ public class MappingTests
         }
 
         Assert.Equal(expected, frames);
+    }
+
+    [Fact]
+    public void Frame_decoder_flushes_record_sent_without_terminator()
+    {
+        var decoder = new FrameDecoder(new ServerSettings());
+        Assert.Empty(decoder.Push(Encoding.UTF8.GetBytes("ANANDA02,78787900,000")));
+        Assert.True(decoder.HasPending);
+
+        var frame = decoder.Flush();
+        Assert.Equal("ANANDA02,78787900,000", Encoding.UTF8.GetString(frame!.Value.Data));
+        Assert.False(decoder.HasPending);
+        Assert.Null(decoder.Flush());
     }
 
     [Fact]

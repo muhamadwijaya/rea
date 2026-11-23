@@ -34,6 +34,23 @@ public sealed class FrameDecoder
         }
     }
 
+    /// <summary>Ada byte yang sudah diterima tetapi belum menjadi record (menunggu terminator).</summary>
+    public bool HasPending => !_discarding && _buffer.Count > 0 && (_mode != FrameMode.StxEtx || _insideFrame);
+
+    /// <summary>Jadikan byte yang menunggu terminator sebagai satu record (dipakai setelah jeda tanpa data).</summary>
+    public Frame? Flush()
+    {
+        if (!HasPending)
+        {
+            return null;
+        }
+
+        var frame = new Frame([.. _buffer], Truncated: false);
+        _buffer.Clear();
+        _insideFrame = false;
+        return frame;
+    }
+
     public IReadOnlyList<Frame> Push(ReadOnlySpan<byte> data)
     {
         var frames = new List<Frame>();

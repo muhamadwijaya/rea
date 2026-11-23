@@ -269,7 +269,7 @@ public sealed partial class TransferService : IAsyncDisposable
     public void SetCounter(string template, long value)
     {
         _counter.SetValue(template, value, _settings.Counter);
-        _log.Write(LogStatus.Ok, $"Counter template {template} diubah manual menjadi {CounterEngine.Format(value, _settings.Counter.Digits)}");
+        _log.Write(LogStatus.Ok, $"Counter template {template} diubah manual menjadi {CounterEngine.Format(value, Math.Max(_counter.StoredWidth(template), _settings.Counter.Digits))}");
         Enqueue(new ResyncItem("counter diubah manual"));
     }
 
@@ -407,11 +407,43 @@ public sealed partial class TransferService : IAsyncDisposable
         var decoder = new FrameDecoder(server);
         var buffer = new byte[8192];
         var writer = _work!.Writer;
+        var idle = TimeSpan.FromMilliseconds(server.IdleFlushMs);
+        var idleNoticeLogged = false;
+        Task<int>? read = null;
         while (true)
         {
-            var n = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+            read ??= stream.ReadAsync(buffer, ct).AsTask();
+            if (server.IdleFlushMs > 0 && decoder.HasPending)
+            {
+                // Server tidak mengirim terminator: setelah jeda tanpa data, proses yang sudah ada.
+                var completed = await Task.WhenAny(read, Task.Delay(idle, _time, ct)).ConfigureAwait(false);
+                if (completed != read)
+                {
+                    if (decoder.Flush() is { } pending)
+                    {
+                        if (!idleNoticeLogged)
+                        {
+                            idleNoticeLogged = true;
+                            _log.Write(LogStatus.Info,
+                                $"Data dari server tanpa terminator ({DescribeFraming(server)}); diproses setelah jeda {server.IdleFlushMs} ms");
+                        }
+
+                        await writer.WriteAsync(new ServerFrameItem(pending), ct).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+            }
+
+            var n = await read.ConfigureAwait(false);
+            read = null;
             if (n == 0)
             {
+                if (decoder.Flush() is { } last)
+                {
+                    await writer.WriteAsync(new ServerFrameItem(last), ct).ConfigureAwait(false);
+                }
+
                 return;
             }
 
@@ -422,6 +454,15 @@ public sealed partial class TransferService : IAsyncDisposable
             }
         }
     }
+
+    private static string DescribeFraming(ServerSettings server) => server.Framing switch
+    {
+        FrameMode.Line => "CR/LF",
+        FrameMode.Etx => "ETX",
+        FrameMode.StxEtx => "STX..ETX",
+        FrameMode.Custom => ControlTokens.Visualize(ControlTokens.Decode(server.CustomTerminator)),
+        _ => server.Framing.ToString(),
+    };
 
     // ------------------------------------------------------------------ background
 

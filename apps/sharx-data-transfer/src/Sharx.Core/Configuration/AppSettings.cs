@@ -37,6 +37,12 @@ public sealed class ServerSettings
     public int ReconnectDelaySeconds { get; set; } = 3;
     public int ConnectTimeoutSeconds { get; set; } = 5;
     public int MaxFrameBytes { get; set; } = 65536;
+
+    /// <summary>
+    /// Data yang belum diakhiri terminator diproses sebagai satu record setelah tidak ada data baru
+    /// selama N ms (untuk server yang mengirim tanpa CR/LF). 0 = nonaktif.
+    /// </summary>
+    public int IdleFlushMs { get; set; } = 300;
 }
 
 /// <summary>Cara data dari server dipecah menjadi field.</summary>
@@ -120,8 +126,11 @@ public sealed class CounterSettings
 
     public long Step { get; set; } = 1;
 
-    /// <summary>Jumlah digit counter (zero padding). 3 =&gt; 001.</summary>
-    public int Digits { get; set; } = 3;
+    /// <summary>
+    /// Jumlah digit counter (zero padding), mis. 3 =&gt; 001.
+    /// 0 = ikuti panjang counter dari server (000 =&gt; 001, 00000 =&gt; 00001).
+    /// </summary>
+    public int Digits { get; set; }
 
     /// <summary>
     /// Untuk template yang belum punya counter hari ini, pakai nilai counter dari server sebagai nilai awal.

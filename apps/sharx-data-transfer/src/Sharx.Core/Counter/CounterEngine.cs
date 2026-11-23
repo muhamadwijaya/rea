@@ -18,6 +18,10 @@ public sealed record CounterDecision
     public required long Value { get; init; }
 
     public required string Text { get; init; }
+
+    /// <summary>Jumlah digit counter (0 = tanpa zero padding).</summary>
+    public required int Width { get; init; }
+
     public required bool TemplateChanged { get; init; }
     public required bool OperatorChanged { get; init; }
     public required bool DayRolled { get; init; }
@@ -104,10 +108,34 @@ public sealed class CounterEngine
             ? t
             : TimeSpan.Zero;
 
-    public static string Format(long value, int digits) =>
-        value < 0
+    public static string Format(long value, int width) =>
+        value < 0 || width <= 0
             ? value.ToString(CultureInfo.InvariantCulture)
-            : value.ToString("D" + Math.Clamp(digits, 1, 18), CultureInfo.InvariantCulture);
+            : value.ToString("D" + Math.Min(width, 18), CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Jumlah digit counter: dari Settings, atau (Digits = 0) mengikuti panjang counter yang dikirim server
+    /// sehingga panjang/karakter data boleh berubah-ubah. 0 = tidak diketahui.
+    /// </summary>
+    public static int WidthFor(CounterSettings settings, string? serverCounter)
+    {
+        if (settings.Digits > 0)
+        {
+            return settings.Digits;
+        }
+
+        var text = serverCounter?.Trim() ?? "";
+        return text.Length > 0 && text.All(char.IsAsciiDigit) ? Math.Min(text.Length, 18) : 0;
+    }
+
+    /// <summary>Jumlah digit yang terakhir dipakai template ini (0 = belum ada).</summary>
+    public int StoredWidth(string template)
+    {
+        lock (_gate)
+        {
+            return _state.Templates.TryGetValue(template, out var c) ? c.Width : 0;
+        }
+    }
 
     /// <summary>Nilai counter berikutnya setelah <paramref name="last"/>.</summary>
     public static long Next(long last, bool firstUse, CounterSettings settings)
@@ -140,6 +168,12 @@ public sealed class CounterEngine
                 _state.Templates.TryGetValue(template, out existing);
             }
 
+            var width = WidthFor(settings, record.ServerCounter);
+            if (width == 0 && existing is not null)
+            {
+                width = existing.Width;
+            }
+
             long baseValue;
             string why;
             if (existing is null)
@@ -155,10 +189,10 @@ public sealed class CounterEngine
             {
                 baseValue = existing.Value;
                 why = templateChanged
-                    ? $"Template berubah ke {template}: lanjut counter tersimpan {Format(existing.Value, settings.Digits)}"
+                    ? $"Template berubah ke {template}: lanjut counter tersimpan {Format(existing.Value, width)}"
                     : operatorChanged
-                        ? $"Operator berubah, template sama: counter lanjut dari {Format(existing.Value, settings.Digits)}"
-                        : $"Counter lanjut dari {Format(existing.Value, settings.Digits)}";
+                        ? $"Operator berubah, template sama: counter lanjut dari {Format(existing.Value, width)}"
+                        : $"Counter lanjut dari {Format(existing.Value, width)}";
             }
 
             var value = Next(baseValue, existing is null || existing.Records == 0, settings);
@@ -169,7 +203,8 @@ public sealed class CounterEngine
                 BusinessDate = date,
                 BaseValue = baseValue,
                 Value = value,
-                Text = Format(value, settings.Digits),
+                Text = Format(value, width),
+                Width = width,
                 TemplateChanged = templateChanged,
                 OperatorChanged = operatorChanged,
                 DayRolled = dayRolled,
@@ -204,6 +239,7 @@ public sealed class CounterEngine
                 {
                     Value = decision.BaseValue,
                     Records = 0,
+                    Width = decision.Width,
                     LastOperator = decision.Operator,
                     UpdatedAt = _time.GetLocalNow(),
                 };
@@ -238,6 +274,7 @@ public sealed class CounterEngine
             {
                 Value = decision.Value,
                 Records = (previous?.Records ?? 0) + 1,
+                Width = decision.Width,
                 LastOperator = decision.Operator,
                 UpdatedAt = _time.GetLocalNow(),
             };
@@ -255,7 +292,7 @@ public sealed class CounterEngine
     /// Mode counter per cetak: printer melapor <paramref name="value"/> sudah tercetak.
     /// Diabaikan (false) jika counter sudah direset sejak nilai itu dikirim (<paramref name="epoch"/> beda).
     /// </summary>
-    public bool CommitPrint(string template, string op, long value, long epoch)
+    public bool CommitPrint(string template, string op, long value, int width, long epoch)
     {
         lock (_gate)
         {
@@ -269,6 +306,7 @@ public sealed class CounterEngine
             {
                 Value = value,
                 Records = (previous?.Records ?? 0) + 1,
+                Width = width > 0 ? width : previous?.Width ?? 0,
                 LastOperator = op,
                 UpdatedAt = _time.GetLocalNow(),
             };
@@ -360,6 +398,7 @@ public sealed class CounterEngine
             {
                 Value = value,
                 Records = Math.Max(1, previous?.Records ?? 0),
+                Width = previous?.Width ?? settings.Digits,
                 LastOperator = previous?.LastOperator,
                 UpdatedAt = _time.GetLocalNow(),
             };

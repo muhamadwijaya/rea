@@ -174,6 +174,36 @@ public class TransferServiceTests
     }
 
     [Fact]
+    public async Task Records_without_line_terminator_are_processed_after_idle_gap()
+    {
+        // Seperti NetAssist tanpa "Auto Append Bytes": data dikirim tanpa CR/LF.
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var commands = new ConcurrentQueue<string>();
+        var settings = new AppSettings();
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ => new FakeTijLink(commands));
+        var records = new ConcurrentQueue<TransferRecord>();
+        service.RecordProcessed += records.Enqueue;
+        service.Start();
+
+        using var server = await listener.AcceptTcpClientAsync();
+        await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes("ANANDA02,78787900,000"));
+        await WaitUntil(() => records.Count >= 1, "record pertama");
+        await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes("BUDI01,78787900,000"));
+        await WaitUntil(() => records.Count >= 2, "record kedua");
+
+        Assert.Equal(["ANANDA02,78787900,000", "BUDI01,78787900,000"], records.Select(r => r.Data));
+        Assert.Equal("78787900", records.First().Template);
+        await WaitUntil(() => commands.Contains("1D:0=BUDI01;1=001"), "field data operator baru");
+        await service.StopAsync();
+        listener.Stop();
+    }
+
+    [Fact]
     public async Task Rejected_record_is_not_sent_to_printer()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

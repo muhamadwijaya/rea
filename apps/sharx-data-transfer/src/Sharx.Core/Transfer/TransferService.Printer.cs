@@ -18,6 +18,7 @@ public sealed partial class TransferService
         long Counter,
         string CounterText,
         string BusinessDate,
+        int Width,
         long Epoch);
 
     private readonly LinkedList<PendingPrint> _pending = new();
@@ -188,13 +189,20 @@ public sealed partial class TransferService
     private PrinterCall Call(PrinterSession session, AppSettings s, List<SentCommand> trace, CancellationToken ct) =>
         new(session, s, _stats, _log, trace, ct);
 
+    /// <summary>Digit counter untuk record ini (Settings, panjang counter server, atau yang tersimpan).</summary>
+    private int CounterWidth(AppSettings s, ParsedRecord? record)
+    {
+        var width = CounterEngine.WidthFor(s.Counter, record?.ServerCounter);
+        return width > 0 || record is null ? width : _counter.StoredWidth(record.Template);
+    }
+
     private OutputContext ContextFor(AppSettings s, ParsedRecord record, long counter)
     {
         var now = _time.GetLocalNow();
         return new OutputContext(
             record,
             counter,
-            CounterEngine.Format(counter, s.Counter.Digits),
+            CounterEngine.Format(counter, CounterWidth(s, record)),
             CounterEngine.BusinessDateFor(now, s.Counter.DayStartTime),
             now,
             Interlocked.Read(ref _sequence));
@@ -237,7 +245,7 @@ public sealed partial class TransferService
         var context = ContextFor(s, record, counter);
         var fields = PrinterDrivers.RenderFields(s.Printer, context);
         await PrinterDrivers.For(s.Printer).SendFieldsAsync(Call(session, s, trace, ct), fields, context).ConfigureAwait(false);
-        return new PendingPrint(record, counter, context.CounterText, context.BusinessDate, _counter.Epoch);
+        return new PendingPrint(record, counter, context.CounterText, context.BusinessDate, CounterWidth(s, record), _counter.Epoch);
     }
 
     /// <summary>
@@ -304,7 +312,7 @@ public sealed partial class TransferService
         _pending.Clear();
         _pendingCount = 0;
         _nextToSend = nextValue;
-        _nextToSendText = CounterEngine.Format(nextValue, _settings.Counter.Digits);
+        _nextToSendText = CounterEngine.Format(nextValue, CounterWidth(_settings, _job?.Record));
     }
 
     private void AddPending(PendingPrint pending)
@@ -407,9 +415,9 @@ public sealed partial class TransferService
         }
 
         _pendingCount = _pending.Count;
-        _nextToSendText = _pending.First?.Value.CounterText ?? (UsesPrintCounting(s) ? CounterEngine.Format(_nextToSend, s.Counter.Digits) : null);
+        _nextToSendText = _pending.First?.Value.CounterText ?? (UsesPrintCounting(s) ? CounterEngine.Format(_nextToSend, CounterWidth(s, _job?.Record)) : null);
         if (UsesPrintCounting(s) && !repeat
-            && !_counter.CommitPrint(printed.Record.Template, printed.Record.Operator, printed.Counter, printed.Epoch))
+            && !_counter.CommitPrint(printed.Record.Template, printed.Record.Operator, printed.Counter, printed.Width, printed.Epoch))
         {
             _log.Write(LogStatus.Info, $"Counter sudah direset; cetakan {printed.CounterText} tidak menambah counter");
         }

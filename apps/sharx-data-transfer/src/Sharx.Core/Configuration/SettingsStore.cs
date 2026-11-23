@@ -106,6 +106,11 @@ public static partial class SettingsValidator
             errors.Add("Reconnect delay 1-3600 detik dan connect timeout 1-120 detik");
         }
 
+        if (s.Server.IdleFlushMs is < 0 or > 60000)
+        {
+            errors.Add("Jeda proses data tanpa terminator 0-60000 ms");
+        }
+
         if (s.Server.MaxFrameBytes is < 16 or > 1_048_576)
         {
             errors.Add("Panjang maksimum data 16 - 1048576 byte");
@@ -185,9 +190,9 @@ public static partial class SettingsValidator
             errors.Add("Step counter minimal 1");
         }
 
-        if (c.Digits is < 1 or > 18)
+        if (c.Digits is < 0 or > 18)
         {
-            errors.Add("Digit counter 1-18");
+            errors.Add("Digit counter 0-18 (0 = ikuti counter dari server)");
         }
 
         if (c.MaxValue < 0 || (c.MaxValue > 0 && c.MaxValue <= c.StartValue))

@@ -792,6 +792,14 @@
                     data-type="int"
                 /></label>
                 <label
+                  >Proses data tanpa CR/LF setelah jeda (ms, 0 = nonaktif)<input
+                    class="input"
+                    type="number"
+                    min="0"
+                    data-bind="server.idleFlushMs"
+                    data-type="int"
+                /></label>
+                <label
                   >Panjang maks. data (byte)<input
                     class="input"
                     type="number"
@@ -1290,10 +1298,10 @@
                     data-type="int"
                 /></label>
                 <label
-                  >Jumlah digit (zero padding)<input
+                  >Jumlah digit (0 = ikuti counter dari server)<input
                     class="input"
                     type="number"
-                    min="1"
+                    min="0"
                     max="18"
                     data-bind="counter.digits"
                     data-type="int"

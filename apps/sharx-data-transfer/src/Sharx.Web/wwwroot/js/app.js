@@ -251,6 +251,9 @@
       }
     }
     el.dataset.state = key;
+    $("#incomingEmpty").innerHTML = s.running
+      ? "Menunggu data dari server..."
+      : "Belum ada data. Tekan <b>Start Transfer</b> untuk mulai menerima data dari server.";
     $("#connTitle").textContent = title;
     $("#connSub").textContent = sub;
     const idx = s.serverEndpoint.lastIndexOf(":");
