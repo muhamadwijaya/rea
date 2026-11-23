@@ -69,10 +69,10 @@ set "SIM=%~dp0tools\Sharx.Simulator\bin\Release\net8.0\SharxSimulator.exe"
 
 :simulator_start
 start "Simulator Printer TIJ (port 9100)" "%SIM%" printer --port 9100 --messages 867892,555111 --print-interval 2
-start "Simulator Server (port 9000)" "%SIM%" server --port 9000
+start "Simulator MQTT Broker (port 1883)" "%SIM%" broker --port 1883
 echo Simulator berjalan di 2 jendela baru.
-echo Di Settings - Koneksi isi: Server 127.0.0.1 port 9000, Printer 127.0.0.1 port 9100,
-echo simpan, lalu tekan Start Transfer.
+echo Di Settings - Koneksi isi: MQTT broker 127.0.0.1 port 1883 (topic sharx/job, feedback sharx/printed),
+echo Printer 127.0.0.1 port 9100, simpan, lalu tekan Start Transfer.
 exit /b 0
 
 rem --------------------------------------------------------------- publish

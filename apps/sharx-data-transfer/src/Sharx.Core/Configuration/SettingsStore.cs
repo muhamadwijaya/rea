@@ -41,6 +41,12 @@ public sealed class SettingsStore
     public static void Normalize(AppSettings s)
     {
         s.Server ??= new ServerSettings();
+        s.Server.Mqtt ??= new MqttSettings();
+        s.Server.Mqtt.ClientId ??= "";
+        s.Server.Mqtt.Username ??= "";
+        s.Server.Mqtt.Password ??= "";
+        s.Server.Mqtt.SubscribeTopic ??= "";
+        s.Server.Mqtt.PublishTopic ??= "";
         s.Mapping ??= new MappingSettings();
         s.Counter ??= new CounterSettings();
         s.Printer ??= new PrinterSettings();
@@ -93,6 +99,11 @@ public static partial class SettingsValidator
             errors.Add("Port server harus 1-65535");
         }
 
+        if (s.Server.Protocol == ServerProtocol.Mqtt)
+        {
+            ValidateMqtt(s.Server.Mqtt, errors);
+        }
+
         if (s.Server.Framing == FrameMode.Custom && ControlTokens.Decode(s.Server.CustomTerminator ?? "").Length == 0)
         {
             errors.Add("Terminator custom wajib diisi");
@@ -128,6 +139,34 @@ public static partial class SettingsValidator
         }
 
         return errors;
+    }
+
+    private static void ValidateMqtt(MqttSettings m, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(m.ClientId) || m.ClientId.Length > 128)
+        {
+            errors.Add("MQTT Client ID wajib diisi (maks. 128 karakter)");
+        }
+
+        if (string.IsNullOrWhiteSpace(m.SubscribeTopic))
+        {
+            errors.Add("MQTT topic data masuk (subscribe) wajib diisi");
+        }
+
+        if (string.IsNullOrWhiteSpace(m.PublishTopic) || m.PublishTopic.Contains('+') || m.PublishTopic.Contains('#'))
+        {
+            errors.Add("MQTT topic feedback (publish) wajib diisi dan tidak boleh memakai + atau #");
+        }
+
+        if (m.Qos is < 0 or > 2)
+        {
+            errors.Add("MQTT QoS harus 0, 1 atau 2");
+        }
+
+        if (m.KeepAliveSeconds is < 5 or > 3600)
+        {
+            errors.Add("MQTT keep alive 5-3600 detik");
+        }
     }
 
     private static void ValidateMapping(MappingSettings m, List<string> errors)

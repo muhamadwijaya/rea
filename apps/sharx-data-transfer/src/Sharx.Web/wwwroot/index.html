@@ -493,33 +493,33 @@
                   <div class="info-label">Template CIJ</div>
                   <div class="js-value" id="jobTemplate">-</div>
                 </div>
-                <div class="js-item">
+                <div class="js-item js-item-counter">
                   <div class="info-label">Counter terakhir</div>
                   <div class="js-counter" id="jobCounter">-</div>
                 </div>
                 <div class="js-item">
-                  <div class="info-label">Berikutnya dicetak</div>
+                  <div class="info-label">Berikutnya</div>
                   <div class="js-value mono" id="jobNext">-</div>
-                  <div class="js-note" id="jobQueue"></div>
                 </div>
                 <div class="js-divider"></div>
                 <div class="js-printer">
-                  <div class="js-printer-head">
+                  <div class="js-row">
                     <svg class="js-printer-icon"><use href="#i-printer" /></svg>
                     <span class="js-printer-name" id="printerEndpoint">-</span>
                     <span class="pill" id="printerPill">-</span>
                   </div>
-                  <div class="print-state">
-                    <span class="info-label">Status print</span>
+                  <div class="js-row">
+                    <span class="info-label">Print</span>
                     <b id="printState">-</b>
-                  </div>
-                  <div class="js-buttons">
-                    <button class="btn btn-sm btn-primary" id="btnPrintStart">
-                      <svg><use href="#i-play" /></svg>Start Print
-                    </button>
-                    <button class="btn btn-sm btn-danger" id="btnPrintStop">
-                      <svg><use href="#i-stop" /></svg>Stop Print
-                    </button>
+                    <span class="js-note" id="jobQueue"></span>
+                    <span class="js-buttons">
+                      <button class="btn btn-sm btn-primary" id="btnPrintStart">
+                        <svg><use href="#i-play" /></svg>Start Print
+                      </button>
+                      <button class="btn btn-sm btn-danger" id="btnPrintStop">
+                        <svg><use href="#i-stop" /></svg>Stop Print
+                      </button>
+                    </span>
                   </div>
                   <div class="printer-msg" id="printerMsg"></div>
                 </div>
@@ -568,48 +568,54 @@
               </div>
             </div>
 
-            <div class="card card-log">
-              <div class="card-head">
-                <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
-                <h2>Transfer Log</h2>
-              </div>
-              <div class="log-box">
-                <div class="log-scroll" id="logBox"></div>
-              </div>
-            </div>
-
-            <div class="card card-counters">
-              <div class="card-head">
-                <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
-                <h2>Counter per Template</h2>
-                <span class="head-note" id="jobDate">-</span>
-                <div class="mini-stats">
-                  <span>Data <b id="statRecords">0</b></span>
-                  <span>Dikirim <b id="statForwarded">0</b></span>
-                  <span>Tercetak <b id="statPrinted">0</b></span>
-                  <span>Gagal <b id="statFailed">0</b></span>
+            <div class="bottom-row">
+              <div class="card card-log">
+                <div class="card-head">
+                  <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
+                  <h2>Transfer Log</h2>
+                  <div class="mini-stats">
+                    <span>Data <b id="statRecords">0</b></span>
+                    <span>Dikirim <b id="statForwarded">0</b></span>
+                    <span>Tercetak <b id="statPrinted">0</b></span>
+                    <span>Gagal <b id="statFailed">0</b></span>
+                  </div>
                 </div>
-                <button class="btn btn-danger btn-sm" id="btnResetAll">
-                  <svg><use href="#i-reset" /></svg>Reset Counter
-                </button>
+                <div class="log-box">
+                  <div class="log-scroll" id="logBox"></div>
+                </div>
               </div>
-              <div class="table-wrap">
-                <div class="table-scroll short">
-                  <table class="data-table compact">
-                    <thead>
-                      <tr>
-                        <th>Template</th>
-                        <th>Counter</th>
-                        <th>Jumlah Cetak</th>
-                        <th>Operator Terakhir</th>
-                        <th>Update</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody id="counterBody"></tbody>
-                  </table>
-                  <div class="empty-hint" id="counterEmpty">
-                    Belum ada counter tersimpan untuk hari ini.
+
+              <div class="card card-counters">
+                <div class="card-head">
+                  <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
+                  <h2>Counter per Template</h2>
+                  <span class="head-note" id="jobDate">-</span>
+                  <button class="btn btn-danger btn-sm" id="btnResetAll">
+                    <svg><use href="#i-reset" /></svg>Reset Counter
+                  </button>
+                </div>
+                <div class="table-wrap">
+                  <div class="table-scroll">
+                    <table class="data-table compact">
+                      <colgroup>
+                        <col />
+                        <col style="width: 22%" />
+                        <col style="width: 17%" />
+                        <col style="width: 76px" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>Template</th>
+                          <th>Counter</th>
+                          <th>Cetak</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="counterBody"></tbody>
+                    </table>
+                    <div class="empty-hint" id="counterEmpty">
+                      Belum ada counter hari ini.
+                    </div>
                   </div>
                 </div>
               </div>
@@ -684,14 +690,25 @@
                 <svg class="head-icon icon-green">
                   <use href="#i-antenna" />
                 </svg>
-                <h2>Koneksi ke Server</h2>
+                <h2>Koneksi ke Server / MQTT Broker</h2>
               </div>
               <div class="form-grid">
                 <label
-                  >Server IP<input class="input" data-bind="server.host"
+                  >Koneksi server
+                  <select class="input" data-bind="server.protocol">
+                    <option value="Mqtt">MQTT broker</option>
+                    <option value="Tcp">TCP langsung (IP + port)</option>
+                  </select>
+                </label>
+                <label
+                  >Server / broker IP<input
+                    class="input"
+                    data-bind="server.host"
                 /></label>
                 <label
-                  >Port<input
+                  ><span
+                    >Port <span class="muted">(MQTT umumnya 1883)</span></span
+                  ><input
                     class="input"
                     type="number"
                     min="1"
@@ -699,22 +716,101 @@
                     data-bind="server.port"
                     data-type="int"
                 /></label>
-                <label
-                  >Pemisah record (framing)
-                  <select class="input" data-bind="server.framing">
-                    <option value="Line">Per baris (CR / LF / CRLF)</option>
-                    <option value="Etx">Diakhiri ETX</option>
-                    <option value="StxEtx">Dibungkus STX ... ETX</option>
-                    <option value="Custom">Terminator custom</option>
-                    <option value="Packet">Setiap paket TCP</option>
-                  </select>
-                </label>
-                <label data-show="server.framing=Custom"
-                  >Terminator custom<input
-                    class="input mono"
-                    data-bind="server.customTerminator"
-                    placeholder="&lt;CR&gt;&lt;LF&gt;"
-                /></label>
+                <div class="show-group" data-show="server.protocol=Mqtt">
+                  <label
+                    >Topic data masuk (subscribe)<input
+                      class="input mono"
+                      data-bind="server.mqtt.subscribeTopic"
+                      placeholder="sharx/job"
+                  /></label>
+                  <label
+                    >Topic feedback cetak (publish)<input
+                      class="input mono"
+                      data-bind="server.mqtt.publishTopic"
+                      placeholder="sharx/printed"
+                  /></label>
+                  <label
+                    >Client ID<input
+                      class="input"
+                      data-bind="server.mqtt.clientId"
+                  /></label>
+                  <label
+                    >Username<input
+                      class="input"
+                      autocomplete="off"
+                      data-bind="server.mqtt.username"
+                  /></label>
+                  <label
+                    >Password<input
+                      class="input"
+                      type="password"
+                      autocomplete="new-password"
+                      data-bind="server.mqtt.password"
+                  /></label>
+                  <label
+                    >QoS
+                    <select
+                      class="input"
+                      data-bind="server.mqtt.qos"
+                      data-type="int"
+                    >
+                      <option value="0">0 - at most once</option>
+                      <option value="1">1 - at least once</option>
+                      <option value="2">2 - exactly once</option>
+                    </select>
+                  </label>
+                  <label
+                    >Keep alive (detik)<input
+                      class="input"
+                      type="number"
+                      min="5"
+                      data-bind="server.mqtt.keepAliveSeconds"
+                      data-type="int"
+                  /></label>
+                  <label class="check"
+                    ><input type="checkbox" data-bind="server.mqtt.useTls" />TLS
+                    (mqtts)</label
+                  >
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="server.mqtt.cleanSession"
+                    />Clean session</label
+                  >
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="server.mqtt.retain"
+                    />Retain pesan feedback</label
+                  >
+                </div>
+                <div class="show-group" data-show="server.protocol=Tcp">
+                  <label
+                    >Pemisah record (framing)
+                    <select class="input" data-bind="server.framing">
+                      <option value="Line">Per baris (CR / LF / CRLF)</option>
+                      <option value="Etx">Diakhiri ETX</option>
+                      <option value="StxEtx">Dibungkus STX ... ETX</option>
+                      <option value="Custom">Terminator custom</option>
+                      <option value="Packet">Setiap paket TCP</option>
+                    </select>
+                  </label>
+                  <label data-show="server.framing=Custom"
+                    >Terminator custom<input
+                      class="input mono"
+                      data-bind="server.customTerminator"
+                      placeholder="&lt;CR&gt;&lt;LF&gt;"
+                  /></label>
+                  <label
+                    >Proses data tanpa CR/LF setelah jeda (ms, 0 =
+                    nonaktif)<input
+                      class="input"
+                      type="number"
+                      min="0"
+                      data-bind="server.idleFlushMs"
+                      data-type="int"
+                  /></label>
+                </div>
                 <label
                   >Encoding<select
                     class="input"
@@ -736,14 +832,6 @@
                     type="number"
                     min="1"
                     data-bind="server.reconnectDelaySeconds"
-                    data-type="int"
-                /></label>
-                <label
-                  >Proses data tanpa CR/LF setelah jeda (ms, 0 = nonaktif)<input
-                    class="input"
-                    type="number"
-                    min="0"
-                    data-bind="server.idleFlushMs"
                     data-type="int"
                 /></label>
                 <label

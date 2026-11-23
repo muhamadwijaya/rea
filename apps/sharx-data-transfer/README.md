@@ -1,18 +1,32 @@
 # SHARX Data Transfer
 
 Aplikasi C# (.NET 8) dengan UI web (HTML/CSS/JS) yang menjadi jembatan data
-**server → printer CIJ/TIJ → server**. Server dan printer sama-sama dihubungi lewat **IP + port**.
+**server (MQTT broker) → printer CIJ/TIJ → server**.
 
-1. Menerima data dari server (TCP), contoh `ANANDA02,867892,000`.
+1. Menerima data job dari server lewat **MQTT broker** (subscribe topic, default `sharx/job`),
+   contoh payload `ANANDA02,867892,000`. Mode TCP langsung (IP + port) tetap tersedia.
 2. Memecah data sesuai **Flow Mapping** (posisi field bisa diatur): nama operator,
    nama template, counter, dan field custom.
 3. Menghitung **counter per template** (aturan di bawah).
-4. Mengirim ke printer:
+4. Mengirim ke printer (IP + port):
    - **Change template**: memanggil template yang sudah dibuat dan disimpan di printer,
      memakai nama template dari server.
    - **Field data**: **field 0 = nama operator**, **field 1 = counter** (bisa ditambah / diubah).
-5. Setiap printer melapor **selesai cetak**, aplikasi mengirim ke server data yang tercetak:
-   `operator,template,counter` (format bisa diubah).
+5. Setiap printer melapor **selesai cetak**, aplikasi mem-publish ke server (topic feedback,
+   default `sharx/printed`) data yang tercetak: `operator,template,counter` (format bisa diubah).
+
+## MQTT
+
+Diatur di **Settings → Koneksi**: IP + port broker (umumnya 1883), topic data masuk (subscribe,
+boleh wildcard `+`/`#`), topic feedback (publish), Client ID (harus unik per komputer), username /
+password, QoS 0/1/2, TLS, keep alive, clean session, retain.
+
+- Satu pesan MQTT = satu data job (beberapa baris dalam satu pesan = beberapa data). Tidak perlu CR/LF.
+- Feedback dikirim satu pesan per cetakan; akhiran `<CR><LF>` di format feedback tidak ikut dikirim.
+- Jika broker terputus, aplikasi menyambung ulang otomatis dan feedback yang tertunda dikirim
+  setelah tersambung. Data job berikutnya ditahan di broker (QoS 1/2) jika printer lebih lambat.
+- **Test Koneksi Server** mencoba login ke broker.
+- Password MQTT disimpan di `data\settings.json` di komputer ini.
 
 ## Menjalankan: `run.bat`
 
@@ -89,7 +103,8 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
 
 ## Halaman
 
-- **Dashboard** (satu layar untuk operator): status koneksi, statistik (Received = byte dari server,
+- **Dashboard** (satu layar untuk operator, tanpa scroll; ukuran menyesuaikan tinggi jendela
+  1280×720 sampai 1920×1280): status koneksi, statistik (Received = byte dari server,
   Sent = byte ke printer + feedback ke server), job aktif (operator, template, counter terakhir &
   berikutnya), status printer + tombol **Start Print / Stop Print**, Incoming Data (Source `Server` =
   data masuk, `Printer` = feedback cetak; kolom Counter & Status), Transfer Log, Counter per Template
@@ -125,9 +140,10 @@ Semua tampilan live dan Log History hanya menampilkan **50 baris terakhir** agar
 ## Uji tanpa mesin
 
 `run.bat simulator` membuka simulator printer TIJ (port 9100, template `867892`, `555111`,
-mencetak tiap 2 detik) dan simulator server (port 9000, mengirim beberapa job). Di
-**Settings → Koneksi** isi server `127.0.0.1:9000` dan printer `127.0.0.1:9100`, simpan,
-lalu **Start Transfer**.
+mencetak tiap 2 detik) dan **MQTT broker** kecil (port 1883) yang mengirim beberapa job ke
+`sharx/job` dan menampilkan feedback dari `sharx/printed`. Di **Settings → Koneksi** isi broker
+`127.0.0.1:1883` dan printer `127.0.0.1:9100`, simpan, lalu **Start Transfer**.
+(Simulator server TCP: `SharxSimulator server --port 9000`.)
 
 ## Printer belum start
 
@@ -163,3 +179,4 @@ tests/Sharx.Core.Tests  xUnit (termasuk contoh checksum dari dokumen protokol)
 
 UI hanya bisa diakses dari komputer yang sama (127.0.0.1) kecuali memakai `--allow-remote`.
 Font Roboto Condensed & Roboto Mono berlisensi SIL Open Font License (lihat `wwwroot/fonts`).
+Library pihak ketiga: MQTTnet (MIT), Microsoft Edge WebView2 SDK, System.IO.Ports (MIT).

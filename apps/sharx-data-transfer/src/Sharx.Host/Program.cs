@@ -41,7 +41,15 @@ catch (AlreadyRunningException ex)
     return 2;
 }
 
-await app.StartAsync();
+try
+{
+    await app.StartAsync();
+}
+catch (IOException ex) when (ex.InnerException is Microsoft.AspNetCore.Connections.AddressInUseException)
+{
+    Console.Error.WriteLine($"Port {options.Port} sudah dipakai program lain. Jalankan dengan --port <nomor lain>.");
+    return 3;
+}
 var url = SharxWebHost.ListeningAddress(app);
 Console.WriteLine($"SHARX Data Transfer v{SharxWebHost.Version}");
 Console.WriteLine($"UI   : {url}");

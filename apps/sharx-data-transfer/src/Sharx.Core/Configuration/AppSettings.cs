@@ -26,10 +26,26 @@ public enum FrameMode
     Packet,
 }
 
+/// <summary>Cara software terhubung ke server.</summary>
+public enum ServerProtocol
+{
+    /// <summary>MQTT broker: data job dari topic subscribe, feedback ke topic publish.</summary>
+    Mqtt,
+    /// <summary>TCP langsung ke server (IP + port).</summary>
+    Tcp,
+}
+
 public sealed class ServerSettings
 {
+    public ServerProtocol Protocol { get; set; } = ServerProtocol.Mqtt;
+
+    /// <summary>IP / host server (mode TCP) atau MQTT broker.</summary>
     public string Host { get; set; } = "192.168.1.100";
-    public int Port { get; set; } = 8080;
+
+    public int Port { get; set; } = 1883;
+
+    public MqttSettings Mqtt { get; set; } = new();
+
     public FrameMode Framing { get; set; } = FrameMode.Line;
     public string CustomTerminator { get; set; } = "<CR><LF>";
     public string Encoding { get; set; } = "utf-8";
@@ -43,6 +59,31 @@ public sealed class ServerSettings
     /// selama N ms (untuk server yang mengirim tanpa CR/LF). 0 = nonaktif.
     /// </summary>
     public int IdleFlushMs { get; set; } = 300;
+}
+
+public sealed class MqttSettings
+{
+    /// <summary>Client ID unik per komputer (broker menolak dua client dengan ID sama).</summary>
+    public string ClientId { get; set; } = "sharx-" + Environment.MachineName.ToLowerInvariant();
+
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+
+    /// <summary>Topic data job dari server (boleh wildcard + / #).</summary>
+    public string SubscribeTopic { get; set; } = "sharx/job";
+
+    /// <summary>Topic untuk feedback setelah printer selesai cetak.</summary>
+    public string PublishTopic { get; set; } = "sharx/printed";
+
+    /// <summary>QoS 0, 1 atau 2.</summary>
+    public int Qos { get; set; } = 1;
+
+    public bool UseTls { get; set; }
+    public int KeepAliveSeconds { get; set; } = 30;
+    public bool CleanSession { get; set; } = true;
+
+    /// <summary>Retain flag untuk pesan feedback.</summary>
+    public bool Retain { get; set; }
 }
 
 /// <summary>Cara data dari server dipecah menjadi field.</summary>

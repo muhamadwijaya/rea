@@ -126,6 +126,7 @@ public class TransferServiceTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         settings.Printer.Host = "127.0.0.1";
 
         var time = TimeProvider.System;
@@ -208,6 +209,7 @@ public class TransferServiceTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
             new TransferLog(null, time), new TransferStats(), time, _ => new FakeTijLink(commands));
@@ -237,6 +239,7 @@ public class TransferServiceTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
             new TransferLog(null, time), new TransferStats(), time, _ => new FakeTijLink(commands));
@@ -306,6 +309,7 @@ public class GenericProtocolTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         settings.Printer.Protocol = PrinterProtocol.Generic;
         settings.Printer.Generic = new GenericProtocolSettings
         {
@@ -370,6 +374,7 @@ public class PrintNotStartedTests
             var settings = new AppSettings();
             settings.Server.Host = "127.0.0.1";
             settings.Server.Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            settings.Server.Protocol = ServerProtocol.Tcp;
             settings.Printer.AutoStartPrint = autoStart;
             settings.Printer.ReadyPollSeconds = 1;
             var time = TimeProvider.System;
@@ -467,6 +472,7 @@ public class RobustnessTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         settings.Counter.IncrementOn = CounterIncrement.Record;
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
@@ -501,6 +507,7 @@ public class RobustnessTests
         var settings = new AppSettings();
         settings.Server.Host = "127.0.0.1";
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
         settings.Server.ReconnectDelaySeconds = 1;
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
@@ -560,5 +567,97 @@ public class RobustnessTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+}
+
+public class MqttServerTests
+{
+    private static int FreePort()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
+    private static async Task WaitUntil(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Menunggu: {what}");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
+    [Fact]
+    public async Task Jobs_arrive_from_mqtt_topic_and_print_feedback_is_published()
+    {
+        var port = FreePort();
+        var factory = new MQTTnet.MqttFactory();
+        using var broker = factory.CreateMqttServer(new MQTTnet.Server.MqttServerOptionsBuilder()
+            .WithDefaultEndpoint()
+            .WithDefaultEndpointPort(port)
+            .WithDefaultEndpointBoundIPAddress(IPAddress.Loopback)
+            .WithDefaultEndpointBoundIPV6Address(IPAddress.None)
+            .Build());
+        var feedback = new ConcurrentQueue<string>();
+        broker.InterceptingPublishAsync += e =>
+        {
+            if (e.ApplicationMessage.Topic == "pabrik/line1/printed")
+            {
+                feedback.Enqueue(Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment));
+            }
+
+            return Task.CompletedTask;
+        };
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        broker.InterceptingSubscriptionAsync += _ =>
+        {
+            subscribed.TrySetResult();
+            return Task.CompletedTask;
+        };
+        await broker.StartAsync();
+
+        var commands = new ConcurrentQueue<string>();
+        FakeTijLink? printer = null;
+        var settings = new AppSettings();
+        settings.Server.Protocol = ServerProtocol.Mqtt;
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = port;
+        settings.Server.Mqtt.SubscribeTopic = "pabrik/line1/job";
+        settings.Server.Mqtt.PublishTopic = "pabrik/line1/printed";
+        Assert.Empty(SettingsValidator.Validate(settings));
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ => printer = new FakeTijLink(commands));
+        service.Start();
+        await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await WaitUntil(() => service.Status.Server == ServerState.Connected, "terhubung ke broker");
+
+        async Task PublishJob(string payload) =>
+            await broker.InjectApplicationMessage(new MQTTnet.Server.InjectedMqttApplicationMessage(
+                new MQTTnet.MqttApplicationMessageBuilder().WithTopic("pabrik/line1/job").WithPayload(payload).Build())
+            {
+                SenderClientId = "server",
+            });
+
+        await PublishJob("ANANDA02,867892,000");
+        await WaitUntil(() => commands.Contains("1D:0=ANANDA02;1=001"), "job dari MQTT terkirim ke printer");
+        printer!.Print();
+        await WaitUntil(() => !feedback.IsEmpty, "feedback dipublish");
+        Assert.Equal("ANANDA02,867892,001", feedback.Single()); // tanpa CR/LF
+
+        // Operator ganti lewat MQTT: counter lanjut.
+        await PublishJob("BUDI01,867892,000");
+        await WaitUntil(() => commands.Contains("1D:0=BUDI01;1=002"), "operator baru, counter lanjut");
+
+        await service.StopAsync();
+        await broker.StopAsync(new MQTTnet.Server.MqttServerStopOptions());
     }
 }

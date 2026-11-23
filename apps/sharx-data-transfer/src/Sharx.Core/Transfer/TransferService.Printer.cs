@@ -753,7 +753,7 @@ public sealed partial class TransferService
     private string? QueueFeedback(byte[] payload)
     {
         _feedback.Writer.TryWrite(payload);
-        return _serverStream is null
+        return _serverSender is null
             ? $"Server tidak terhubung: laporan diantrikan ({_feedback.Reader.Count})"
             : null;
     }
@@ -772,8 +772,8 @@ public sealed partial class TransferService
             {
                 while (reader.TryPeek(out var payload))
                 {
-                    var stream = _serverStream;
-                    if (stream is null)
+                    var send = _serverSender;
+                    if (send is null)
                     {
                         await Task.Delay(TimeSpan.FromMilliseconds(300), _time, ct).ConfigureAwait(false);
                         continue;
@@ -783,16 +783,7 @@ public sealed partial class TransferService
                     timeout.CancelAfter(TimeSpan.FromSeconds(10));
                     try
                     {
-                        await _serverWriteGate.WaitAsync(timeout.Token).ConfigureAwait(false);
-                        try
-                        {
-                            await stream.WriteAsync(payload, timeout.Token).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            _serverWriteGate.Release();
-                        }
-
+                        await send(payload, timeout.Token).ConfigureAwait(false);
                         _stats.AddSent(payload.Length);
                         reader.TryRead(out _);
                         if (warned)
@@ -808,8 +799,9 @@ public sealed partial class TransferService
                         _connectionCts?.Cancel();
                         await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct).ConfigureAwait(false);
                     }
-                    catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException or InvalidOperationException)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        // TCP putus / broker MQTT menolak: laporan tetap di antrean.
                         if (!warned)
                         {
                             warned = true;

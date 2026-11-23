@@ -84,7 +84,8 @@ public sealed record TransferStatus(
     PrintState PrintState,
     bool WaitingForPrinter,
     int WaitingRecords,
-    bool CanControlPrint);
+    bool CanControlPrint,
+    string ServerProtocol);
 
 public sealed record SettingsApplyResult(bool Ok, IReadOnlyList<string> Errors, bool Reconnecting);
 

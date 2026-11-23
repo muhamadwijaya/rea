@@ -1199,127 +1199,6 @@ code {
   border: 1px solid #3a5285;
 }
 
-/* Job aktif + printer (gabungan halaman Data Transfer) */
-.card-jobstrip {
-  --card-border: linear-gradient(
-    95deg,
-    #8cff2c 0%,
-    #3cbd7a 35%,
-    #2f8ae8 65%,
-    #2c6be0 100%
-  );
-  --card-glow:
-    -3px 2px 12px -3px rgba(126, 247, 38, 0.35),
-    3px 0 12px -3px rgba(47, 124, 255, 0.35);
-  flex: none;
-  margin-top: 22px;
-}
-
-.jobstrip {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(
-      0,
-      0.9fr
-    ) minmax(0, 1fr) 2px minmax(0, 1.9fr);
-  gap: 18px;
-  align-items: center;
-  padding: 16px 22px;
-}
-
-.js-value {
-  margin-top: 2px;
-  font-size: 23px;
-  font-weight: 600;
-  overflow-wrap: break-word;
-}
-
-.js-counter {
-  color: var(--lime-text);
-  font-family: var(--mono);
-  font-size: 38px;
-  line-height: 42px;
-  text-shadow: 0 0 12px rgba(125, 250, 44, 0.4);
-}
-
-.js-note {
-  color: var(--label);
-  font-size: 14px;
-}
-
-.js-divider {
-  align-self: stretch;
-  background: linear-gradient(180deg, #3b5a8e, #2d4a7a);
-  border-radius: 2px;
-}
-
-.js-printer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.js-printer-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.js-printer-icon {
-  width: 26px;
-  height: 26px;
-  color: #f2f6ff;
-}
-
-.js-printer-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 17px;
-}
-
-.js-printer-head .pill {
-  margin-left: auto;
-}
-
-.js-buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.card-counters {
-  --card-border: linear-gradient(95deg, #8cff2c 0%, #2f8ae8 50%, #2c6be0 100%);
-  margin-top: 22px;
-  flex: none;
-}
-
-.card-counters .head-note {
-  margin-left: 18px;
-}
-
-.mini-stats {
-  display: flex;
-  gap: 14px;
-  margin: 0 14px 0 auto;
-  color: var(--label);
-  font-size: 16px;
-  white-space: nowrap;
-}
-
-.mini-stats b {
-  color: #fff;
-  font-size: 18px;
-}
-
-.card-counters .table-wrap {
-  margin-top: 12px;
-}
-
-.card-counters .table-scroll.short {
-  max-height: 210px;
-}
-
 .status-tag {
   display: inline-block;
   padding: 1px 9px;
@@ -1919,18 +1798,6 @@ button.chip:hover {
 }
 
 /* Jendela pendek: dashboard boleh di-scroll */
-@media (max-height: 1000px) {
-  .card-log {
-    height: 203px;
-    --log-lines: 4;
-  }
-
-  .actions {
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
-}
-
 @media (max-width: 1100px) {
   .app {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -1949,5 +1816,690 @@ button.chip:hover {
 
   .nav-icon {
     margin-right: 16px;
+  }
+}
+
+/* ================================================================== dashboard satu layar
+   Semua bagian dashboard muat di satu layar (tanpa scroll halaman). Ukuran mengikuti tinggi
+   jendela lewat variabel di bawah; Incoming Data mengisi sisa ruang. */
+
+#page-dashboard {
+  --gap: 18px;
+  --top-h: 288px;
+  --btn-h: 86px;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+#page-dashboard > * {
+  flex: none;
+}
+
+#page-dashboard .top-row {
+  height: var(--top-h);
+}
+
+#page-dashboard .card-incoming {
+  flex: 3 1 0;
+  min-height: 120px;
+  margin-top: var(--gap);
+}
+
+#page-dashboard .actions {
+  margin: 0;
+  padding: var(--gap) 7px calc(var(--gap) + 4px) 1px;
+}
+
+#page-dashboard .big-btn {
+  height: var(--btn-h);
+}
+
+/* Job aktif + printer: satu baris ringkas */
+.card-jobstrip {
+  --card-border: linear-gradient(
+    95deg,
+    #8cff2c 0%,
+    #3cbd7a 35%,
+    #2f8ae8 65%,
+    #2c6be0 100%
+  );
+  --card-glow:
+    -3px 2px 12px -3px rgba(126, 247, 38, 0.35),
+    3px 0 12px -3px rgba(47, 124, 255, 0.35);
+  margin-top: var(--gap);
+}
+
+.jobstrip {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 8px 18px;
+}
+
+.js-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.js-item .info-label {
+  font-size: 15px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.js-value {
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.js-counter {
+  color: var(--lime-text);
+  font-family: var(--mono);
+  font-size: 28px;
+  line-height: 30px;
+  text-shadow: 0 0 12px rgba(125, 250, 44, 0.4);
+}
+
+.js-divider {
+  align-self: stretch;
+  width: 2px;
+  flex: none;
+  background: linear-gradient(180deg, #3b5a8e, #2d4a7a);
+  border-radius: 2px;
+}
+
+.js-printer {
+  flex: 0 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.js-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.js-printer-icon {
+  width: 22px;
+  height: 22px;
+  color: #f2f6ff;
+}
+
+.js-printer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 16px;
+}
+
+.js-row .pill {
+  margin-left: auto;
+  padding: 1px 10px;
+  font-size: 14px;
+}
+
+.js-row .info-label {
+  font-size: 15px;
+}
+
+.js-row b {
+  font-size: 16px;
+}
+
+.js-row b.ok {
+  color: #8ef75a;
+}
+
+.js-row b.wait {
+  color: var(--amber);
+}
+
+.js-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--label);
+  font-size: 13px;
+}
+
+.js-buttons {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.js-buttons .btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.js-buttons .btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.printer-msg:empty {
+  display: none;
+}
+
+.js-printer .printer-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* Transfer Log + Counter per Template berdampingan */
+.bottom-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 15px;
+  flex: 2 1 0 !important;
+  min-height: 112px;
+  max-height: 240px;
+  margin-top: var(--gap);
+}
+
+.bottom-row .card-log,
+.bottom-row .card-counters {
+  height: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.bottom-row .card-head {
+  height: 46px;
+  padding: 0 10px 0 18px;
+}
+
+.bottom-row .card-head h2 {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.bottom-row .head-icon {
+  width: 26px;
+  height: 26px;
+  margin-right: 16px;
+}
+
+.bottom-row .log-box {
+  flex: 1;
+  min-height: 0;
+  margin: 0 10px 10px;
+  padding: 6px 12px;
+  font-size: 15px;
+  letter-spacing: -0.4px;
+  line-height: 24px;
+}
+
+.bottom-row .log-scroll {
+  height: 100%;
+}
+
+.card-counters {
+  --card-border: linear-gradient(95deg, #8cff2c 0%, #2f8ae8 50%, #2c6be0 100%);
+}
+
+.card-counters .head-note {
+  min-width: 0;
+  margin: 0 10px 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.card-counters .btn {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.card-counters .table-wrap {
+  margin: 0 10px 10px;
+}
+
+.card-counters .data-table.compact {
+  font-size: 15px;
+}
+
+.card-counters .data-table.compact thead th {
+  height: 34px;
+  padding-left: 10px;
+}
+
+.card-counters .data-table.compact td {
+  height: 34px;
+  padding-left: 10px;
+}
+
+.row-actions {
+  white-space: nowrap;
+}
+
+.row-actions .btn-icon {
+  width: 28px;
+  height: 26px;
+  margin-right: 4px;
+}
+
+.mini-stats {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--label);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.mini-stats b {
+  color: #fff;
+  font-size: 15px;
+}
+
+/* --- jendela sedang (mis. 1920x1080, 1280x1024) --- */
+@media (max-height: 1149px) {
+  .app {
+    padding-top: 12px;
+    padding-bottom: 14px;
+  }
+
+  .titlebar {
+    height: 104px;
+  }
+
+  .title-chevrons {
+    margin-top: 30px;
+    width: 46px;
+    height: 26px;
+  }
+
+  .title-text {
+    padding-top: 16px;
+  }
+
+  .title-text h1 {
+    font-size: 40px;
+    line-height: 46px;
+  }
+
+  .title-text p {
+    margin-top: 2px;
+    font-size: 19px;
+  }
+
+  .win-controls {
+    margin-top: 14px;
+  }
+
+  #page-dashboard {
+    --gap: 12px;
+    --top-h: 232px;
+    --btn-h: 66px;
+    padding-top: 12px;
+  }
+
+  #page-dashboard .card-head {
+    height: 50px;
+  }
+
+  #page-dashboard .card-head h2 {
+    font-size: 22px;
+  }
+
+  #page-dashboard .top-row .head-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .conn-state {
+    padding-top: 14px;
+  }
+
+  .conn-ring {
+    width: 84px;
+    height: 84px;
+    border-width: 4px;
+  }
+
+  .conn-glyph {
+    width: 42px;
+    height: 42px;
+  }
+
+  .conn-title {
+    margin-top: 8px;
+    font-size: 28px;
+    line-height: 30px;
+  }
+
+  .conn-sub {
+    font-size: 17px;
+  }
+
+  .conn-info {
+    gap: 16px;
+    padding-top: 16px;
+  }
+
+  .conn-divider,
+  .stat-divider {
+    margin: 16px 0;
+  }
+
+  .stat {
+    padding-top: 14px;
+  }
+
+  .stat-circle {
+    width: 48px;
+    height: 48px;
+  }
+
+  .stat-circle svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .stat-label {
+    margin-top: 4px;
+    font-size: 18px;
+  }
+
+  .stat-value {
+    font-size: 31px;
+    line-height: 36px;
+  }
+
+  .stat-value small {
+    font-size: 28px;
+  }
+
+  .stat-rate {
+    font-size: 19px;
+  }
+
+  #page-dashboard .card-incoming .card-head {
+    height: 48px;
+  }
+
+  #page-dashboard .data-table {
+    font-size: 18px;
+  }
+
+  #page-dashboard .data-table thead th {
+    height: 40px;
+  }
+
+  #page-dashboard .data-table td {
+    height: 38px;
+  }
+
+  #page-dashboard .big-btn {
+    font-size: 24px;
+  }
+
+  .big-btn svg {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+/* --- jendela pendek (mis. 1366x768, 1280x720) --- */
+@media (max-height: 949px) {
+  .app {
+    min-height: 600px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .titlebar {
+    height: 76px;
+  }
+
+  .title-chevrons {
+    margin-top: 22px;
+    width: 38px;
+    height: 22px;
+  }
+
+  .title-text {
+    margin-left: 18px;
+    padding-top: 10px;
+  }
+
+  .title-text h1 {
+    font-size: 32px;
+    line-height: 36px;
+  }
+
+  .title-text p {
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .win-controls {
+    margin-top: 8px;
+  }
+
+  .brand {
+    height: 150px;
+    padding-top: 0;
+  }
+
+  .logo {
+    transform: scale(0.82);
+    transform-origin: left top;
+  }
+
+  .nav {
+    padding-top: 4px;
+  }
+
+  .nav-item,
+  .nav-item + .nav-item {
+    height: 56px;
+    font-size: 20px;
+  }
+
+  .system-box {
+    height: 74px;
+    padding-top: 12px;
+  }
+
+  #page-dashboard {
+    --gap: 8px;
+    --top-h: 178px;
+    --btn-h: 50px;
+    padding-top: 8px;
+  }
+
+  #page-dashboard .card-head {
+    height: 40px;
+    padding-left: 16px;
+  }
+
+  #page-dashboard .card-head h2 {
+    font-size: 19px;
+  }
+
+  #page-dashboard .top-row .head-icon {
+    width: 26px;
+    height: 26px;
+    margin-right: 16px;
+  }
+
+  .conn-state {
+    width: 180px;
+    padding-top: 8px;
+  }
+
+  .conn-ring {
+    width: 58px;
+    height: 58px;
+    border-width: 3px;
+  }
+
+  .conn-glyph {
+    width: 30px;
+    height: 30px;
+  }
+
+  .conn-title {
+    margin-top: 4px;
+    font-size: 22px;
+    line-height: 24px;
+  }
+
+  .conn-sub {
+    font-size: 15px;
+  }
+
+  .conn-info {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .info-label,
+  .info-value {
+    font-size: 17px;
+    line-height: 21px;
+  }
+
+  .info-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .conn-divider,
+  .stat-divider {
+    margin: 10px 0;
+  }
+
+  .stat {
+    padding-top: 8px;
+  }
+
+  .stat-circle {
+    width: 36px;
+    height: 36px;
+  }
+
+  .stat-circle svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .stat-label {
+    margin-top: 2px;
+    font-size: 16px;
+  }
+
+  .stat-value {
+    font-size: 25px;
+    line-height: 28px;
+  }
+
+  .stat-value small {
+    font-size: 22px;
+  }
+
+  .stat-rate {
+    font-size: 16px;
+  }
+
+  .jobstrip {
+    padding: 5px 14px;
+  }
+
+  .js-value {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .js-counter {
+    font-size: 22px;
+    line-height: 24px;
+  }
+
+  .js-item .info-label {
+    font-size: 13px;
+  }
+
+  #page-dashboard .card-incoming .card-head {
+    height: 38px;
+  }
+
+  #page-dashboard .data-table {
+    font-size: 16px;
+  }
+
+  #page-dashboard .data-table thead th {
+    height: 32px;
+  }
+
+  #page-dashboard .data-table td {
+    height: 30px;
+  }
+
+  .bottom-row .card-head {
+    height: 36px;
+  }
+
+  .bottom-row .card-head h2 {
+    font-size: 17px;
+  }
+
+  .bottom-row .log-box {
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+
+  .card-counters .data-table.compact td,
+  .card-counters .data-table.compact thead th {
+    height: 28px;
+  }
+
+  #page-dashboard .big-btn {
+    font-size: 21px;
+    border-radius: 10px;
+  }
+
+  .big-btn svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Lebar sempit: info yang kurang penting disembunyikan agar tetap satu baris */
+@media (max-width: 1350px) {
+  .mini-stats span:nth-child(2),
+  .card-counters .head-note,
+  .js-note {
+    display: none;
+  }
+
+  .bottom-row .card-head h2 {
+    font-size: 18px;
+  }
+
+  .bottom-row .head-icon {
+    margin-right: 10px;
+  }
+
+  .jobstrip {
+    gap: 14px;
   }
 }

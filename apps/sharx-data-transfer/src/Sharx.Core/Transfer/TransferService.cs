@@ -55,7 +55,8 @@ public sealed partial class TransferService : IAsyncDisposable
     private Task? _workerTask;
     private Task? _backgroundTask;
     private volatile bool _running;
-    private volatile NetworkStream? _serverStream;
+    /// <summary>Pengirim feedback ke server yang sedang terhubung (TCP atau MQTT); null = terputus.</summary>
+    private volatile Func<byte[], CancellationToken, Task>? _serverSender;
     private ServerState _serverState = ServerState.Stopped;
     private DateTimeOffset? _connectedSince;
     private string? _lastError;
@@ -130,7 +131,8 @@ public sealed partial class TransferService : IAsyncDisposable
                 _printState,
                 WaitingForPrinter,
                 _waitingCount,
-                Printing.PrinterDrivers.For(s.Printer).SupportsPrintControl(s.Printer));
+                Printing.PrinterDrivers.For(s.Printer).SupportsPrintControl(s.Printer),
+                s.Server.Protocol.ToString());
         }
     }
 
@@ -316,6 +318,11 @@ public sealed partial class TransferService : IAsyncDisposable
 
     public static async Task<ConnectionTestResult> TestServerAsync(ServerSettings server, CancellationToken ct)
     {
+        if (server.Protocol == ServerProtocol.Mqtt)
+        {
+            return await TestMqttAsync(server, ct).ConfigureAwait(false);
+        }
+
         var watch = Stopwatch.StartNew();
         try
         {
@@ -352,7 +359,9 @@ public sealed partial class TransferService : IAsyncDisposable
     }
 
     private static string ServerKey(ServerSettings s) =>
-        $"{s.Host}|{s.Port}|{s.Framing}|{s.CustomTerminator}|{s.Encoding}|{s.MaxFrameBytes}";
+        $"{s.Protocol}|{s.Host}|{s.Port}|{s.Framing}|{s.CustomTerminator}|{s.Encoding}|{s.MaxFrameBytes}|"
+        + $"{s.Mqtt.ClientId}|{s.Mqtt.Username}|{s.Mqtt.Password}|{s.Mqtt.SubscribeTopic}|{s.Mqtt.Qos}|{s.Mqtt.UseTls}|"
+        + $"{s.Mqtt.KeepAliveSeconds}|{s.Mqtt.CleanSession}";
 
     private void Enqueue(WorkItem item)
     {
@@ -384,8 +393,16 @@ public sealed partial class TransferService : IAsyncDisposable
                 var reconnectNow = false;
                 try
                 {
-                    await ReceiveAsync(server, connectionCts.Token).ConfigureAwait(false);
-                    _log.Write(LogStatus.Warn, "Server menutup koneksi");
+                    if (server.Protocol == ServerProtocol.Mqtt)
+                    {
+                        await ReceiveMqttAsync(server, connectionCts.Token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await ReceiveTcpAsync(server, connectionCts.Token).ConfigureAwait(false);
+                    }
+
+                    _log.Write(LogStatus.Warn, "Koneksi server terputus");
                 }
                 catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
                 {
@@ -398,11 +415,11 @@ public sealed partial class TransferService : IAsyncDisposable
                 catch (Exception ex)
                 {
                     _lastError = ex.Message;
-                    _log.Write(LogStatus.Error, $"Koneksi server {server.Host}:{server.Port} gagal: {ex.Message}");
+                    _log.Write(LogStatus.Error, $"Koneksi {DescribeServer(server)} gagal: {ex.Message}");
                 }
                 finally
                 {
-                    _serverStream = null;
+                    _serverSender = null;
                     _connectionCts = null;
                 }
 
@@ -430,7 +447,10 @@ public sealed partial class TransferService : IAsyncDisposable
         }
     }
 
-    private async Task ReceiveAsync(ServerSettings server, CancellationToken ct)
+    private static string DescribeServer(ServerSettings s) =>
+        s.Protocol == ServerProtocol.Mqtt ? $"MQTT broker {s.Host}:{s.Port}" : $"server {s.Host}:{s.Port}";
+
+    private async Task ReceiveTcpAsync(ServerSettings server, CancellationToken ct)
     {
         _serverState = ServerState.Connecting;
         RaiseStatus();
@@ -451,7 +471,18 @@ public sealed partial class TransferService : IAsyncDisposable
 
         client.NoDelay = true;
         var stream = client.GetStream();
-        _serverStream = stream;
+        _serverSender = async (payload, token) =>
+        {
+            await _serverWriteGate.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                await stream.WriteAsync(payload, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _serverWriteGate.Release();
+            }
+        };
         _serverState = ServerState.Connected;
         _connectedSince = _time.GetLocalNow();
         _lastError = null;

@@ -2,9 +2,15 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MQTTnet;
+using MQTTnet.Server;
 using Sharx.Core.Transport;
 
 // Simulator untuk uji tanpa mesin asli.
+//
+//   SharxSimulator broker  [--port 1883] [--jobs "ANANDA02,867892,000;BUDI01,867892,000"] [--interval 15]
+//                          [--job-topic sharx/job] [--feedback-topic sharx/printed]
+//       MQTT broker kecil: mengirim job ke topic job dan menampilkan feedback after print.
 //
 //   SharxSimulator server  [--port 9000] [--jobs "ANANDA02,867892,000;BUDI01,867892,000"] [--interval 15]
 //       Server TCP: mengirim job (satu baris per job) ke SHARX dan menampilkan feedback after print.
@@ -30,11 +36,14 @@ try
         case "server":
             await RunServerAsync(options, cts.Token);
             break;
+        case "broker":
+            await RunBrokerAsync(options, cts.Token);
+            break;
         case "printer":
             await RunPrinterAsync(options, cts.Token);
             break;
         default:
-            Console.WriteLine("Pakai: SharxSimulator server|printer [opsi]  (lihat komentar di Program.cs)");
+            Console.WriteLine("Pakai: SharxSimulator broker|server|printer [opsi]  (lihat komentar di Program.cs)");
             return 1;
     }
 }
@@ -119,6 +128,61 @@ static async Task RunServerAsync(Dictionary<string, string> o, CancellationToken
         await linked.CancelAsync();
         Log("SERVER", "SHARX terputus");
     }
+}
+
+static async Task RunBrokerAsync(Dictionary<string, string> o, CancellationToken ct)
+{
+    var port = int.Parse(o.GetValueOrDefault("port", "1883"), CultureInfo.InvariantCulture);
+    var jobs = o.GetValueOrDefault("jobs", "ANANDA02,867892,000;BUDI01,867892,000;BUDI01,555111,000").Split(';');
+    var interval = double.Parse(o.GetValueOrDefault("interval", "15"), CultureInfo.InvariantCulture);
+    var jobTopic = o.GetValueOrDefault("job-topic", "sharx/job");
+    var feedbackTopic = o.GetValueOrDefault("feedback-topic", "sharx/printed");
+    var factory = new MqttFactory();
+    using var broker = factory.CreateMqttServer(new MqttServerOptionsBuilder()
+        .WithDefaultEndpoint()
+        .WithDefaultEndpointPort(port)
+        .WithDefaultEndpointBoundIPAddress(IPAddress.Any)
+        .WithDefaultEndpointBoundIPV6Address(IPAddress.None)
+        .Build());
+    var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    broker.ClientConnectedAsync += e =>
+    {
+        Log("BROKER", $"client terhubung: {e.ClientId}");
+        return Task.CompletedTask;
+    };
+    broker.InterceptingSubscriptionAsync += e =>
+    {
+        Log("BROKER", $"{e.ClientId} subscribe {e.TopicFilter.Topic}");
+        subscribed.TrySetResult();
+        return Task.CompletedTask;
+    };
+    broker.InterceptingPublishAsync += e =>
+    {
+        if (e.ApplicationMessage.Topic == feedbackTopic)
+        {
+            Log("BROKER", $"<- feedback after print [{feedbackTopic}]: {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}");
+        }
+
+        return Task.CompletedTask;
+    };
+
+    await broker.StartAsync();
+    Log("BROKER", $"MQTT broker listen port {port}; job -> {jobTopic}, feedback <- {feedbackTopic}");
+    await subscribed.Task.WaitAsync(ct);
+    await Task.Delay(500, ct);
+    foreach (var job in jobs)
+    {
+        Log("BROKER", $"-> job [{jobTopic}]: {job}");
+        await broker.InjectApplicationMessage(
+            new InjectedMqttApplicationMessage(new MqttApplicationMessageBuilder().WithTopic(jobTopic).WithPayload(job).Build())
+            {
+                SenderClientId = "simulator",
+            },
+            ct);
+        await Task.Delay(TimeSpan.FromSeconds(interval), ct);
+    }
+
+    await Task.Delay(Timeout.Infinite, ct);
 }
 
 static async Task RunPrinterAsync(Dictionary<string, string> o, CancellationToken ct)

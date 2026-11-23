@@ -258,11 +258,11 @@
       if (s.server === "Connected") {
         key = "connected";
         title = "Connected";
-        sub = "to Server";
+        sub = s.serverProtocol === "Mqtt" ? "to MQTT Broker" : "to Server";
       } else if (s.server === "Connecting") {
         key = "connecting";
         title = "Connecting...";
-        sub = "to Server";
+        sub = s.serverProtocol === "Mqtt" ? "to MQTT Broker" : "to Server";
       } else {
         key = "disconnected";
         title = "Disconnected";
@@ -471,17 +471,14 @@
     $("#jobOperator").textContent = c.activeOperator || "-";
     $("#jobTemplate").textContent = c.activeTemplate || "-";
     $("#jobCounter").textContent = c.activeValue || "-";
-    $("#jobDate").textContent = c.businessDate
-      ? `Hari produksi ${c.businessDate}`
-      : "-";
+    $("#jobDate").textContent = c.businessDate ? c.businessDate : "";
     const body = $("#counterBody");
     const rows = (c.templates || []).map((t) => {
       const tr = document.createElement("tr");
       if (t.template === c.activeTemplate) tr.className = "highlight";
+      tr.title = `Operator terakhir: ${t.lastOperator || "-"}\nUpdate: ${timeText(t.updatedAt)}`;
       tr.innerHTML = `<td>${esc(t.template)}</td><td class="mono">${esc(t.text)}</td><td>${t.records}</td>
-        <td>${esc(t.lastOperator || "-")}</td><td>${esc(timeText(t.updatedAt))}</td>
-        <td><button class="btn btn-sm btn-icon" data-act="set" title="Ubah counter"><svg><use href="#i-edit"/></svg></button>
-            <button class="btn btn-sm btn-icon" data-act="reset" title="Reset counter template ini"><svg><use href="#i-reset"/></svg></button></td>`;
+        <td class="row-actions"><button class="btn btn-sm btn-icon" data-act="set" title="Ubah counter"><svg><use href="#i-edit"/></svg></button><button class="btn btn-sm btn-icon" data-act="reset" title="Reset counter template ini"><svg><use href="#i-reset"/></svg></button></td>`;
       tr.querySelector('[data-act="set"]').onclick = () => setCounter(t);
       tr.querySelector('[data-act="reset"]').onclick = () =>
         resetCounter(t.template);
