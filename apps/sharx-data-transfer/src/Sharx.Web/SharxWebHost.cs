@@ -1,0 +1,427 @@
+using System.Net;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Sharx.Core.Configuration;
+using Sharx.Core.Counter;
+using Sharx.Core.Logging;
+using Sharx.Core.Mapping;
+using Sharx.Core.Text;
+using Sharx.Core.Transfer;
+
+namespace Sharx.Web;
+
+public sealed class SharxHostOptions
+{
+    /// <summary>Folder settings.json, counters.json dan logs/.</summary>
+    public string DataDirectory { get; set; } = DefaultDataDirectory();
+
+    /// <summary>Port UI lokal. 0 = pilih port kosong otomatis.</summary>
+    public int Port { get; set; } = 5080;
+
+    /// <summary>Izinkan akses UI dari komputer lain di jaringan (default hanya komputer ini).</summary>
+    public bool AllowRemote { get; set; }
+
+    /// <summary>"desktop" jika dibuka di jendela aplikasi (WebView2), "browser" jika di browser biasa.</summary>
+    public string Shell { get; set; } = "browser";
+
+    public static string DefaultDataDirectory()
+    {
+        var portable = Path.Combine(AppContext.BaseDirectory, "data");
+        try
+        {
+            Directory.CreateDirectory(portable);
+            var probe = Path.Combine(portable, ".write-test");
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return portable;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SharxDataTransfer");
+        }
+    }
+}
+
+public sealed class AlreadyRunningException(string dataDirectory)
+    : Exception($"SHARX Data Transfer sudah berjalan (folder data: {dataDirectory}).");
+
+public static class SharxWebHost
+{
+    public static string Version { get; } =
+        typeof(SharxWebHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            .Split('+')[0] ?? "1.0.0";
+
+    public static JsonSerializerOptions JsonOptions { get; } = JsonFile.CreateOptions(indented: false);
+
+    public static WebApplication Build(SharxHostOptions options, string[]? args = null)
+    {
+        Directory.CreateDirectory(options.DataDirectory);
+        var instanceLock = AcquireInstanceLock(options.DataDirectory);
+
+        var webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+        {
+            Args = args ?? [],
+            ContentRootPath = AppContext.BaseDirectory,
+            WebRootPath = webRoot,
+        });
+        builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(k =>
+        {
+            if (options.AllowRemote)
+            {
+                k.Listen(IPAddress.Any, options.Port);
+            }
+            else
+            {
+                k.Listen(IPAddress.Loopback, options.Port);
+            }
+        });
+        builder.Services.ConfigureHttpJsonOptions(o =>
+        {
+            o.SerializerOptions.PropertyNamingPolicy = JsonOptions.PropertyNamingPolicy;
+            foreach (var converter in JsonOptions.Converters)
+            {
+                o.SerializerOptions.Converters.Add(converter);
+            }
+        });
+
+        var time = TimeProvider.System;
+        var store = new SettingsStore(Path.Combine(options.DataDirectory, "settings.json"));
+        var (settings, settingsWarning) = store.Load();
+        var log = new TransferLog(Path.Combine(options.DataDirectory, "logs"), time);
+        var counter = new CounterEngine(Path.Combine(options.DataDirectory, "counters.json"), time);
+        var service = new TransferService(settings, store, counter, log, new TransferStats(), time);
+        var hub = new LiveHub(JsonOptions);
+
+        builder.Services.AddSingleton(service);
+        builder.Services.AddSingleton(hub);
+        builder.Services.AddSingleton(options);
+
+        var app = builder.Build();
+        app.Lifetime.ApplicationStopped.Register(instanceLock.Dispose);
+
+        foreach (var warning in new[] { settingsWarning, counter.LoadWarning })
+        {
+            if (warning is not null)
+            {
+                log.Write(LogStatus.Warn, warning);
+            }
+        }
+
+        WireEvents(service, hub);
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            log.Write(LogStatus.Info, $"SHARX Data Transfer v{Version} siap ({ListeningAddress(app)})");
+            service.StartBackground();
+            if (service.Settings.General.AutoStart)
+            {
+                service.Start();
+            }
+        });
+        app.Lifetime.ApplicationStopping.Register(() => service.DisposeAsync().AsTask().GetAwaiter().GetResult());
+
+        app.Use(GuardAsync(options));
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+        app.UseDefaultFiles();
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(webRoot),
+            OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache",
+        });
+
+        MapApi(app, service, hub, options);
+        return app;
+    }
+
+    /// <summary>Alamat UI setelah server berjalan (berguna jika Port = 0).</summary>
+    public static string ListeningAddress(WebApplication app)
+    {
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault()
+            ?? "http://127.0.0.1:5080";
+        return address.Replace("0.0.0.0", "127.0.0.1", StringComparison.Ordinal)
+            .Replace("[::]", "127.0.0.1", StringComparison.Ordinal);
+    }
+
+    private static FileStream AcquireInstanceLock(string dataDirectory)
+    {
+        try
+        {
+            return new FileStream(
+                Path.Combine(dataDirectory, ".instance.lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                1,
+                FileOptions.DeleteOnClose);
+        }
+        catch (IOException)
+        {
+            throw new AlreadyRunningException(dataDirectory);
+        }
+    }
+
+    private static void WireEvents(TransferService service, LiveHub hub)
+    {
+        service.StatusChanged += status => hub.Broadcast("status", status);
+        service.RecordProcessed += record => hub.Broadcast("record", record);
+        service.StatsUpdated += stats => hub.Broadcast("stats", stats);
+        service.Log.Added += entry => hub.Broadcast("log", entry);
+        service.Counter.Changed += () => hub.Broadcast("counter", CounterView(service));
+    }
+
+    /// <summary>
+    /// UI ini mengontrol printer, jadi tolak request dari situs lain (CSRF) dan host asing (DNS rebinding).
+    /// </summary>
+    private static Func<HttpContext, RequestDelegate, Task> GuardAsync(SharxHostOptions options) => (context, next) =>
+    {
+        var path = context.Request.Path;
+        var isApi = path.StartsWithSegments("/api") || path.StartsWithSegments("/ws");
+        if (!isApi)
+        {
+            return next(context);
+        }
+
+        if (!options.AllowRemote && !IsLocalHost(context.Request.Host.Host))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+
+        var origin = context.Request.Headers.Origin.ToString();
+        if (origin.Length > 0)
+        {
+            var sameOrigin = Uri.TryCreate(origin, UriKind.Absolute, out var originUri)
+                && string.Equals(originUri.Authority, context.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+            if (!sameOrigin)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            }
+        }
+
+        var mutating = !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method);
+        if (mutating && context.Request.Headers["X-Sharx"] != "1")
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+
+        return next(context);
+    };
+
+    private static bool IsLocalHost(string host) =>
+        host is "localhost" or "127.0.0.1" or "[::1]" or "::1";
+
+    private static object Snapshot(TransferService service, SharxHostOptions options) => new
+    {
+        Version,
+        options.Shell,
+        DataDirectory = options.DataDirectory,
+        Status = service.Status,
+        Stats = service.Stats.Snapshot(),
+        Counter = CounterView(service),
+        Records = service.RecentRecords(service.Settings.General.LiveRows),
+        Log = service.Log.Recent(200),
+    };
+
+    private static object CounterView(TransferService service)
+    {
+        var state = service.Counter.Snapshot();
+        var digits = service.Settings.Counter.Digits;
+        var active = state.ActiveTemplate is not null && state.Templates.TryGetValue(state.ActiveTemplate, out var c) ? c : null;
+        return new
+        {
+            state.BusinessDate,
+            state.ActiveTemplate,
+            state.ActiveOperator,
+            ActiveValue = active is null ? null : CounterEngine.Format(active.Value, digits),
+            PersistError = service.Counter.LastPersistError,
+            Templates = state.Templates
+                .OrderByDescending(kv => kv.Value.UpdatedAt)
+                .Select(kv => new
+                {
+                    Template = kv.Key,
+                    kv.Value.Value,
+                    Text = CounterEngine.Format(kv.Value.Value, digits),
+                    kv.Value.Records,
+                    kv.Value.LastOperator,
+                    kv.Value.UpdatedAt,
+                }),
+        };
+    }
+
+    private sealed record PreviewRequest(AppSettings Settings, string Sample);
+
+    private sealed record CounterResetRequest(string? Template);
+
+    private sealed record CounterSetRequest(string Template, long Value);
+
+    private static void MapApi(WebApplication app, TransferService service, LiveHub hub, SharxHostOptions options)
+    {
+        app.MapGet("/api/state", () => Results.Json(Snapshot(service, options), JsonOptions));
+
+        app.MapPost("/api/transfer/start", () =>
+        {
+            var started = service.Start();
+            return Results.Json(new { started, status = service.Status }, JsonOptions);
+        });
+
+        app.MapPost("/api/transfer/stop", async () =>
+        {
+            await service.StopAsync();
+            return Results.Json(new { stopped = true, status = service.Status }, JsonOptions);
+        });
+
+        app.MapGet("/api/settings", () => Results.Json(new
+        {
+            settings = service.Settings,
+            meta = new
+            {
+                encodings = TextEncodings.Supported,
+                tokens = ControlTokens.Names,
+                builtIns = OutputFormatter.BuiltIns,
+                special = new[] { FieldKeys.Operator, FieldKeys.Template, FieldKeys.ServerCounter },
+                serialPorts = SafeSerialPorts(),
+            },
+        }, JsonOptions));
+
+        app.MapPut("/api/settings", async (HttpRequest request) =>
+        {
+            var next = await ReadJsonAsync<AppSettings>(request);
+            if (next is null)
+            {
+                return Results.BadRequest(new { ok = false, errors = new[] { "Body kosong" } });
+            }
+
+            var result = await service.ApplySettingsAsync(next);
+            if (result.Ok)
+            {
+                hub.Broadcast("counter", CounterView(service));
+            }
+
+            return Results.Json(result, JsonOptions, statusCode: result.Ok ? 200 : 400);
+        });
+
+        app.MapPost("/api/settings/preview", async (HttpRequest request) =>
+        {
+            var body = await ReadJsonAsync<PreviewRequest>(request);
+            return body?.Settings is null
+                ? Results.BadRequest()
+                : Results.Json(service.Preview(body.Settings, body.Sample), JsonOptions);
+        });
+
+        app.MapPost("/api/settings/test-server", async (HttpRequest request, CancellationToken ct) =>
+        {
+            var server = await ReadJsonAsync<ServerSettings>(request, ct);
+            return server is null
+                ? Results.BadRequest()
+                : Results.Json(await TransferService.TestServerAsync(server, ct), JsonOptions);
+        });
+
+        app.MapPost("/api/settings/test-printer", async (HttpRequest request, CancellationToken ct) =>
+        {
+            var printer = await ReadJsonAsync<PrinterSettings>(request, ct);
+            return printer is null
+                ? Results.BadRequest()
+                : Results.Json(await service.TestPrinterAsync(printer, ct), JsonOptions);
+        });
+
+        app.MapPost("/api/counter/reset", async (HttpRequest request) =>
+        {
+            var body = request.ContentLength > 0 ? await ReadJsonAsync<CounterResetRequest>(request) : null;
+            var template = string.IsNullOrWhiteSpace(body?.Template) ? null : body!.Template;
+            var removed = service.ResetCounter(template);
+            return Results.Json(new { ok = true, removed, counter = CounterView(service) }, JsonOptions);
+        });
+
+        app.MapPost("/api/counter/set", async (HttpRequest request) =>
+        {
+            var body = await ReadJsonAsync<CounterSetRequest>(request);
+            if (body is null || string.IsNullOrWhiteSpace(body.Template) || body.Value < 0)
+            {
+                return Results.BadRequest(new { ok = false, errors = new[] { "Template dan nilai (>= 0) wajib diisi" } });
+            }
+
+            service.SetCounter(body.Template.Trim(), body.Value);
+            return Results.Json(new { ok = true, counter = CounterView(service) }, JsonOptions);
+        });
+
+        app.MapGet("/api/logs/dates", () => Results.Json(service.Log.Dates(), JsonOptions));
+
+        app.MapGet("/api/logs/{date}", (string date) => Results.Json(service.Log.ReadDay(date), JsonOptions));
+
+        app.MapGet("/api/logs/{date}/download", (string date) =>
+        {
+            var entries = service.Log.ReadDay(date);
+            var sb = new StringBuilder();
+            foreach (var e in entries)
+            {
+                sb.Append('[').Append(e.Time.ToString("yyyy-MM-dd HH:mm:ss")).Append("] ")
+                    .Append(e.Status.ToString().ToUpperInvariant().PadRight(5)).Append(' ')
+                    .Append(e.Message).Append("\r\n");
+            }
+
+            return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain; charset=utf-8", $"sharx-log-{date}.txt");
+        });
+
+        app.MapPost("/api/app/shutdown", (IHostApplicationLifetime lifetime) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(300);
+                lifetime.StopApplication();
+            });
+            return Results.Json(new { ok = true }, JsonOptions);
+        });
+
+        app.Map("/ws", async (HttpContext context) =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            await hub.HandleAsync(socket, Snapshot(service, options), context.RequestAborted);
+        });
+    }
+
+    private static async Task<T?> ReadJsonAsync<T>(HttpRequest request, CancellationToken ct = default)
+        where T : class
+    {
+        try
+        {
+            return await request.ReadFromJsonAsync<T>(JsonOptions, ct);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static string[] SafeSerialPorts()
+    {
+        try
+        {
+            return System.IO.Ports.SerialPort.GetPortNames().Order().ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return [];
+        }
+    }
+}

@@ -1,0 +1,66 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{062C9556-F3D9-4DC1-8280-A85D004CEF1C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Core", "src\Sharx.Core\Sharx.Core.csproj", "{1213A23D-5AC0-42BA-978A-55C9FBFA8B86}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Web", "src\Sharx.Web\Sharx.Web.csproj", "{34800A8A-9802-4DAD-AC03-41D0EA112AC7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Host", "src\Sharx.Host\Sharx.Host.csproj", "{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Desktop", "src\Sharx.Desktop\Sharx.Desktop.csproj", "{46149ADB-2BF0-437C-BF5C-54B86A7354DE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{8BEA7FB8-246A-4306-BE7C-3634FD620845}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Simulator", "tools\Sharx.Simulator\Sharx.Simulator.csproj", "{1CC4D375-879A-4633-B61E-A3C0959EBAB1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{78C39730-EC8C-4EC3-B8DC-B3F3D76EF74D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sharx.Core.Tests", "tests\Sharx.Core.Tests\Sharx.Core.Tests.csproj", "{78043CE5-8AAE-44EE-8B4B-15186D077A34}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1213A23D-5AC0-42BA-978A-55C9FBFA8B86}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1213A23D-5AC0-42BA-978A-55C9FBFA8B86}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1213A23D-5AC0-42BA-978A-55C9FBFA8B86}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1213A23D-5AC0-42BA-978A-55C9FBFA8B86}.Release|Any CPU.Build.0 = Release|Any CPU
+		{34800A8A-9802-4DAD-AC03-41D0EA112AC7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{34800A8A-9802-4DAD-AC03-41D0EA112AC7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{34800A8A-9802-4DAD-AC03-41D0EA112AC7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{34800A8A-9802-4DAD-AC03-41D0EA112AC7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{46149ADB-2BF0-437C-BF5C-54B86A7354DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46149ADB-2BF0-437C-BF5C-54B86A7354DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46149ADB-2BF0-437C-BF5C-54B86A7354DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46149ADB-2BF0-437C-BF5C-54B86A7354DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1CC4D375-879A-4633-B61E-A3C0959EBAB1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CC4D375-879A-4633-B61E-A3C0959EBAB1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CC4D375-879A-4633-B61E-A3C0959EBAB1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CC4D375-879A-4633-B61E-A3C0959EBAB1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{78043CE5-8AAE-44EE-8B4B-15186D077A34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78043CE5-8AAE-44EE-8B4B-15186D077A34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78043CE5-8AAE-44EE-8B4B-15186D077A34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78043CE5-8AAE-44EE-8B4B-15186D077A34}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{1213A23D-5AC0-42BA-978A-55C9FBFA8B86} = {062C9556-F3D9-4DC1-8280-A85D004CEF1C}
+		{34800A8A-9802-4DAD-AC03-41D0EA112AC7} = {062C9556-F3D9-4DC1-8280-A85D004CEF1C}
+		{4B2E7F81-FDAF-48E3-8BEC-23AD2CE7A72B} = {062C9556-F3D9-4DC1-8280-A85D004CEF1C}
+		{46149ADB-2BF0-437C-BF5C-54B86A7354DE} = {062C9556-F3D9-4DC1-8280-A85D004CEF1C}
+		{1CC4D375-879A-4633-B61E-A3C0959EBAB1} = {8BEA7FB8-246A-4306-BE7C-3634FD620845}
+		{78043CE5-8AAE-44EE-8B4B-15186D077A34} = {78C39730-EC8C-4EC3-B8DC-B3F3D76EF74D}
+	EndGlobalSection
+EndGlobal

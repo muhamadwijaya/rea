@@ -1,0 +1,1416 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SHARX Data Transfer</title>
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <linearGradient id="g-fin" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#9ef733" />
+          <stop offset="1" stop-color="#7fe022" />
+        </linearGradient>
+        <linearGradient id="g-letter" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ffffff" />
+          <stop offset="0.55" stop-color="#f1f4f8" />
+          <stop offset="1" stop-color="#c9d1de" />
+        </linearGradient>
+      </defs>
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 2.6 1.9 11.4c-.5.4-.2 1.1.4 1.1H4.4V21c0 .6.4 1 1 1H10v-6.2h4V22h4.6c.6 0 1-.4 1-1v-8.5h2.1c.6 0 .9-.7.4-1.1z"
+        />
+      </symbol>
+      <symbol id="i-device" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M4.5 2.5h15c.4 0 .7.3.7.7v1.4h-1.4v-.7H5.2v.7H3.8V3.2c0-.4.3-.7.7-.7Z"
+        />
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M3.2 6.2h17.6c.9 0 1.7.8 1.7 1.7v11.4c0 .9-.8 1.7-1.7 1.7H3.2c-.9 0-1.7-.8-1.7-1.7V7.9c0-.9.8-1.7 1.7-1.7Zm.6 3.1v1.4h16.4V9.3Zm2.2 5.1c-.9 0-1.6.6-1.6 1.4s.7 1.4 1.6 1.4c.6 0 1-.3 1.4-.6.5.4 1.2.8 2 .8 1.1 0 1.7-.7 2.3-1.3.4-.4.7-.7 1.2-.7h1.3v-1.6h-1.3c-1.2 0-1.8.7-2.3 1.2-.4.4-.7.7-1.2.7-.5 0-.9-.3-1.4-.8-.5-.3-1.1-.5-2-.5Zm11.4.1a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6Zm-2.6-3.6c-.4 0-.7.3-.7.7s.3.7.7.7.7-.3.7-.7-.3-.7-.7-.7Z"
+        />
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M5.5 1.5h9.2l5.3 5.3v14.4c0 .7-.6 1.3-1.3 1.3H5.5c-.7 0-1.3-.6-1.3-1.3V2.8c0-.7.6-1.3 1.3-1.3Zm1.3 2.2v16.6h10.9V8.1h-4.2c-.5 0-.9-.4-.9-.9V3.7Zm1.9 6.6h6.6v1.7H8.7Zm0 3.2h6.6v1.7H8.7Zm0 3.2h6.6v1.7H8.7Z"
+        />
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+        />
+      </symbol>
+      <symbol id="i-info" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M12 1.5a10.5 10.5 0 1 1 0 21 10.5 10.5 0 0 1 0-21Zm-1.5 8.7v8.3h3v-8.3Zm1.5-5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6Z"
+        />
+      </symbol>
+      <symbol id="i-antenna" viewBox="0 0 24 24">
+        <g
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.1"
+          stroke-linecap="round"
+        >
+          <path d="M8.2 6.4a6 6 0 0 0 0 8.2M15.8 6.4a6 6 0 0 1 0 8.2" />
+          <path d="M5.2 3.6a10 10 0 0 0 0 13.8M18.8 3.6a10 10 0 0 1 0 13.8" />
+          <path d="M12 12.2v9.2" stroke-width="2.6" />
+        </g>
+        <circle cx="12" cy="10.5" r="2.4" fill="currentColor" />
+      </symbol>
+      <symbol id="i-database" viewBox="0 0 24 24">
+        <g fill="currentColor">
+          <ellipse cx="12" cy="5" rx="8.5" ry="3.2" />
+          <path
+            d="M3.5 7.6c1.2 1.6 4.6 2.6 8.5 2.6s7.3-1 8.5-2.6v3.2c0 1.8-3.8 3.2-8.5 3.2s-8.5-1.4-8.5-3.2Z"
+          />
+          <path
+            d="M3.5 13.4c1.2 1.6 4.6 2.6 8.5 2.6s7.3-1 8.5-2.6v3.3c0 1.8-3.8 3.2-8.5 3.2s-8.5-1.4-8.5-3.2Z"
+          />
+        </g>
+      </symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24">
+        <circle
+          cx="12"
+          cy="12"
+          r="9.2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+        />
+        <path
+          fill="currentColor"
+          d="M17.4 6.4 12.9 10a2.2 2.2 0 1 0 1.4 2.2l3.6-5.3Z"
+        />
+        <path
+          fill="currentColor"
+          d="M6.3 13.6c.2-2.4 1.9-4.4 4.2-5l-.2 1.7c-1.4.5-2.4 1.7-2.6 3.2Z"
+        />
+        <path
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          d="M5.8 18.2 18.2 5.8"
+        />
+      </symbol>
+      <symbol id="i-swap" viewBox="0 0 24 24">
+        <g
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M3.5 8h16M15.5 3.8 19.7 8l-4.2 4.2" />
+          <path d="M20.5 16h-16M8.5 11.8 4.3 16l4.2 4.2" />
+        </g>
+      </symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 20V5M5.5 11.2 12 4.7l6.5 6.5"
+        />
+      </symbol>
+      <symbol id="i-arrow-down" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 4v15M5.5 12.8l6.5 6.5 6.5-6.5"
+        />
+      </symbol>
+      <symbol id="i-list" viewBox="0 0 24 24">
+        <g fill="currentColor">
+          <rect x="2" y="3.4" width="20" height="4.2" rx="1.2" />
+          <rect x="2" y="9.9" width="20" height="4.2" rx="1.2" />
+          <rect x="2" y="16.4" width="20" height="4.2" rx="1.2" />
+        </g>
+        <g fill="#0b1832">
+          <circle cx="5.2" cy="5.5" r="0.95" />
+          <circle cx="5.2" cy="12" r="0.95" />
+          <circle cx="5.2" cy="18.5" r="0.95" />
+        </g>
+      </symbol>
+      <symbol id="i-bars" viewBox="0 0 24 24">
+        <g fill="currentColor">
+          <rect x="3" y="13" width="4.6" height="8.5" rx="0.6" />
+          <rect x="9.7" y="8.2" width="4.6" height="13.3" rx="0.6" />
+          <rect x="16.4" y="2.5" width="4.6" height="19" rx="0.6" />
+        </g>
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M5 2.6v18.8L21.4 12Z" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24">
+        <rect fill="currentColor" x="3" y="3" width="18" height="18" rx="1" />
+      </symbol>
+      <symbol id="i-min" viewBox="0 0 24 24">
+        <path stroke="currentColor" stroke-width="1.6" d="M3 12.5h18" />
+      </symbol>
+      <symbol id="i-max" viewBox="0 0 24 24">
+        <rect
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          x="3.5"
+          y="3.5"
+          width="17"
+          height="17"
+          rx="1"
+        />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path
+          stroke="currentColor"
+          stroke-width="1.7"
+          d="m3.5 3.5 17 17m0-17-17 17"
+        />
+      </symbol>
+      <symbol id="i-chevrons" viewBox="0 0 56 32">
+        <path fill="currentColor" d="M0 0h13l15 16-15 16H0l15-16Z" />
+        <path fill="currentColor" d="M26 0h13l15 16-15 16H26l15-16Z" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="m4.5 12.5 5 5 10-11"
+        />
+      </symbol>
+      <symbol id="i-x" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          d="m6 6 12 12M18 6 6 18"
+        />
+      </symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24">
+        <g fill="currentColor">
+          <rect x="6" y="5" width="4" height="14" rx="1" />
+          <rect x="14" y="5" width="4" height="14" rx="1" />
+        </g>
+      </symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.6h4.6"
+        />
+      </symbol>
+      <symbol id="i-save" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M4 3h13l4 4v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm3 2v5h9V5Zm5 9a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"
+        />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path
+          stroke="currentColor"
+          stroke-width="2.6"
+          stroke-linecap="round"
+          d="M12 4v16M4 12h16"
+        />
+      </symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M9 2h6l1 2h4v2H4V4h4Zm-3 6h12l-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1Z"
+        />
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 3v12m-5-5 5 5 5-5M4 20h16"
+        />
+      </symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="m15.2 3.8 5 5L9 20H4v-5ZM17 2l5 5-1.4 1.4-5-5Z"
+        />
+      </symbol>
+      <symbol id="i-printer" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M6 2h12v5H6Zm-2 6h16a2 2 0 0 1 2 2v7h-4v5H6v-5H2v-7a2 2 0 0 1 2-2Zm4 8v4h8v-4Zm10-6a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+        />
+      </symbol>
+      <symbol id="i-flow" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M3 6h6v4H3Zm12 8h6v4h-6ZM9 8h4a2 2 0 0 1 2 2v6"
+        />
+      </symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M4 12h15m-5-5 5 5-5 5"
+        />
+      </symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M9 3v5m6-5v5M6 8h12v3a6 6 0 0 1-12 0Zm6 9v4"
+        />
+      </symbol>
+    </svg>
+
+    <div class="app" id="app">
+      <aside class="sidebar">
+        <div class="brand" aria-label="SHARX — Powered by wijaya CODE">
+          <svg class="logo" viewBox="0 0 240 170" role="img">
+            <g style="filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45))">
+              <path
+                fill="url(#g-fin)"
+                d="M82 19.5C115 24 150 44 172.5 78H159c-6-13.5-19-24.5-36.5-31.5 7.5 8.5 16.5 19.5 23.5 31.5h-13l-9-2.5-10.5 2.5-6.5 9c-.5-11-1.5-21-3.5-28.5 7.5.5 15.5 3.5 21.5 8-7-8-16-15.5-24.5-20C95 38 89 28 82 19.5Z"
+              />
+            </g>
+            <g
+              fill="url(#g-letter)"
+              style="filter: drop-shadow(0 1.5px 1.5px rgba(0, 0, 0, 0.55))"
+            >
+              <path
+                d="M28 83h34.5v8H33.4c-.8 0-1.4.6-1.4 1.4v.6c0 .8.6 1.4 1.4 1.4h22.4c3.8 0 6.7 2.9 6.7 6.6v2.4c0 3.7-2.9 6.6-6.7 6.6H25v-8h29.1c.8 0 1.4-.6 1.4-1.4v-.6c0-.8-.6-1.4-1.4-1.4H31.7c-3.8 0-6.7-2.9-6.7-6.6v-2.4c0-3.7 3-6.6 6.7-6.6Z"
+              />
+              <path d="M67 83h8.4v9.6h19.3V83h8.4v27h-8.4v-9.4H75.4v9.4H67Z" />
+              <path
+                d="M124.6 83h6l20 27h-10l-13-18.2-6.6 9.3h6.8l-3.6 5h-6.8l-2.8 3.9h-10Z"
+              />
+              <path
+                d="M151.3 83h25.2c3.9 0 6.9 3 6.9 6.7v2.4c0 3.2-2.3 5.9-5.4 6.5l6.6 11.4h-9.6l-6-10.6h-9.4v10.6h-8.3Zm8.3 7.4v5.3h15.3c.8 0 1.4-.6 1.4-1.4v-2.5c0-.8-.6-1.4-1.4-1.4Z"
+              />
+              <path
+                d="M186 83h10.2l7.2 9.2 7.2-9.2h10.2l-12.3 13.5 12.3 13.5h-10.2l-7.2-9.2-7.2 9.2H186l12.3-13.5Z"
+              />
+            </g>
+            <text
+              x="112"
+              y="130.5"
+              textLength="105.5"
+              lengthAdjust="spacingAndGlyphs"
+              class="logo-powered"
+            >
+              Powered by wijaya
+            </text>
+            <g
+              fill="none"
+              stroke="#8cf22a"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M128.3 138.6h-10.8a4 4 0 0 0-4 4v7.2a4 4 0 0 0 4 4h10.8"
+              />
+              <path
+                d="M137.8 138.6h7.6a4 4 0 0 1 4 4v7.2a4 4 0 0 1-4 4h-7.6a4 4 0 0 1-4-4v-7.2a4 4 0 0 1 4-4Z"
+              />
+              <path
+                d="M155.3 138.6h11.3a4 4 0 0 1 4 4v7.2a4 4 0 0 1-4 4h-11.3Z"
+              />
+              <path
+                d="M193.4 138.6h-11.1a4 4 0 0 0-4 4v7.2a4 4 0 0 0 4 4h11.1M178.3 146.2h12.6"
+              />
+              <path d="m200.2 139.2 15 7-15 7" />
+            </g>
+          </svg>
+        </div>
+
+        <nav class="nav" id="nav">
+          <a href="#dashboard" data-page="dashboard" class="nav-item active">
+            <svg class="nav-icon"><use href="#i-home" /></svg
+            ><span>Dashboard</span>
+          </a>
+          <a href="#transfer" data-page="transfer" class="nav-item">
+            <svg class="nav-icon"><use href="#i-device" /></svg
+            ><span>Data Transfer</span>
+          </a>
+          <a href="#logs" data-page="logs" class="nav-item">
+            <svg class="nav-icon"><use href="#i-doc" /></svg
+            ><span>Log History</span>
+          </a>
+          <a href="#settings" data-page="settings" class="nav-item">
+            <svg class="nav-icon"><use href="#i-gear" /></svg
+            ><span>Settings</span>
+          </a>
+          <a href="#about" data-page="about" class="nav-item">
+            <svg class="nav-icon"><use href="#i-info" /></svg><span>About</span>
+          </a>
+        </nav>
+
+        <div class="system-box" id="systemBox">
+          <span class="system-dot"></span>
+          <div>
+            <div class="system-text" id="systemText">System Online</div>
+            <div class="system-version" id="systemVersion">v1.0.0</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="titlebar" id="titlebar">
+          <svg class="title-chevrons"><use href="#i-chevrons" /></svg>
+          <div class="title-text">
+            <h1 id="pageTitle">Data Transfer</h1>
+            <p id="pageSubtitle">Real-Time Data Monitoring</p>
+          </div>
+          <div class="win-controls">
+            <button class="win-btn" data-win="minimize" title="Minimize">
+              <svg><use href="#i-min" /></svg>
+            </button>
+            <button class="win-btn" data-win="maximize" title="Maximize">
+              <svg><use href="#i-max" /></svg>
+            </button>
+            <button class="win-btn" data-win="close" title="Close">
+              <svg><use href="#i-close" /></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="pages">
+          <!-- ===================== DASHBOARD ===================== -->
+          <section class="page active" id="page-dashboard">
+            <div class="top-row">
+              <div class="card card-conn">
+                <div class="card-head">
+                  <svg class="head-icon icon-green">
+                    <use href="#i-antenna" />
+                  </svg>
+                  <h2>Connection Status</h2>
+                </div>
+                <div class="conn-body">
+                  <div class="conn-state" id="connState" data-state="stopped">
+                    <div class="conn-ring">
+                      <svg class="conn-glyph glyph-ok">
+                        <use href="#i-check" />
+                      </svg>
+                      <svg class="conn-glyph glyph-x"><use href="#i-x" /></svg>
+                      <svg class="conn-glyph glyph-pause">
+                        <use href="#i-pause" />
+                      </svg>
+                    </div>
+                    <div class="conn-title" id="connTitle">Stopped</div>
+                    <div class="conn-sub" id="connSub">Transfer idle</div>
+                  </div>
+                  <div class="conn-divider"></div>
+                  <div class="conn-info">
+                    <div class="info-row">
+                      <svg class="info-icon"><use href="#i-database" /></svg>
+                      <div>
+                        <div class="info-label">Server IP</div>
+                        <div class="info-value" id="serverIp">-</div>
+                      </div>
+                    </div>
+                    <div class="info-row">
+                      <svg class="info-icon"><use href="#i-gauge" /></svg>
+                      <div>
+                        <div class="info-label">Port</div>
+                        <div class="info-value" id="serverPort">-</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card card-stats">
+                <div class="card-head">
+                  <svg class="head-icon icon-white"><use href="#i-swap" /></svg>
+                  <h2>Transfer Statistics</h2>
+                </div>
+                <div class="stats-body">
+                  <div class="stat">
+                    <div class="stat-circle stat-green">
+                      <svg><use href="#i-arrow-up" /></svg>
+                    </div>
+                    <div class="stat-label">Received</div>
+                    <div class="stat-value">
+                      <span id="rxValue">0</span> <small id="rxUnit">B</small>
+                    </div>
+                    <div class="stat-rate rate-green" id="rxRate">(0 B/s)</div>
+                  </div>
+                  <div class="stat-divider"></div>
+                  <div class="stat">
+                    <div class="stat-circle stat-blue">
+                      <svg><use href="#i-arrow-down" /></svg>
+                    </div>
+                    <div class="stat-label">Sent</div>
+                    <div class="stat-value">
+                      <span id="txValue">0</span> <small id="txUnit">B</small>
+                    </div>
+                    <div class="stat-rate rate-blue" id="txRate">(0 B/s)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-incoming">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-list" /></svg>
+                <h2>Incoming Data (Live)</h2>
+                <label class="autoscroll">
+                  <span class="dot-green"></span>
+                  <span>Auto Scroll</span>
+                  <input type="checkbox" id="autoScroll" checked />
+                  <span class="switch"></span>
+                </label>
+              </div>
+              <div class="table-wrap">
+                <div class="table-scroll" id="incomingScroll">
+                  <table class="data-table" id="incomingTable">
+                    <colgroup>
+                      <col style="width: 74px" />
+                      <col style="width: 150px" />
+                      <col style="width: 125px" />
+                      <col />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>No</th>
+                        <th>Time</th>
+                        <th>Source</th>
+                        <th>Data</th>
+                      </tr>
+                    </thead>
+                    <tbody id="incomingBody"></tbody>
+                  </table>
+                  <div class="empty-hint" id="incomingEmpty">
+                    Belum ada data. Tekan <b>Start Transfer</b> untuk mulai
+                    menerima data dari server.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-log">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
+                <h2>Transfer Log</h2>
+              </div>
+              <div class="log-box">
+                <div class="log-scroll" id="logBox"></div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="big-btn btn-start" id="btnStart">
+                <svg><use href="#i-play" /></svg><span>Start Transfer</span>
+              </button>
+              <button class="big-btn btn-stop" id="btnStop">
+                <svg><use href="#i-stop" /></svg><span>Stop Transfer</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- ===================== DATA TRANSFER ===================== -->
+          <section class="page" id="page-transfer">
+            <div class="top-row">
+              <div class="card card-job">
+                <div class="card-head">
+                  <svg class="head-icon icon-green"><use href="#i-flow" /></svg>
+                  <h2>Active Job</h2>
+                  <span class="head-note" id="jobDate">-</span>
+                </div>
+                <div class="job-body">
+                  <div class="job-field">
+                    <div class="info-label">Operator</div>
+                    <div class="job-value" id="jobOperator">-</div>
+                  </div>
+                  <div class="job-field">
+                    <div class="info-label">Template CIJ</div>
+                    <div class="job-value" id="jobTemplate">-</div>
+                  </div>
+                  <div class="job-field job-counter">
+                    <div class="info-label">Counter terakhir</div>
+                    <div class="job-counter-value" id="jobCounter">-</div>
+                  </div>
+                </div>
+                <div class="job-next">
+                  Berikutnya dicetak: <b class="mono" id="jobNext">-</b>
+                  <span id="jobQueue"></span>
+                </div>
+                <div class="job-rule">
+                  Template sama &amp; operator ganti: counter <b>lanjut</b>.
+                  Template ganti: pakai counter <b>template baru</b>. Counter
+                  direset saat <b>ganti hari</b> atau tombol
+                  <b>Reset Counter</b>.
+                </div>
+              </div>
+              <div class="card card-printer">
+                <div class="card-head">
+                  <svg class="head-icon icon-white">
+                    <use href="#i-printer" />
+                  </svg>
+                  <h2>Printer CIJ</h2>
+                  <span class="pill" id="printerPill">-</span>
+                </div>
+                <div class="printer-body">
+                  <div class="info-row">
+                    <svg class="info-icon"><use href="#i-plug" /></svg>
+                    <div>
+                      <div class="info-label">Endpoint</div>
+                      <div class="info-value" id="printerEndpoint">-</div>
+                    </div>
+                  </div>
+                  <div class="printer-msg" id="printerMsg"></div>
+                  <div class="mini-stats">
+                    <div>
+                      <span class="info-label">Records</span
+                      ><b id="statRecords">0</b>
+                    </div>
+                    <div>
+                      <span class="info-label">Forwarded</span
+                      ><b id="statForwarded">0</b>
+                    </div>
+                    <div>
+                      <span class="info-label">Printed</span
+                      ><b id="statPrinted">0</b>
+                    </div>
+                    <div>
+                      <span class="info-label">Failed</span
+                      ><b id="statFailed">0</b>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-counters">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
+                <h2>Counter per Template</h2>
+                <button
+                  class="btn btn-danger btn-sm head-action"
+                  id="btnResetAll"
+                >
+                  <svg><use href="#i-reset" /></svg>Reset Counter
+                </button>
+              </div>
+              <div class="table-wrap">
+                <div class="table-scroll short">
+                  <table class="data-table compact">
+                    <thead>
+                      <tr>
+                        <th>Template</th>
+                        <th>Counter</th>
+                        <th>Jumlah Data</th>
+                        <th>Operator Terakhir</th>
+                        <th>Update</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="counterBody"></tbody>
+                  </table>
+                  <div class="empty-hint" id="counterEmpty">
+                    Belum ada counter tersimpan untuk hari ini.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-mapped">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-list" /></svg>
+                <h2>Mapped Data &rarr; Printer</h2>
+              </div>
+              <div class="table-wrap">
+                <div class="table-scroll">
+                  <table class="data-table compact">
+                    <thead>
+                      <tr>
+                        <th style="width: 62px">No</th>
+                        <th style="width: 92px">Time</th>
+                        <th style="width: 84px">Sumber</th>
+                        <th style="width: 112px">Operator</th>
+                        <th style="width: 100px">Template</th>
+                        <th style="width: 84px">Counter</th>
+                        <th>Data dikirim</th>
+                        <th style="width: 104px">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="mappedBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===================== LOG HISTORY ===================== -->
+          <section class="page" id="page-logs">
+            <div class="card card-full">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-doc" /></svg>
+                <h2>Log History</h2>
+                <div class="head-tools">
+                  <select id="logDate" class="input input-sm"></select>
+                  <select id="logStatus" class="input input-sm">
+                    <option value="">Semua status</option>
+                    <option value="Ok">OK</option>
+                    <option value="Info">INFO</option>
+                    <option value="Warn">WARN</option>
+                    <option value="Error">ERROR</option>
+                  </select>
+                  <input
+                    id="logSearch"
+                    class="input input-sm"
+                    placeholder="Cari..."
+                  />
+                  <button class="btn btn-sm" id="btnLogRefresh">
+                    <svg><use href="#i-reset" /></svg>Refresh
+                  </button>
+                  <a class="btn btn-sm" id="btnLogDownload" href="#"
+                    ><svg><use href="#i-download" /></svg>Download</a
+                  >
+                </div>
+              </div>
+              <div class="log-box log-history" id="logHistory"></div>
+              <div class="log-footer" id="logCount"></div>
+            </div>
+          </section>
+
+          <!-- ===================== SETTINGS ===================== -->
+          <section class="page" id="page-settings">
+            <div class="settings-tabs" id="settingsTabs">
+              <button class="tab active" data-tab="server">
+                Koneksi Server
+              </button>
+              <button class="tab" data-tab="mapping">Flow Mapping Data</button>
+              <button class="tab" data-tab="counter">Counter</button>
+              <button class="tab" data-tab="printer">Printer CIJ</button>
+              <button class="tab" data-tab="general">Umum</button>
+              <div class="tabs-spacer"></div>
+              <span class="dirty-note" id="dirtyNote" hidden
+                >Perubahan belum disimpan</span
+              >
+              <button class="btn" id="btnSettingsReload">
+                <svg><use href="#i-reset" /></svg>Batal
+              </button>
+              <button class="btn btn-primary" id="btnSettingsSave">
+                <svg><use href="#i-save" /></svg>Simpan
+              </button>
+            </div>
+            <div class="settings-errors" id="settingsErrors" hidden></div>
+
+            <!-- Server -->
+            <div class="card settings-panel active" data-panel="server">
+              <div class="card-head">
+                <svg class="head-icon icon-green">
+                  <use href="#i-antenna" />
+                </svg>
+                <h2>Koneksi ke Server</h2>
+              </div>
+              <div class="form-grid">
+                <label
+                  >Server IP<input class="input" data-bind="server.host"
+                /></label>
+                <label
+                  >Port<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    data-bind="server.port"
+                    data-type="int"
+                /></label>
+                <label
+                  >Pemisah record (framing)
+                  <select class="input" data-bind="server.framing">
+                    <option value="Line">Per baris (CR / LF / CRLF)</option>
+                    <option value="Etx">Diakhiri ETX</option>
+                    <option value="StxEtx">Dibungkus STX ... ETX</option>
+                    <option value="Custom">Terminator custom</option>
+                    <option value="Packet">Setiap paket TCP</option>
+                  </select>
+                </label>
+                <label data-show="server.framing=Custom"
+                  >Terminator custom<input
+                    class="input mono"
+                    data-bind="server.customTerminator"
+                    placeholder="&lt;CR&gt;&lt;LF&gt;"
+                /></label>
+                <label
+                  >Encoding<select
+                    class="input"
+                    data-bind="server.encoding"
+                    data-options="encodings"
+                  ></select
+                ></label>
+                <label
+                  >Connect timeout (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="server.connectTimeoutSeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Reconnect delay (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="server.reconnectDelaySeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Panjang maks. data (byte)<input
+                    class="input"
+                    type="number"
+                    min="16"
+                    data-bind="server.maxFrameBytes"
+                    data-type="int"
+                /></label>
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="server.autoReconnect"
+                  />Auto reconnect jika koneksi terputus</label
+                >
+              </div>
+              <div class="form-actions">
+                <button class="btn" id="btnTestServer">
+                  <svg><use href="#i-plug" /></svg>Test Koneksi Server
+                </button>
+                <span class="test-result" id="testServerResult"></span>
+              </div>
+            </div>
+
+            <!-- Flow Mapping -->
+            <div class="card settings-panel" data-panel="mapping">
+              <div class="card-head">
+                <svg class="head-icon icon-green"><use href="#i-flow" /></svg>
+                <h2>Flow Mapping Data &rarr; Printer CIJ</h2>
+              </div>
+              <div class="flow">
+                <div class="flow-step">
+                  <span class="flow-num">1</span>Data dari Server
+                </div>
+                <svg class="flow-arrow"><use href="#i-arrow-right" /></svg>
+                <div class="flow-step">
+                  <span class="flow-num">2</span>Pecah Field
+                </div>
+                <svg class="flow-arrow"><use href="#i-arrow-right" /></svg>
+                <div class="flow-step">
+                  <span class="flow-num">3</span>Atur Posisi
+                </div>
+                <svg class="flow-arrow"><use href="#i-arrow-right" /></svg>
+                <div class="flow-step">
+                  <span class="flow-num">4</span>Counter
+                </div>
+                <svg class="flow-arrow"><use href="#i-arrow-right" /></svg>
+                <div class="flow-step">
+                  <span class="flow-num">5</span>Kirim ke Printer
+                </div>
+              </div>
+
+              <div class="section-title">
+                <span class="flow-num">1</span>Contoh data dari server
+              </div>
+              <input
+                class="input mono wide"
+                data-bind="mapping.sampleData"
+                id="sampleInput"
+                placeholder="ANANDA02,867892,000"
+              />
+
+              <div class="section-title">
+                <span class="flow-num">2</span>Cara memecah data
+              </div>
+              <div class="form-grid">
+                <label
+                  >Mode
+                  <select class="input" data-bind="mapping.mode">
+                    <option value="Delimited">Pakai pemisah (delimiter)</option>
+                    <option value="FixedWidth">
+                      Lebar tetap (posisi karakter)
+                    </option>
+                  </select>
+                </label>
+                <label data-show="mapping.mode=Delimited"
+                  >Delimiter<input
+                    class="input mono"
+                    data-bind="mapping.delimiter"
+                    placeholder=","
+                /></label>
+                <label data-show="mapping.mode=Delimited"
+                  >Jumlah field wajib (0 = bebas)<input
+                    class="input"
+                    type="number"
+                    min="0"
+                    data-bind="mapping.expectedFieldCount"
+                    data-type="int"
+                /></label>
+                <label class="check"
+                  ><input type="checkbox" data-bind="mapping.trimFields" />Hapus
+                  spasi di awal/akhir field</label
+                >
+              </div>
+              <div class="chips" id="splitChips"></div>
+
+              <div class="section-title">
+                <span class="flow-num">3</span>Posisi field (bisa diatur /
+                custom)
+              </div>
+              <div class="table-wrap">
+                <table class="data-table compact form-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 170px">Kunci</th>
+                      <th style="width: 170px">Nama</th>
+                      <th class="col-delimited" style="width: 200px">Posisi</th>
+                      <th style="width: 96px" title="0 = seluruh field">
+                        Karakter awal
+                      </th>
+                      <th style="width: 86px" title="0 = sampai akhir">
+                        Panjang
+                      </th>
+                      <th style="width: 64px">Wajib</th>
+                      <th>Hasil</th>
+                      <th style="width: 56px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="fieldRows"></tbody>
+                </table>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-sm" id="btnAddField">
+                  <svg><use href="#i-plus" /></svg>Tambah field custom
+                </button>
+                <span class="hint"
+                  >OPERATOR, TEMPLATE dan SERVER_COUNTER dipakai logika counter.
+                  Field custom bisa dipakai di output sebagai
+                  <code>{KUNCI}</code>.</span
+                >
+              </div>
+
+              <div class="show-group" data-show="printer.protocol=Tij">
+                <div class="section-title">
+                  <span class="flow-num">5</span>Kirim ke printer TIJ (protokol
+                  4.8)
+                </div>
+                <div class="form-grid">
+                  <label
+                    >Nama message / template di printer (1E Load Print
+                    Message)<input
+                      class="input mono"
+                      data-bind="printer.tij.messageName"
+                      placeholder="{TEMPLATE}"
+                  /></label>
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="printer.tij.updateAfterLoad"
+                    />Kirim 01 Update Print Contents setelah load</label
+                  >
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="printer.tij.startPrintAfterLoad"
+                    />Kirim 11 Start Print setelah load</label
+                  >
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="printer.tij.clearBufferOnJobChange"
+                    />Kosongkan buffer 1D (21) saat job berubah</label
+                  >
+                </div>
+                <div class="sub-title">
+                  Remote field (1D Download Remote Field Data)
+                </div>
+                <div class="table-wrap">
+                  <table class="data-table compact form-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 120px">Field</th>
+                        <th style="width: 220px">Nama</th>
+                        <th>Isi</th>
+                        <th style="width: 260px">Hasil</th>
+                        <th style="width: 56px"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="remoteRows"></tbody>
+                  </table>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-sm" id="btnAddRemote">
+                    <svg><use href="#i-plus" /></svg>Tambah remote field
+                  </button>
+                  <span class="hint"
+                    >Default: <b>field 0 = nama operator</b>,
+                    <b>field 1 = counter</b>. Nomor field sesuai field remote di
+                    message printer.</span
+                  >
+                </div>
+              </div>
+
+              <div class="show-group" data-show="printer.protocol=CustomText">
+                <div class="section-title">
+                  <span class="flow-num">5</span>Format data ke printer (urutan
+                  langkah teks)
+                </div>
+                <div id="stepRows"></div>
+                <div class="form-actions">
+                  <button class="btn btn-sm" id="btnAddStep">
+                    <svg><use href="#i-plus" /></svg>Tambah langkah
+                  </button>
+                </div>
+              </div>
+
+              <div class="section-title">
+                <span class="flow-num">6</span>Feedback after print &rarr;
+                server
+              </div>
+              <div class="form-grid">
+                <label class="check"
+                  ><input type="checkbox" data-bind="feedback.enabled" />Setiap
+                  printer selesai cetak, kirim data yang tercetak ke
+                  server</label
+                >
+                <label class="span-2"
+                  >Format data ke server<input
+                    class="input mono"
+                    data-bind="feedback.template"
+                    placeholder="{OPERATOR},{TEMPLATE},{COUNTER}&lt;CR&gt;&lt;LF&gt;"
+                /></label>
+              </div>
+
+              <div class="token-help">
+                <div>
+                  <b>Placeholder:</b> <span id="placeholderChips"></span>
+                </div>
+                <div>
+                  <b>Karakter kontrol:</b> <span id="tokenChips"></span>
+                </div>
+                <div class="hint">
+                  Klik chip untuk menyisipkan ke kolom yang terakhir dipilih.
+                  Format: <code>{COUNTER:D6}</code> 6 digit,
+                  <code>{DATE:ddMMyy}</code>, <code>{TIME:HHmm}</code>,
+                  <code>{OPERATOR:L10}</code> rata kiri 10,
+                  <code>{TEMPLATE:Z8}</code> isi nol 8, <code>{F1}</code> field
+                  ke-1 hasil split, <code>&lt;0x1B&gt;</code> byte hex.
+                </div>
+              </div>
+
+              <div class="section-title">Preview hasil</div>
+              <div class="preview" id="previewBox"></div>
+            </div>
+
+            <!-- Counter -->
+            <div class="card settings-panel" data-panel="counter">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-bars" /></svg>
+                <h2>Counter</h2>
+                <button
+                  class="btn btn-danger btn-sm head-action"
+                  id="btnResetAll2"
+                >
+                  <svg><use href="#i-reset" /></svg>Reset Counter
+                </button>
+              </div>
+              <div class="rules">
+                <div class="rule">
+                  <b>Template sama, operator berubah</b> &rarr; counter tetap
+                  lanjut dari hitungan terakhir.
+                </div>
+                <div class="rule">
+                  <b>Template berubah</b> &rarr; counter pindah ke counter
+                  template baru (tersimpan per template).
+                </div>
+                <div class="rule">
+                  <b>Ganti hari</b> (jam ganti hari di bawah) atau tombol
+                  <b>Reset Counter</b> &rarr; semua counter direset.
+                </div>
+                <div class="rule">
+                  Mode <b>per cetak</b>: counter naik setiap printer mengirim
+                  sinyal selesai cetak (AB) dan nilai yang tercetak dilaporkan
+                  ke server.
+                </div>
+              </div>
+              <div class="form-grid">
+                <label
+                  >Counter bertambah saat
+                  <select class="input" data-bind="counter.incrementOn">
+                    <option value="Print">
+                      Printer selesai cetak (feedback after print)
+                    </option>
+                    <option value="Record">Setiap data dari server</option>
+                  </select>
+                </label>
+                <label
+                  >Nilai awal<input
+                    class="input"
+                    type="number"
+                    min="0"
+                    data-bind="counter.startValue"
+                    data-type="int"
+                /></label>
+                <label
+                  >Step (+ per data)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="counter.step"
+                    data-type="int"
+                /></label>
+                <label
+                  >Jumlah digit (zero padding)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="18"
+                    data-bind="counter.digits"
+                    data-type="int"
+                /></label>
+                <label
+                  >Batas maksimum (0 = tanpa batas)<input
+                    class="input"
+                    type="number"
+                    min="0"
+                    data-bind="counter.maxValue"
+                    data-type="int"
+                /></label>
+                <label
+                  >Jam ganti hari<input
+                    class="input"
+                    type="time"
+                    data-bind="counter.dayStartTime"
+                /></label>
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="counter.useServerValueAsStart"
+                  />Template baru: mulai dari counter yang dikirim server</label
+                >
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="counter.incrementBeforeUse"
+                  />Tambah dulu sebelum dikirim (000 &rarr; data pertama
+                  001)</label
+                >
+              </div>
+            </div>
+
+            <!-- Printer -->
+            <div class="card settings-panel" data-panel="printer">
+              <div class="card-head">
+                <svg class="head-icon icon-white">
+                  <use href="#i-printer" />
+                </svg>
+                <h2>Koneksi Printer CIJ</h2>
+              </div>
+              <div class="form-grid">
+                <label class="check"
+                  ><input type="checkbox" data-bind="printer.enabled" />Teruskan
+                  data ke printer (nonaktif = monitor saja)</label
+                >
+                <label
+                  >Protokol
+                  <select class="input" data-bind="printer.protocol">
+                    <option value="Tij">TIJ Protocol 4.8 (1E / 1D / AB)</option>
+                    <option value="CustomText">Custom text</option>
+                  </select>
+                </label>
+                <label
+                  >Koneksi
+                  <select class="input" data-bind="printer.transport">
+                    <option value="Tcp">TCP/IP (Ethernet)</option>
+                    <option value="Serial">Serial (RS232)</option>
+                  </select>
+                </label>
+                <label data-show="printer.transport=Tcp"
+                  >IP printer<input class="input" data-bind="printer.host"
+                /></label>
+                <label data-show="printer.transport=Tcp"
+                  >Port printer<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    data-bind="printer.port"
+                    data-type="int"
+                /></label>
+                <label data-show="printer.transport=Serial"
+                  >COM port<input
+                    class="input"
+                    list="serialPorts"
+                    data-bind="printer.serialPort" /><datalist
+                    id="serialPorts"
+                  ></datalist
+                ></label>
+                <label data-show="printer.transport=Serial"
+                  >Baud rate
+                  <select
+                    class="input"
+                    data-bind="printer.baudRate"
+                    data-type="int"
+                  >
+                    <option>1200</option>
+                    <option>2400</option>
+                    <option>4800</option>
+                    <option>9600</option>
+                    <option>19200</option>
+                    <option>38400</option>
+                    <option>57600</option>
+                    <option>115200</option>
+                  </select>
+                </label>
+                <label data-show="printer.transport=Serial"
+                  >Data bits<select
+                    class="input"
+                    data-bind="printer.dataBits"
+                    data-type="int"
+                  >
+                    <option>7</option>
+                    <option>8</option>
+                  </select></label
+                >
+                <label data-show="printer.transport=Serial"
+                  >Parity<select class="input" data-bind="printer.parity">
+                    <option>None</option>
+                    <option>Odd</option>
+                    <option>Even</option>
+                    <option>Mark</option>
+                    <option>Space</option>
+                  </select></label
+                >
+                <label data-show="printer.transport=Serial"
+                  >Stop bits<select class="input" data-bind="printer.stopBits">
+                    <option>One</option>
+                    <option>OnePointFive</option>
+                    <option>Two</option>
+                  </select></label
+                >
+                <div class="show-group" data-show="printer.protocol=Tij">
+                  <label
+                    >Slave address (-1 = byte terakhir IP)<input
+                      class="input"
+                      type="number"
+                      min="-1"
+                      max="255"
+                      data-bind="printer.tij.slaveAddress"
+                      data-type="int"
+                  /></label>
+                  <label
+                    >Antrean buffer 1D (1-10)<input
+                      class="input"
+                      type="number"
+                      min="1"
+                      max="10"
+                      data-bind="printer.tij.lookahead"
+                      data-type="int"
+                  /></label>
+                </div>
+                <label
+                  >Encoding<select
+                    class="input"
+                    data-bind="printer.encoding"
+                    data-options="encodings"
+                  ></select
+                ></label>
+                <label
+                  >Connect timeout (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="printer.connectTimeoutSeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Reconnect printer (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="printer.reconnectDelaySeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Timeout balasan (ms)<input
+                    class="input"
+                    type="number"
+                    min="50"
+                    data-bind="printer.responseTimeoutMs"
+                    data-type="int"
+                /></label>
+                <div class="show-group" data-show="printer.protocol=CustomText">
+                  <label
+                    >Jeda antar langkah (ms)<input
+                      class="input"
+                      type="number"
+                      min="0"
+                      data-bind="printer.stepDelayMs"
+                      data-type="int"
+                  /></label>
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      data-bind="printer.waitForResponse"
+                    />Tunggu balasan printer setiap langkah</label
+                  >
+                  <label
+                    >Balasan sukses (kosong = apa saja)<input
+                      class="input mono"
+                      data-bind="printer.expectedResponse"
+                      placeholder="&lt;ACK&gt;"
+                  /></label>
+                  <label
+                    >Sinyal selesai cetak (feedback)<input
+                      class="input mono"
+                      data-bind="printer.printDoneSignal"
+                      placeholder="kosong = tidak ada"
+                  /></label>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn" id="btnTestPrinter">
+                  <svg><use href="#i-plug" /></svg>Test Koneksi Printer
+                </button>
+                <span class="test-result" id="testPrinterResult"></span>
+              </div>
+              <p class="hint">
+                Isi field (operator, counter) dan nama message diatur di tab
+                <a href="#settings/mapping">Flow Mapping Data</a>. Tombol test
+                juga menampilkan daftar message yang ada di printer TIJ.
+              </p>
+            </div>
+
+            <!-- General -->
+            <div class="card settings-panel" data-panel="general">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-gear" /></svg>
+                <h2>Umum</h2>
+              </div>
+              <div class="form-grid">
+                <label
+                  >Simpan log (hari, 0 = selamanya)<input
+                    class="input"
+                    type="number"
+                    min="0"
+                    data-bind="general.logRetentionDays"
+                    data-type="int"
+                /></label>
+                <label
+                  >Baris data live<input
+                    class="input"
+                    type="number"
+                    min="10"
+                    max="2000"
+                    data-bind="general.liveRows"
+                    data-type="int"
+                /></label>
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="general.autoStart"
+                  />Langsung Start Transfer saat aplikasi dibuka</label
+                >
+              </div>
+              <p class="hint">Folder data: <code id="dataDir">-</code></p>
+            </div>
+          </section>
+
+          <!-- ===================== ABOUT ===================== -->
+          <section class="page" id="page-about">
+            <div class="card card-full about">
+              <div class="card-head">
+                <svg class="head-icon icon-white"><use href="#i-info" /></svg>
+                <h2>About</h2>
+              </div>
+              <div class="about-body">
+                <h3>
+                  SHARX Data Transfer <span id="aboutVersion">v1.0.0</span>
+                </h3>
+                <p>
+                  Jembatan data dari server (TCP/IP) ke printer CIJ. Data dari
+                  server dipecah sesuai <b>Flow Mapping</b>, counter dihitung
+                  per template, lalu diteruskan ke printer.
+                </p>
+                <ul>
+                  <li>Koneksi server via IP &amp; port, auto reconnect.</li>
+                  <li>
+                    Posisi field (operator, template, counter, field custom)
+                    bisa diatur.
+                  </li>
+                  <li>
+                    Counter tersimpan per template sampai ganti hari atau Reset
+                    Counter.
+                  </li>
+                  <li>
+                    Printer TIJ Protocol 4.8 (TCP/IP atau RS232): load template
+                    (1E), isi remote field (1D), sinyal selesai cetak (AB).
+                  </li>
+                  <li>
+                    Setiap selesai cetak, operator, template dan counter yang
+                    tercetak dilaporkan ke server.
+                  </li>
+                  <li>Log harian tersimpan di folder data.</li>
+                </ul>
+                <p class="muted">
+                  Powered by wijaya CODE &middot; Font: Roboto Condensed &amp;
+                  Roboto Mono (SIL Open Font License).
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-card">
+        <h3 id="modalTitle"></h3>
+        <div id="modalBody"></div>
+        <div class="modal-actions">
+          <button class="btn" id="modalCancel">Batal</button>
+          <button class="btn btn-primary" id="modalOk">OK</button>
+        </div>
+      </div>
+    </div>
+    <div class="toasts" id="toasts"></div>
+
+    <script src="js/app.js"></script>
+  </body>
+</html>
