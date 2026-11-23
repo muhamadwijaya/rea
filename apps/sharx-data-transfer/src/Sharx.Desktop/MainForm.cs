@@ -53,7 +53,19 @@ internal sealed class MainForm : Form
         }
 
         Controls.Add(_web);
-        Load += async (_, _) => await StartAsync();
+        Load += async (_, _) =>
+        {
+            try
+            {
+                await StartAsync();
+            }
+            catch (Exception ex)
+            {
+                SharxWebHost.WriteCrash(SharxHostOptions.DefaultDataDirectory(), "Startup", ex);
+                MessageBox.Show($"SHARX Data Transfer gagal dibuka:\n{ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Close();
+            }
+        };
         Resize += (_, _) => Padding = WindowState == FormWindowState.Maximized ? Padding.Empty : new Padding(ResizeBorder);
         Move += (_, _) => UpdateMaximizedBounds();
         FormClosing += OnFormClosing;
@@ -163,9 +175,9 @@ internal sealed class MainForm : Form
             await _app.StopAsync(timeout.Token);
             await _app.DisposeAsync();
         }
-        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+        catch (Exception)
         {
-            // Tutup saja.
+            // Apa pun yang gagal saat berhenti, jendela tetap ditutup.
         }
 
         Close();

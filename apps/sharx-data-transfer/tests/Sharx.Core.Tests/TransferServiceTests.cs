@@ -436,8 +436,129 @@ public class PrintNotStartedTests
         await using var rig = new Rig(autoStart: true);
         await rig.SendJobAsync("ANANDA02,867892,000");
 
-        await WaitUntil(() => rig.Commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+        await WaitUntil(() => !rig.Records.IsEmpty, "record selesai diproses");
         Assert.Equal(["11", "1E:867892", "01", "21", "1D:0=ANANDA02;1=001"], rig.Commands.ToArray());
         Assert.Equal(RecordStatus.Ok, rig.Records.Single().Status);
+    }
+}
+
+public class RobustnessTests
+{
+    private static async Task WaitUntil(Func<bool> condition, string what, int seconds = 20)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Menunggu: {what}");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
+    [Fact]
+    public async Task Flood_of_server_records_is_processed_completely_without_buffer_growth()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var commands = new ConcurrentQueue<string>();
+        var settings = new AppSettings();
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Counter.IncrementOn = CounterIncrement.Record;
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ => new FakeTijLink(commands));
+        service.Start();
+
+        using var server = await listener.AcceptTcpClientAsync();
+        const int total = 3000;
+        var payload = new StringBuilder();
+        for (var i = 0; i < total; i++)
+        {
+            payload.Append(i % 2 == 0 ? "ANANDA02" : "BUDI01").Append(",867892,000\n");
+        }
+
+        await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes(payload.ToString()));
+        await WaitUntil(() => service.Stats.Snapshot().RecordsForwarded == total, "semua record terkirim");
+
+        Assert.Equal(total, commands.Count(c => c.StartsWith("1D", StringComparison.Ordinal)));
+        Assert.Contains($"1D:0=BUDI01;1={total:D3}", commands);
+        Assert.Equal(50, service.RecentRecords(1000).Count);
+        await service.StopAsync();
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Feedback_is_queued_while_server_is_down_and_delivered_after_reconnect()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var commands = new ConcurrentQueue<string>();
+        FakeTijLink? printer = null;
+        var settings = new AppSettings();
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.ReconnectDelaySeconds = 1;
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ => printer = new FakeTijLink(commands));
+        service.Start();
+
+        using (var first = await listener.AcceptTcpClientAsync())
+        {
+            await first.GetStream().WriteAsync(Encoding.UTF8.GetBytes("ANANDA02,867892,000\n"));
+            await WaitUntil(() => commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+        }
+
+        await WaitUntil(() => service.Status.Server != ServerState.Connected, "server terputus");
+        printer!.Print();
+        printer.Print();
+        await WaitUntil(() => service.Status.FeedbackQueued == 2, "feedback diantrikan");
+
+        using var second = await listener.AcceptTcpClientAsync();
+        var reader = new StreamReader(second.GetStream(), Encoding.UTF8);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.Equal("ANANDA02,867892,001", await reader.ReadLineAsync(timeout.Token));
+        Assert.Equal("ANANDA02,867892,002", await reader.ReadLineAsync(timeout.Token));
+        await service.StopAsync();
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Log_history_returns_only_last_50_matching_lines()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"sharx-log-{Guid.NewGuid():N}");
+        try
+        {
+            var log = new TransferLog(dir, TimeProvider.System);
+            for (var i = 1; i <= 120; i++)
+            {
+                log.Write(i % 3 == 0 ? LogStatus.Error : LogStatus.Ok, $"baris {i}");
+            }
+
+            await log.DisposeAsync();
+            var date = log.Dates().Single();
+
+            var page = log.ReadDay(date);
+            Assert.Equal(120, page.Matched);
+            Assert.Equal(50, page.Entries.Count);
+            Assert.Equal("baris 120", page.Entries[^1].Message);
+
+            var errors = log.ReadDay(date, LogStatus.Error);
+            Assert.Equal(40, errors.Matched);
+            Assert.All(errors.Entries, e => Assert.Equal(LogStatus.Error, e.Status));
+
+            var search = log.ReadDay(date, null, "baris 11");
+            Assert.Equal(11, search.Matched); // baris 11 dan 110-119
+            Assert.Equal("baris 11", search.Entries[0].Message);
+            Assert.Equal(120, log.ReadAll(date).Count());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

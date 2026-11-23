@@ -122,9 +122,9 @@ public static partial class SettingsValidator
         ValidateCounter(s.Counter, errors);
         ValidatePrinter(s, errors);
 
-        if (s.General.LogRetentionDays is < 0 or > 3650 || s.General.LiveRows is < 10 or > 2000)
+        if (s.General.LogRetentionDays is < 0 or > 3650)
         {
-            errors.Add("Retensi log 0-3650 hari dan baris live 10-2000");
+            errors.Add("Retensi log 0-3650 hari");
         }
 
         return errors;

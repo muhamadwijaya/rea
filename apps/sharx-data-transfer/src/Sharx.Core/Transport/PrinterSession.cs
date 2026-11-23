@@ -86,7 +86,20 @@ public sealed class PrinterSession : IAsyncDisposable
                 }
             }
 
-            await _link.SendAsync(payload, ct).ConfigureAwait(false);
+            // Printer yang berhenti menerima data tidak boleh menahan transfer selamanya.
+            using (var sendTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                sendTimeout.CancelAfter(timeout + TimeSpan.FromSeconds(5));
+                try
+                {
+                    await _link.SendAsync(payload, sendTimeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    throw new TimeoutException("Printer tidak menerima data (kirim timeout)");
+                }
+            }
+
             if (pending is null)
             {
                 return null;

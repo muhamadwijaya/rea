@@ -157,9 +157,12 @@ public sealed class TijDriver : IPrinterDriver
         if (!okStatuses.Contains(frame.Status))
         {
             var text = $"{name}: {TijProtocol.PrinterStatusText(frame.Status)} (P_Status {frame.Status:X2})";
-            throw frame.Status == TijProtocol.StatusPrintNotStarted
-                ? new PrinterNotReadyException(text)
-                : new PrinterException(text);
+            throw frame.Status switch
+            {
+                TijProtocol.StatusPrintNotStarted => new PrinterNotReadyException(text),
+                TijProtocol.StatusBufferStillFull => new PrinterBusyException(text),
+                _ => new PrinterException(text),
+            };
         }
 
         // 42 (buffer now full) normal saat buffer 1D terisi; status lain yang diterima dicatat.

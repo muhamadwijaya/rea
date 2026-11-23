@@ -701,9 +701,9 @@ code {
   --card-glow:
     -3px 2px 12px -3px rgba(126, 247, 38, 0.4),
     3px 0 12px -3px rgba(47, 124, 255, 0.4);
-  flex: 1 1 357px;
-  min-height: 250px;
-  margin-top: 30px;
+  flex: 1 0 330px;
+  min-height: 300px;
+  margin-top: 22px;
 }
 
 .card-incoming .card-head {
@@ -1013,11 +1013,21 @@ code {
 
 /* Buttons */
 .actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: grid;
   grid-template-columns: 430fr 434fr;
   gap: 33px;
   flex: none;
-  padding: 32px 7px 46px 1px;
+  margin-top: 10px;
+  padding: 22px 7px 22px 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(2, 16, 39, 0) 0%,
+    rgba(2, 16, 39, 0.92) 28%,
+    #021027 100%
+  );
 }
 
 .big-btn {
@@ -1189,105 +1199,93 @@ code {
   border: 1px solid #3a5285;
 }
 
-.card-job {
-  --card-border: linear-gradient(100deg, #8cff2c 0%, #3cbd7a 60%, #2c86f0 100%);
+/* Job aktif + printer (gabungan halaman Data Transfer) */
+.card-jobstrip {
+  --card-border: linear-gradient(
+    95deg,
+    #8cff2c 0%,
+    #3cbd7a 35%,
+    #2f8ae8 65%,
+    #2c6be0 100%
+  );
+  --card-glow:
+    -3px 2px 12px -3px rgba(126, 247, 38, 0.35),
+    3px 0 12px -3px rgba(47, 124, 255, 0.35);
+  flex: none;
+  margin-top: 22px;
 }
 
-.card-printer {
-  --card-border: linear-gradient(135deg, #8cff2c 0%, #2f74e6 25%, #2c6be0 100%);
-}
-
-#page-transfer .top-row {
-  height: auto;
-  min-height: 288px;
-}
-
-.job-body {
+.jobstrip {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-  padding: 22px 24px 8px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(
+      0,
+      0.9fr
+    ) minmax(0, 1fr) 2px minmax(0, 1.9fr);
+  gap: 18px;
+  align-items: center;
+  padding: 16px 22px;
 }
 
-.job-value {
-  margin-top: 4px;
-  font-size: 24px;
+.js-value {
+  margin-top: 2px;
+  font-size: 23px;
   font-weight: 600;
   overflow-wrap: break-word;
 }
 
-.job-counter-value {
-  margin-top: 0;
+.js-counter {
   color: var(--lime-text);
   font-family: var(--mono);
-  font-size: 46px;
-  font-weight: 400;
-  line-height: 52px;
+  font-size: 38px;
+  line-height: 42px;
   text-shadow: 0 0 12px rgba(125, 250, 44, 0.4);
 }
 
-.job-rule {
-  margin: auto 24px 18px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(47, 124, 255, 0.08);
-  border: 1px solid #1d3a68;
-  color: #b9c7ee;
-  font-size: 15.5px;
-  line-height: 21px;
+.js-note {
+  color: var(--label);
+  font-size: 14px;
 }
 
-.printer-body {
+.js-divider {
+  align-self: stretch;
+  background: linear-gradient(180deg, #3b5a8e, #2d4a7a);
+  border-radius: 2px;
+}
+
+.js-printer {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 22px 28px;
+  gap: 6px;
+  min-width: 0;
 }
 
-.print-state {
+.js-printer-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.print-state b {
-  margin-right: auto;
-  font-size: 18px;
+.js-printer-icon {
+  width: 26px;
+  height: 26px;
+  color: #f2f6ff;
 }
 
-.print-state b.ok {
-  color: #8ef75a;
+.js-printer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
 }
 
-.print-state b.wait {
-  color: var(--amber);
+.js-printer-head .pill {
+  margin-left: auto;
 }
 
-.printer-msg {
-  min-height: 22px;
-  color: #ff8a8a;
-  font-size: 16px;
-}
-
-.mini-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: auto;
-}
-
-.mini-stats > div {
+.js-buttons {
   display: flex;
-  flex-direction: column;
-  padding: 8px 12px;
-  border: 1px solid #1d3a68;
-  border-radius: 8px;
-  background: #061430;
-}
-
-.mini-stats b {
-  font-size: 26px;
+  gap: 8px;
 }
 
 .card-counters {
@@ -1296,18 +1294,30 @@ code {
   flex: none;
 }
 
+.card-counters .head-note {
+  margin-left: 18px;
+}
+
+.mini-stats {
+  display: flex;
+  gap: 14px;
+  margin: 0 14px 0 auto;
+  color: var(--label);
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.mini-stats b {
+  color: #fff;
+  font-size: 18px;
+}
+
 .card-counters .table-wrap {
   margin-top: 12px;
 }
 
-.card-mapped {
-  --card-border: linear-gradient(95deg, #c6ff3a 0%, #2f8fd8 45%, #2c6be0 100%);
-  margin: 22px 0 24px;
-  flex: 1 0 320px;
-}
-
-.card-mapped .table-wrap {
-  margin-top: 12px;
+.card-counters .table-scroll.short {
+  max-height: 210px;
 }
 
 .status-tag {
@@ -1515,22 +1525,6 @@ input[type="checkbox"] {
   margin: 16px 24px 8px;
   color: var(--label);
   font-size: 17px;
-}
-
-.job-next {
-  padding: 0 24px;
-  color: var(--label);
-  font-size: 18px;
-}
-
-.job-next b {
-  color: #fff;
-  font-size: 20px;
-}
-
-.job-next span {
-  margin-left: 8px;
-  font-size: 15px;
 }
 
 .form-actions {
@@ -1932,8 +1926,8 @@ button.chip:hover {
   }
 
   .actions {
-    padding-top: 22px;
-    padding-bottom: 22px;
+    padding-top: 16px;
+    padding-bottom: 16px;
   }
 }
 

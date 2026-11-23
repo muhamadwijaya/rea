@@ -36,7 +36,21 @@ public sealed partial class TransferService : IAsyncDisposable
     private volatile AppSettings _settings;
     private CancellationTokenSource? _runCts;
     private CancellationTokenSource? _connectionCts;
+    /// <summary>Perintah &amp; event printer (prioritas, tidak dibatasi; jumlahnya kecil).</summary>
     private Channel<WorkItem>? _work;
+
+    /// <summary>Data dari server (dibatasi: jika penuh, pembacaan TCP menunggu = tidak menumpuk di memori).</summary>
+    private Channel<Frame>? _frames;
+
+    /// <summary>Satu sinyal per item di <see cref="_work"/> / <see cref="_frames"/>.</summary>
+    private SemaphoreSlim? _workSignal;
+
+    /// <summary>Feedback ke server; dikirim task terpisah sehingga server lambat tidak menahan transfer.</summary>
+    private readonly Channel<byte[]> _feedback;
+
+    private Task? _feedbackTask;
+    private long _feedbackDropped;
+    private const int FrameQueueCapacity = 1000;
     private Task? _serverTask;
     private Task? _workerTask;
     private Task? _backgroundTask;
@@ -64,6 +78,13 @@ public sealed partial class TransferService : IAsyncDisposable
         _time = time;
         _printerFactory = printerFactory ?? PrinterLinks.Create;
         _printerState = settings.Printer.Enabled ? PrinterState.Idle : PrinterState.Disabled;
+        _feedback = Channel.CreateBounded<byte[]>(
+            new BoundedChannelOptions(Math.Clamp(settings.Feedback.MaxQueued, 1, 1_000_000))
+            {
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.DropOldest,
+            },
+            _ => Interlocked.Increment(ref _feedbackDropped));
     }
 
     public AppSettings Settings => _settings;
@@ -105,7 +126,7 @@ public sealed partial class TransferService : IAsyncDisposable
                 _printerMessage,
                 _lastError,
                 jobStatus,
-                _outboxCount,
+                _feedback.Reader.Count,
                 _printState,
                 WaitingForPrinter,
                 _waitingCount,
@@ -146,12 +167,23 @@ public sealed partial class TransferService : IAsyncDisposable
             _runCts = new CancellationTokenSource();
             var token = _runCts.Token;
             _work = Channel.CreateUnbounded<WorkItem>(new UnboundedChannelOptions { SingleReader = true });
+            _frames = Channel.CreateBounded<Frame>(new BoundedChannelOptions(FrameQueueCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
+            _workSignal = new SemaphoreSlim(0);
             _running = true;
             _lastError = null;
             _printerNeedsJob = true;
             RestoreJobFromCounter();
-            _workerTask = Task.Run(() => WorkerAsync(_work.Reader, token));
+            var work = _work.Reader;
+            var frames = _frames.Reader;
+            var signal = _workSignal;
+            _workerTask = Task.Run(() => WorkerAsync(work, frames, signal, token));
             _serverTask = Task.Run(() => RunServerAsync(token));
+            _feedbackTask = Task.Run(() => FeedbackSenderAsync(token));
         }
 
         var s = _settings;
@@ -170,22 +202,23 @@ public sealed partial class TransferService : IAsyncDisposable
         CancellationTokenSource? cts;
         Task? server;
         Task? worker;
+        Task? feedback;
         lock (_lifecycle)
         {
             cts = _runCts;
             server = _serverTask;
             worker = _workerTask;
+            feedback = _feedbackTask;
             if (cts is null)
             {
                 return;
             }
 
             _running = false;
-            _work?.Writer.TryComplete();
         }
 
         await cts.CancelAsync().ConfigureAwait(false);
-        foreach (var task in new[] { server, worker })
+        foreach (var task in new[] { server, worker, feedback })
         {
             if (task is null)
             {
@@ -209,7 +242,11 @@ public sealed partial class TransferService : IAsyncDisposable
             _runCts = null;
             _serverTask = null;
             _workerTask = null;
+            _feedbackTask = null;
             _work = null;
+            _frames = null;
+            _workSignal?.Dispose();
+            _workSignal = null;
         }
 
         _serverState = ServerState.Stopped;
@@ -317,7 +354,21 @@ public sealed partial class TransferService : IAsyncDisposable
     private static string ServerKey(ServerSettings s) =>
         $"{s.Host}|{s.Port}|{s.Framing}|{s.CustomTerminator}|{s.Encoding}|{s.MaxFrameBytes}";
 
-    private void Enqueue(WorkItem item) => _work?.Writer.TryWrite(item);
+    private void Enqueue(WorkItem item)
+    {
+        var signal = _workSignal;
+        if (_work?.Writer.TryWrite(item) == true && signal is not null)
+        {
+            try
+            {
+                signal.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Transfer sedang berhenti.
+            }
+        }
+    }
 
     // ------------------------------------------------------------------ server
 
@@ -406,11 +457,11 @@ public sealed partial class TransferService : IAsyncDisposable
         _lastError = null;
         _log.Write(LogStatus.Ok, $"Connected to server {server.Host}:{server.Port}");
         RaiseStatus();
-        Enqueue(new ServerConnectedItem());
 
         var decoder = new FrameDecoder(server);
         var buffer = new byte[8192];
-        var writer = _work!.Writer;
+        var writer = _frames!.Writer;
+        var signal = _workSignal!;
         var idle = TimeSpan.FromMilliseconds(server.IdleFlushMs);
         var idleNoticeLogged = false;
         Task<int>? read = null;
@@ -432,7 +483,8 @@ public sealed partial class TransferService : IAsyncDisposable
                                 $"Data dari server tanpa terminator ({DescribeFraming(server)}); diproses setelah jeda {server.IdleFlushMs} ms");
                         }
 
-                        await writer.WriteAsync(new ServerFrameItem(pending), ct).ConfigureAwait(false);
+                        await writer.WriteAsync(pending, ct).ConfigureAwait(false);
+                        signal.Release();
                     }
 
                     continue;
@@ -445,7 +497,8 @@ public sealed partial class TransferService : IAsyncDisposable
             {
                 if (decoder.Flush() is { } last)
                 {
-                    await writer.WriteAsync(new ServerFrameItem(last), ct).ConfigureAwait(false);
+                    await writer.WriteAsync(last, ct).ConfigureAwait(false);
+                    signal.Release();
                 }
 
                 return;
@@ -454,7 +507,9 @@ public sealed partial class TransferService : IAsyncDisposable
             _stats.AddReceived(n);
             foreach (var frame in decoder.Push(buffer.AsSpan(0, n)))
             {
-                await writer.WriteAsync(new ServerFrameItem(frame), ct).ConfigureAwait(false);
+                // Jika antrean penuh, tunggu (TCP ikut menahan server) — tidak menumpuk di memori.
+                await writer.WriteAsync(frame, ct).ConfigureAwait(false);
+                signal.Release();
             }
         }
     }
@@ -481,6 +536,11 @@ public sealed partial class TransferService : IAsyncDisposable
                 StatsUpdated?.Invoke(_stats.Snapshot());
                 CheckDayRollover();
                 ScheduleRetries();
+                var dropped = Interlocked.Exchange(ref _feedbackDropped, 0);
+                if (dropped > 0)
+                {
+                    _log.Write(LogStatus.Warn, $"Antrean feedback penuh: {dropped} laporan terlama dibuang");
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -545,7 +605,7 @@ public sealed partial class TransferService : IAsyncDisposable
 
     private void Publish(TransferRecord record)
     {
-        var limit = Math.Clamp(_settings.General.LiveRows, 10, 2000);
+        const int limit = TransferLog.ViewLimit;
         lock (_recordsGate)
         {
             _records.AddFirst(record);

@@ -63,6 +63,35 @@ public sealed class AlreadyRunningException(string dataDirectory)
 
 public static class SharxWebHost
 {
+    /// <summary>
+    /// Catat error yang tidak tertangani ke <c>crash.log</c> dan cegah task yang gagal mematikan aplikasi.
+    /// </summary>
+    public static void InstallCrashGuards(string dataDirectory)
+    {
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            WriteCrash(dataDirectory, "UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            WriteCrash(dataDirectory, "UnhandledException", e.ExceptionObject as Exception);
+    }
+
+    public static void WriteCrash(string dataDirectory, string kind, Exception? ex)
+    {
+        try
+        {
+            Directory.CreateDirectory(dataDirectory);
+            File.AppendAllText(
+                Path.Combine(dataDirectory, "crash.log"),
+                $"{DateTimeOffset.Now:O}\t{kind}\t{ex}\n\n");
+        }
+        catch (Exception logError) when (logError is IOException or UnauthorizedAccessException)
+        {
+            // Tidak bisa menulis log crash; jangan menambah error baru.
+        }
+    }
+
     public static string Version { get; } =
         typeof(SharxWebHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             .Split('+')[0] ?? "1.0.0";
@@ -125,7 +154,7 @@ public static class SharxWebHost
             }
         }
 
-        WireEvents(service, hub);
+        var batcher = new LiveBatcher(service, hub, () => CounterView(service));
         app.Lifetime.ApplicationStarted.Register(() =>
         {
             log.Write(LogStatus.Info, $"SHARX Data Transfer v{Version} siap ({ListeningAddress(app)})");
@@ -135,7 +164,12 @@ public static class SharxWebHost
                 service.Start();
             }
         });
-        app.Lifetime.ApplicationStopping.Register(() => service.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        app.Lifetime.ApplicationStopping.Register(() =>
+        {
+            batcher.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            service.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            log.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        });
 
         app.Use(GuardAsync(options));
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
@@ -175,15 +209,6 @@ public static class SharxWebHost
         {
             throw new AlreadyRunningException(dataDirectory);
         }
-    }
-
-    private static void WireEvents(TransferService service, LiveHub hub)
-    {
-        service.StatusChanged += status => hub.Broadcast("status", status);
-        service.RecordProcessed += record => hub.Broadcast("record", record);
-        service.StatsUpdated += stats => hub.Broadcast("stats", stats);
-        service.Log.Added += entry => hub.Broadcast("log", entry);
-        service.Counter.Changed += () => hub.Broadcast("counter", CounterView(service));
     }
 
     /// <summary>
@@ -237,8 +262,8 @@ public static class SharxWebHost
         Status = service.Status,
         Stats = service.Stats.Snapshot(),
         Counter = CounterView(service),
-        Records = service.RecentRecords(service.Settings.General.LiveRows),
-        Log = service.Log.Recent(200),
+        Records = service.RecentRecords(TransferLog.ViewLimit),
+        Log = service.Log.Recent(TransferLog.ViewLimit),
     };
 
     private static object CounterView(TransferService service)
@@ -371,20 +396,18 @@ public static class SharxWebHost
 
         app.MapGet("/api/logs/dates", () => Results.Json(service.Log.Dates(), JsonOptions));
 
-        app.MapGet("/api/logs/{date}", (string date) => Results.Json(service.Log.ReadDay(date), JsonOptions));
-
-        app.MapGet("/api/logs/{date}/download", (string date) =>
+        // Log History: hanya 50 baris terakhir yang cocok dengan filter (file lengkap lewat download).
+        app.MapGet("/api/logs/{date}", (string date, string? status, string? q) =>
         {
-            var entries = service.Log.ReadDay(date);
-            var sb = new StringBuilder();
-            foreach (var e in entries)
-            {
-                sb.Append('[').Append(e.Time.ToString("yyyy-MM-dd HH:mm:ss")).Append("] ")
-                    .Append(e.Status.ToString().ToUpperInvariant().PadRight(5)).Append(' ')
-                    .Append(e.Message).Append("\r\n");
-            }
+            LogStatus? filter = Enum.TryParse<LogStatus>(status, true, out var parsed) ? parsed : null;
+            return Results.Json(service.Log.ReadDay(date, filter, q, TransferLog.ViewLimit), JsonOptions);
+        });
 
-            return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain; charset=utf-8", $"sharx-log-{date}.txt");
+        app.MapGet("/api/logs/{date}/download", (string date, HttpContext context) =>
+        {
+            context.Response.ContentType = "text/plain; charset=utf-8";
+            context.Response.Headers.ContentDisposition = $"attachment; filename=\"sharx-log-{date}.txt\"";
+            return WriteLogFileAsync(service.Log.ReadAll(date), context.Response.Body, context.RequestAborted);
         });
 
         app.MapPost("/api/app/shutdown", (IHostApplicationLifetime lifetime) =>
@@ -408,6 +431,16 @@ public static class SharxWebHost
             using var socket = await context.WebSockets.AcceptWebSocketAsync();
             await hub.HandleAsync(socket, Snapshot(service, options), context.RequestAborted);
         });
+    }
+
+    private static async Task WriteLogFileAsync(IEnumerable<LogEntry> entries, Stream body, CancellationToken ct)
+    {
+        await using var writer = new StreamWriter(body, new UTF8Encoding(false), 64 * 1024, leaveOpen: true);
+        foreach (var e in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            await writer.WriteAsync($"[{e.Time:yyyy-MM-dd HH:mm:ss}] {e.Status.ToString().ToUpperInvariant(),-5} {e.Message}\r\n");
+        }
     }
 
     private static async Task<T?> ReadJsonAsync<T>(HttpRequest request, CancellationToken ct = default)

@@ -17,6 +17,9 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
 
+        // Error tak terduga di UI dicatat ke data\crash.log dan aplikasi tetap berjalan.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+
         var options = new SharxHostOptions { Port = 0, Shell = "desktop" };
         for (var i = 0; i < args.Length; i++)
         {
@@ -29,6 +32,10 @@ internal static class Program
                 options.Port = port;
             }
         }
+
+        SharxWebHost.InstallCrashGuards(options.DataDirectory);
+        Application.ThreadException += (_, e) =>
+            SharxWebHost.WriteCrash(options.DataDirectory, "ThreadException", e.Exception);
 
         Microsoft.AspNetCore.Builder.WebApplication app;
         try

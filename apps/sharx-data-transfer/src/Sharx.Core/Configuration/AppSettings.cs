@@ -291,9 +291,6 @@ public sealed class GeneralSettings
     /// <summary>Jumlah hari log disimpan di folder data/logs. 0 = selamanya.</summary>
     public int LogRetentionDays { get; set; } = 90;
 
-    /// <summary>Jumlah baris data terakhir yang ditampilkan di tabel live.</summary>
-    public int LiveRows { get; set; } = 200;
-
     /// <summary>Langsung Start Transfer saat aplikasi dibuka.</summary>
     public bool AutoStart { get; set; }
 }

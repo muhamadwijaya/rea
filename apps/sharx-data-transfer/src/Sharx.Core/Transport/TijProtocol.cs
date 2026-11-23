@@ -24,6 +24,9 @@ public static class TijProtocol
 
     /// <summary>P_Status: print belum di-start.</summary>
     public const byte StatusPrintNotStarted = 0x12;
+
+    /// <summary>P_Status: buffer 1D masih penuh (data tidak diterima).</summary>
+    public const byte StatusBufferStillFull = 0x43;
     public const byte CmdRemoteFields = 0x1D;
     public const byte CmdLoadMessage = 0x1E;
     public const byte CmdMessageNames = 0x1F;

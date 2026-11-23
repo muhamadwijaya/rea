@@ -27,7 +27,6 @@ public sealed partial class TransferService
     private volatile PrintState _printState = PrintState.Unknown;
     private DateTimeOffset _lastReadyCheck;
     private bool _waitingNoticeLogged;
-    private readonly Queue<byte[]> _outbox = new();
     private PrinterSession? _printer;
     private string? _printerKey;
     private long _printerGeneration;
@@ -38,7 +37,6 @@ public sealed partial class TransferService
     private volatile bool _printerNeedsJob = true;
     private volatile bool _jobArmed;
     private volatile int _pendingCount;
-    private volatile int _outboxCount;
     private volatile string? _nextToSendText;
     private volatile string? _lastPrintedText;
     private PendingPrint? _lastSent;
@@ -78,13 +76,11 @@ public sealed partial class TransferService
         }
     }
 
+    /// <summary>Batas data yang menunggu printer; di atas ini pembacaan dari server ditahan (tidak dibuang).</summary>
+    private const int MaxWaitingFrames = 10_000;
+
     private void DeferFrame(Frame frame)
     {
-        while (_waitingFrames.Count >= 10000)
-        {
-            _waitingFrames.Dequeue();
-        }
-
         _waitingFrames.Enqueue(frame);
         _waitingCount = _waitingFrames.Count;
     }
@@ -277,7 +273,11 @@ public sealed partial class TransferService
             await ClosePrinterAsync(PrinterState.Connecting, null).ConfigureAwait(false);
         }
 
-        var writer = _work?.Writer ?? throw new OperationCanceledException();
+        if (_work is null)
+        {
+            throw new OperationCanceledException();
+        }
+
         _lastPrinterAttempt = _time.GetUtcNow();
         SetPrinterState(PrinterState.Connecting, null);
         var generation = Interlocked.Increment(ref _printerGeneration);
@@ -290,7 +290,7 @@ public sealed partial class TransferService
             session = await PrinterSession.OpenAsync(
                 _printerFactory(p),
                 parser,
-                frame => writer.TryWrite(new PrinterFrameItem(generation, frame)),
+                frame => Enqueue(new PrinterFrameItem(generation, frame)),
                 null,
                 ct).ConfigureAwait(false);
         }
@@ -301,7 +301,7 @@ public sealed partial class TransferService
         }
 
         _ = session.Completion.ContinueWith(
-            _ => writer.TryWrite(new PrinterClosedItem(generation)),
+            _ => Enqueue(new PrinterClosedItem(generation)),
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
@@ -623,6 +623,10 @@ public sealed partial class TransferService
             _log.Write(LogStatus.Ok,
                 $"Job dikirim ke printer ({reason}): {job.Record.Template} / {job.Record.Operator}, counter berikutnya {_nextToSendText}");
         }
+        catch (PrinterBusyException)
+        {
+            _jobArmed = false; // dikirim ulang setelah printer mencetak / cek berikutnya
+        }
         catch (PrinterNotReadyException)
         {
             MarkPrintNotStarted();
@@ -690,7 +694,7 @@ public sealed partial class TransferService
             feedback = OutputFormatter.Render(s.Feedback.Template, context);
             var payload = CommandEncoder.Encode(feedback, TextEncodings.Resolve(s.Server.Encoding));
             bytes = payload.Length;
-            note = await SendFeedbackAsync(payload, ct).ConfigureAwait(false);
+            note = QueueFeedback(payload);
         }
 
         var summary = $"{printed.Record.Operator} / {printed.Record.Template} / {printed.CounterText}";
@@ -724,6 +728,11 @@ public sealed partial class TransferService
             Message = note,
         });
 
+        if (_waitingFrames.Count > 0)
+        {
+            await DrainWaitingAsync(ct).ConfigureAwait(false);
+        }
+
         if (UsesPrintCounting(s) && _job is not null && _jobArmed && _printer is { IsConnected: true } session)
         {
             try
@@ -740,74 +749,81 @@ public sealed partial class TransferService
         RaiseStatus();
     }
 
-    private async Task<string?> SendFeedbackAsync(byte[] payload, CancellationToken ct)
+    /// <summary>Masukkan feedback ke antrean pengirim (tidak menunggu server).</summary>
+    private string? QueueFeedback(byte[] payload)
     {
-        if (_outbox.Count > 0)
-        {
-            await FlushFeedbackAsync(ct).ConfigureAwait(false);
-        }
-
-        if (_outbox.Count == 0 && await TryWriteServerAsync(payload, ct).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        var max = Math.Max(1, _settings.Feedback.MaxQueued);
-        while (_outbox.Count >= max)
-        {
-            _outbox.Dequeue();
-        }
-
-        _outbox.Enqueue(payload);
-        _outboxCount = _outbox.Count;
-        return $"Server tidak terhubung: laporan diantrikan ({_outbox.Count})";
+        _feedback.Writer.TryWrite(payload);
+        return _serverStream is null
+            ? $"Server tidak terhubung: laporan diantrikan ({_feedback.Reader.Count})"
+            : null;
     }
 
-    private async Task FlushFeedbackAsync(CancellationToken ct)
+    /// <summary>
+    /// Kirim feedback ke server berurutan. Jika server terputus, laporan tetap di antrean dan dikirim
+    /// setelah tersambung lagi. Jika server tidak membaca data (TCP macet) 10 detik, koneksi diulang.
+    /// </summary>
+    private async Task FeedbackSenderAsync(CancellationToken ct)
     {
-        var sent = 0;
-        while (_outbox.TryPeek(out var payload))
-        {
-            if (!await TryWriteServerAsync(payload, ct).ConfigureAwait(false))
-            {
-                break;
-            }
-
-            _outbox.Dequeue();
-            sent++;
-        }
-
-        _outboxCount = _outbox.Count;
-        if (sent > 0)
-        {
-            _log.Write(LogStatus.Ok, $"{sent} laporan tertunda terkirim ke server");
-            RaiseStatus();
-        }
-    }
-
-    private async Task<bool> TryWriteServerAsync(byte[] payload, CancellationToken ct)
-    {
-        var stream = _serverStream;
-        if (stream is null)
-        {
-            return false;
-        }
-
-        await _serverWriteGate.WaitAsync(ct).ConfigureAwait(false);
+        var reader = _feedback.Reader;
+        var warned = false;
         try
         {
-            await stream.WriteAsync(payload, ct).ConfigureAwait(false);
-            _stats.AddSent(payload.Length);
-            return true;
+            while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            {
+                while (reader.TryPeek(out var payload))
+                {
+                    var stream = _serverStream;
+                    if (stream is null)
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(300), _time, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                    try
+                    {
+                        await _serverWriteGate.WaitAsync(timeout.Token).ConfigureAwait(false);
+                        try
+                        {
+                            await stream.WriteAsync(payload, timeout.Token).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            _serverWriteGate.Release();
+                        }
+
+                        _stats.AddSent(payload.Length);
+                        reader.TryRead(out _);
+                        if (warned)
+                        {
+                            warned = false;
+                            _log.Write(LogStatus.Ok, "Feedback ke server terkirim lagi");
+                        }
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        _log.Write(LogStatus.Warn, "Server tidak menerima feedback dalam 10 detik: koneksi server diulang");
+                        warned = true;
+                        _connectionCts?.Cancel();
+                        await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException or InvalidOperationException)
+                    {
+                        if (!warned)
+                        {
+                            warned = true;
+                            _log.Write(LogStatus.Warn, $"Gagal kirim feedback ke server ({ex.Message}); dikirim ulang setelah tersambung");
+                        }
+
+                        await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct).ConfigureAwait(false);
+                    }
+                }
+            }
         }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _log.Write(LogStatus.Warn, $"Gagal kirim laporan ke server: {ex.Message}");
-            return false;
-        }
-        finally
-        {
-            _serverWriteGate.Release();
+            // Stop Transfer: sisa antrean dikirim saat Start berikutnya.
         }
     }
 

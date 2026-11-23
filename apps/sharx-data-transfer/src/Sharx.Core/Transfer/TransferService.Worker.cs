@@ -15,8 +15,6 @@ public sealed partial class TransferService
 
     private sealed record ServerFrameItem(Frame Frame) : WorkItem;
 
-    private sealed record ServerConnectedItem : WorkItem;
-
     private sealed record PrinterFrameItem(long Generation, PrinterFrame Frame) : WorkItem;
 
     private sealed record PrinterClosedItem(long Generation) : WorkItem;
@@ -36,10 +34,57 @@ public sealed partial class TransferService
 
     private ActiveJob? _job;
 
-    private async Task WorkerAsync(ChannelReader<WorkItem> reader, CancellationToken ct)
+    /// <summary>
+    /// Satu worker memproses semuanya berurutan. Event printer / perintah didahulukan dari data server
+    /// sehingga sinyal selesai cetak tidak tertahan di belakang banjir data.
+    /// </summary>
+    private async Task WorkerAsync(
+        ChannelReader<WorkItem> control,
+        ChannelReader<Frame> frames,
+        SemaphoreSlim signal,
+        CancellationToken ct)
     {
-        await foreach (var item in reader.ReadAllAsync(ct).ConfigureAwait(false))
+        while (true)
         {
+            try
+            {
+                await signal.WaitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            WorkItem item;
+            if (control.TryRead(out var next))
+            {
+                item = next;
+            }
+            else if (_waitingCount >= MaxWaitingFrames && frames.TryPeek(out _))
+            {
+                // Antrean tunggu penuh: jangan ambil data baru (server ikut tertahan lewat TCP),
+                // tunggu printer mencetak / start dulu. Tidak ada data yang dibuang.
+                signal.Release();
+                try
+                {
+                    await Task.Delay(50, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                continue;
+            }
+            else if (frames.TryRead(out var frame))
+            {
+                item = new ServerFrameItem(frame);
+            }
+            else
+            {
+                continue;
+            }
+
             try
             {
                 await HandleAsync(item, ct).ConfigureAwait(false);
@@ -58,7 +103,6 @@ public sealed partial class TransferService
     private Task HandleAsync(WorkItem item, CancellationToken ct) => item switch
     {
         ServerFrameItem f => ProcessServerFrameAsync(f.Frame, replay: false, ct),
-        ServerConnectedItem => FlushFeedbackAsync(ct),
         PrinterFrameItem p => OnPrinterFrameAsync(p, ct),
         PrinterClosedItem c => OnPrinterClosedAsync(c),
         EnsurePrinterItem => EnsurePrinterAndResyncAsync(ct),
@@ -150,7 +194,7 @@ public sealed partial class TransferService
             if (!replay && !UsesPrintCounting(settings) && _waitingFrames.Count > 0)
             {
                 // Urutan data dijaga: data lama yang menunggu printer start dikirim dulu.
-                throw new PrinterNotReadyException("Masih ada data yang menunggu printer start");
+                throw new PrinterNotReadyException("Masih ada data sebelumnya yang menunggu dikirim ke printer");
             }
 
             if (settings.Counter.IncrementOn == CounterIncrement.Print)
@@ -175,7 +219,12 @@ public sealed partial class TransferService
         }
         catch (PrinterNotReadyException ex)
         {
-            MarkPrintNotStarted();
+            var busy = ex is PrinterBusyException;
+            if (!busy)
+            {
+                MarkPrintNotStarted();
+            }
+
             if (replay)
             {
                 return false;
@@ -190,7 +239,9 @@ public sealed partial class TransferService
             {
                 Status = RecordStatus.Waiting,
                 Counter = decision.Text,
-                CounterNote = "Printer belum start: data disimpan dan dikirim otomatis saat printer start",
+                CounterNote = busy
+                    ? "Antrean printer penuh: data disimpan dan dikirim setelah printer mencetak"
+                    : "Printer belum start: data disimpan dan dikirim otomatis saat printer start",
                 Commands = trace,
                 Message = ex.Message,
             });

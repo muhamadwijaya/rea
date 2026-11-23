@@ -8,7 +8,6 @@
   const SPECIAL_KEYS = ["OPERATOR", "TEMPLATE", "SERVER_COUNTER"];
   const PAGES = {
     dashboard: ["Data Transfer", "Real-Time Data Monitoring"],
-    transfer: ["Data Transfer", "Job, Counter & Printer Output"],
     logs: ["Log History", "Riwayat Log Transfer Harian"],
     settings: ["Settings", "Koneksi, Flow Mapping Data & Counter"],
     about: ["About", "SHARX Data Transfer"],
@@ -22,7 +21,7 @@
     log: [],
     version: "1.0.0",
     shell: "browser",
-    liveRows: 200,
+    // Batas tampilan agar UI tetap ringan.
     settings: null,
     meta: null,
     draft: null,
@@ -30,6 +29,9 @@
     preview: null,
     page: "dashboard",
     logEntries: [],
+    logMatched: 0,
+    lastSeq: 0,
+    lastLogId: 0,
   };
 
   // ------------------------------------------------------------------ helpers
@@ -72,6 +74,7 @@
   }
 
   const pad2 = (n) => String(n).padStart(2, "0");
+  const VIEW_LIMIT = 50;
 
   function timeText(iso) {
     const d = new Date(iso);
@@ -184,11 +187,8 @@
         state.status = msg.data;
         renderStatus();
         break;
-      case "record":
-        addRecord(msg.data);
-        break;
-      case "log":
-        addLog(msg.data);
+      case "batch":
+        applyBatch(msg.data);
         break;
       case "stats":
         state.stats = msg.data;
@@ -207,9 +207,10 @@
     state.status = data.status;
     state.stats = data.stats;
     state.counter = data.counter;
-    state.records = data.records || [];
-    state.liveRows = Math.max(10, state.records.length, state.liveRows);
-    state.log = (data.log || []).slice().reverse();
+    state.records = (data.records || []).slice(0, VIEW_LIMIT);
+    state.log = (data.log || []).slice(-VIEW_LIMIT).reverse();
+    state.lastSeq = state.records.length ? state.records[0].seq : 0;
+    state.lastLogId = state.log.length ? state.log[0].id : 0;
     $("#systemVersion").textContent = `v${data.version}`;
     $("#aboutVersion").textContent = `v${data.version}`;
     $("#dataDir").textContent = data.dataDirectory;
@@ -219,6 +220,24 @@
     renderCounter();
     renderAllRecords();
     renderLog();
+  }
+
+  /** Update gabungan dari server (maks. 4x per detik). */
+  function applyBatch(batch) {
+    if (batch.status) {
+      state.status = batch.status;
+      renderStatus();
+    }
+    if (batch.stats) {
+      state.stats = batch.stats;
+      renderStats();
+    }
+    if (batch.counter) {
+      state.counter = batch.counter;
+      renderCounter();
+    }
+    if (batch.records?.length) addRecords(batch.records);
+    if (batch.logs?.length) addLogs(batch.logs);
   }
 
   function setSystem(online) {
@@ -325,7 +344,9 @@
     if (failed) tr.className = "row-error";
     if (record.status === "Waiting") tr.className = "row-wait";
     tr.title = recordTooltip(record);
-    tr.innerHTML = `<td></td><td>${esc(timeText(record.time))}</td><td>${esc(record.source)}</td><td>${esc(record.data)}</td>`;
+    tr.innerHTML = `<td></td><td>${esc(timeText(record.time))}</td><td>${esc(record.source)}</td><td>${esc(record.data)}</td>
+      <td class="mono">${esc(record.counter || "-")}</td>
+      <td><span class="status-tag ${esc(record.status)}">${esc(statusLabel(record.status))}</span></td>`;
     return tr;
   }
 
@@ -339,17 +360,6 @@
     if (r.message) lines.push(r.message);
     if (r.counterNote) lines.push(r.counterNote);
     return lines.join("\n");
-  }
-
-  function mappedRow(record) {
-    const tr = document.createElement("tr");
-    const output = (record.commands || []).map((c) => c.data).join("  |  ");
-    tr.title = recordTooltip(record);
-    tr.innerHTML = `<td>${record.seq}</td><td>${esc(timeText(record.time))}</td><td>${esc(record.source)}</td><td>${esc(record.operator || "-")}</td>
-      <td>${esc(record.template || "-")}</td><td class="mono">${esc(record.counter || "-")}</td>
-      <td class="mono">${esc(output || record.message || "")}</td>
-      <td><span class="status-tag ${esc(record.status)}">${esc(statusLabel(record.status))}</span></td>`;
-    return tr;
   }
 
   function statusLabel(status) {
@@ -373,36 +383,38 @@
 
   function renderAllRecords() {
     const body = $("#incomingBody");
-    const mapped = $("#mappedBody");
     body.replaceChildren(...state.records.map(incomingRow));
-    mapped.replaceChildren(...state.records.map(mappedRow));
     renumber(body);
     $("#incomingEmpty").classList.toggle("show", state.records.length === 0);
   }
 
-  function addRecord(record) {
-    state.records.unshift(record);
-    const limit = state.liveRows;
-    if (state.records.length > limit) state.records.length = limit;
+  /** Tambah data baru (urutan lama → baru), simpan hanya 50 terakhir. */
+  function addRecords(records) {
+    // Lewati data yang sudah tampil (mis. ikut di snapshot saat browser baru terhubung).
+    const unseen = records.filter((r) => r.seq > state.lastSeq);
+    if (!unseen.length) return;
+    state.lastSeq = Math.max(...unseen.map((r) => r.seq));
+    const fresh = unseen.slice(-VIEW_LIMIT).reverse();
+    state.records = fresh.concat(state.records).slice(0, VIEW_LIMIT);
 
     const scroller = $("#incomingScroll");
     const auto = $("#autoScroll").checked;
     const before = scroller.scrollHeight;
     const body = $("#incomingBody");
-    const row = incomingRow(record);
-    row.classList.add("row-new");
-    body.prepend(row);
-    while (body.rows.length > limit) body.deleteRow(body.rows.length - 1);
+    const fragment = document.createDocumentFragment();
+    for (const record of fresh) {
+      const row = incomingRow(record);
+      row.classList.add("row-new");
+      fragment.appendChild(row);
+    }
+    body.prepend(fragment);
+    while (body.rows.length > VIEW_LIMIT) body.deleteRow(body.rows.length - 1);
     renumber(body);
     if (auto) {
       scroller.scrollTop = 0;
     } else {
       scroller.scrollTop += scroller.scrollHeight - before;
     }
-
-    const mapped = $("#mappedBody");
-    mapped.prepend(mappedRow(record));
-    while (mapped.rows.length > limit) mapped.deleteRow(mapped.rows.length - 1);
     $("#incomingEmpty").classList.remove("show");
   }
 
@@ -416,25 +428,42 @@
   }
 
   function renderLog() {
-    $("#logBox").replaceChildren(...state.log.slice(0, 200).map(logLine));
+    $("#logBox").replaceChildren(...state.log.map(logLine));
   }
 
-  function addLog(entry) {
-    state.log.unshift(entry);
-    if (state.log.length > 200) state.log.length = 200;
+  /** Tambah log baru (urutan lama → baru), simpan hanya 50 terakhir. */
+  function addLogs(entries) {
+    entries = entries.filter((e) => e.id > state.lastLogId);
+    if (!entries.length) return;
+    state.lastLogId = Math.max(...entries.map((e) => e.id));
+    const fresh = entries.slice(-VIEW_LIMIT).reverse();
+    state.log = fresh.concat(state.log).slice(0, VIEW_LIMIT);
     const box = $("#logBox");
-    box.prepend(logLine(entry));
-    while (box.children.length > 200) box.lastChild.remove();
+    const fragment = document.createDocumentFragment();
+    for (const entry of fresh) fragment.appendChild(logLine(entry));
+    box.prepend(fragment);
+    while (box.children.length > VIEW_LIMIT) box.lastChild.remove();
+
     if (
       state.page === "logs" &&
-      $("#logDate").value === localDate(new Date(entry.time))
+      $("#logDate").value === localDate(new Date())
     ) {
-      state.logEntries.push(entry);
-      renderLogHistory();
+      const status = $("#logStatus").value;
+      const q = $("#logSearch").value.trim().toLowerCase();
+      const matching = entries.filter(
+        (e) =>
+          (!status || e.status === status) &&
+          (!q || e.message.toLowerCase().includes(q)),
+      );
+      if (matching.length) {
+        state.logEntries = state.logEntries.concat(matching).slice(-VIEW_LIMIT);
+        state.logMatched += matching.length;
+        renderLogHistory();
+      }
     }
   }
 
-  // ------------------------------------------------------------------ counter / data transfer page
+  // ------------------------------------------------------------------ counter & job
 
   function renderCounter() {
     const c = state.counter;
@@ -517,32 +546,32 @@
     await loadLogDay();
   }
 
+  /** Log History: server hanya mengirim 50 baris terakhir yang cocok dengan filter. */
   async function loadLogDay() {
     const date = $("#logDate").value;
+    const params = new URLSearchParams();
+    const status = $("#logStatus").value;
+    const q = $("#logSearch").value.trim();
+    if (status) params.set("status", status);
+    if (q) params.set("q", q);
     $("#btnLogDownload").href =
       `/api/logs/${encodeURIComponent(date)}/download`;
-    state.logEntries = await api(
+    const page = await api(
       "GET",
-      `/api/logs/${encodeURIComponent(date)}`,
+      `/api/logs/${encodeURIComponent(date)}?${params}`,
     );
+    state.logEntries = page.entries;
+    state.logMatched = page.matched;
     renderLogHistory();
   }
 
   function renderLogHistory() {
-    const status = $("#logStatus").value;
-    const q = $("#logSearch").value.trim().toLowerCase();
-    const list = state.logEntries
-      .filter(
-        (e) =>
-          (!status || e.status === status) &&
-          (!q || e.message.toLowerCase().includes(q)),
-      )
-      .slice()
-      .reverse();
-    const shown = list.slice(0, 3000);
-    $("#logHistory").replaceChildren(...shown.map(logLine));
+    const list = state.logEntries.slice().reverse();
+    $("#logHistory").replaceChildren(...list.map(logLine));
     $("#logCount").textContent =
-      `${list.length} baris${list.length > shown.length ? ` (ditampilkan ${shown.length})` : ""}`;
+      state.logMatched > list.length
+        ? `${list.length} baris terakhir dari ${state.logMatched} (Download untuk log lengkap)`
+        : `${list.length} baris`;
   }
 
   // ------------------------------------------------------------------ settings
@@ -903,7 +932,6 @@
           ? "Settings disimpan — koneksi server diulang"
           : "Settings disimpan",
       );
-      state.liveRows = state.draft.general.liveRows;
     } catch (err) {
       const errors = err.data?.errors || [err.message];
       const box = $("#settingsErrors");
@@ -1045,8 +1073,12 @@
 
     $("#logDate").onchange = () =>
       loadLogDay().catch((err) => toast(err.message, true));
-    $("#logStatus").onchange = renderLogHistory;
-    $("#logSearch").oninput = debounce(renderLogHistory, 150);
+    $("#logStatus").onchange = () =>
+      loadLogDay().catch((err) => toast(err.message, true));
+    $("#logSearch").oninput = debounce(
+      () => loadLogDay().catch((err) => toast(err.message, true)),
+      300,
+    );
     $("#btnLogRefresh").onclick = () =>
       loadLogDates().catch((err) => toast(err.message, true));
 

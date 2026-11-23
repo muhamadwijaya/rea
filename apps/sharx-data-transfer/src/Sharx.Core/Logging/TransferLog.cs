@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Threading.Channels;
 using Sharx.Core.Text;
 
 namespace Sharx.Core.Logging;
@@ -14,25 +15,44 @@ public enum LogStatus
 
 public sealed record LogEntry(long Id, DateTimeOffset Time, LogStatus Status, string Message);
 
-/// <summary>Log transfer: disimpan di memori (untuk tampilan live) dan di file harian <c>logs/yyyy-MM-dd.log</c>.</summary>
-public sealed class TransferLog
+/// <summary>
+/// Log transfer: disimpan di memori (untuk tampilan live) dan di file harian <c>logs/yyyy-MM-dd.log</c>.
+/// Penulisan file dilakukan di background (antrean terbatas) sehingga tidak pernah menahan transfer data.
+/// </summary>
+public sealed class TransferLog : IAsyncDisposable
 {
-    private const int Capacity = 500;
+    /// <summary>Jumlah baris terakhir yang ditampilkan di UI.</summary>
+    public const int ViewLimit = 50;
+
+    private const int Capacity = 200;
+    private const int FileQueueCapacity = 100_000;
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     private readonly object _gate = new();
     private readonly LinkedList<LogEntry> _recent = new();
     private readonly string? _directory;
     private readonly TimeProvider _time;
+    private readonly Channel<LogEntry>? _fileQueue;
+    private readonly Task _fileWriter = Task.CompletedTask;
     private long _nextId;
+    private long _dropped;
 
     public TransferLog(string? directory, TimeProvider time)
     {
         _directory = directory;
         _time = time;
-        if (directory is not null)
+        if (directory is null)
         {
-            Directory.CreateDirectory(directory);
+            return;
         }
+
+        Directory.CreateDirectory(directory);
+        _fileQueue = Channel.CreateBounded<LogEntry>(new BoundedChannelOptions(FileQueueCapacity)
+        {
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.DropWrite,
+        });
+        _fileWriter = Task.Run(FileWriterLoopAsync);
     }
 
     public event Action<LogEntry>? Added;
@@ -50,8 +70,11 @@ public sealed class TransferLog
             {
                 _recent.RemoveFirst();
             }
+        }
 
-            AppendToFile(entry);
+        if (_fileQueue is not null && !_fileQueue.Writer.TryWrite(entry))
+        {
+            Interlocked.Increment(ref _dropped);
         }
 
         Added?.Invoke(entry);
@@ -82,43 +105,83 @@ public sealed class TransferLog
             .ToArray();
     }
 
-    /// <summary>Baca log satu hari dari file.</summary>
-    public IReadOnlyList<LogEntry> ReadDay(string date)
+    public sealed record DayPage(IReadOnlyList<LogEntry> Entries, int Matched);
+
+    /// <summary>
+    /// Baca log satu hari: hanya <paramref name="limit"/> baris terakhir yang cocok dengan filter
+    /// yang dikembalikan (file dibaca berurutan, memori tetap kecil walau file besar).
+    /// </summary>
+    public DayPage ReadDay(string date, LogStatus? status = null, string? query = null, int limit = ViewLimit)
     {
         if (_directory is null
             || !DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
         {
-            return [];
+            return new DayPage([], 0);
         }
 
         var path = Path.Combine(_directory, date + ".log");
         if (!File.Exists(path))
         {
-            return [];
+            return new DayPage([], 0);
         }
 
-        var entries = new List<LogEntry>();
-        string[] lines;
-        lock (_gate)
-        {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            lines = reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        }
-
+        var tail = new Queue<LogEntry>(Math.Max(1, limit));
+        var matched = 0;
         long id = 0;
-        foreach (var line in lines)
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        while (reader.ReadLine() is { } line)
         {
-            var parts = line.TrimEnd('\r').Split('\t', 3);
-            if (parts.Length == 3
-                && DateTimeOffset.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
-                && Enum.TryParse<LogStatus>(parts[1], true, out var status))
+            id++;
+            if (!TryParseLine(line, id, out var entry)
+                || (status is not null && entry.Status != status)
+                || (!string.IsNullOrEmpty(query) && !entry.Message.Contains(query, StringComparison.OrdinalIgnoreCase)))
             {
-                entries.Add(new LogEntry(++id, time, status, parts[2]));
+                continue;
+            }
+
+            matched++;
+            if (limit <= 0)
+            {
+                continue;
+            }
+
+            if (tail.Count == limit)
+            {
+                tail.Dequeue();
+            }
+
+            tail.Enqueue(entry);
+        }
+
+        return new DayPage([.. tail], matched);
+    }
+
+    /// <summary>Isi file log satu hari (untuk download).</summary>
+    public IEnumerable<LogEntry> ReadAll(string date)
+    {
+        if (_directory is null
+            || !DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        {
+            yield break;
+        }
+
+        var path = Path.Combine(_directory, date + ".log");
+        if (!File.Exists(path))
+        {
+            yield break;
+        }
+
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        long id = 0;
+        while (reader.ReadLine() is { } line)
+        {
+            if (TryParseLine(line, ++id, out var entry))
+            {
+                yield return entry;
             }
         }
-
-        return entries;
     }
 
     /// <summary>Hapus file log yang lebih tua dari <paramref name="days"/> hari.</summary>
@@ -144,7 +207,7 @@ public sealed class TransferLog
                 File.Delete(Path.Combine(_directory, date + ".log"));
                 removed++;
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // File sedang dibuka program lain; coba lagi lain waktu.
             }
@@ -153,22 +216,103 @@ public sealed class TransferLog
         return removed;
     }
 
-    private void AppendToFile(LogEntry entry)
+    /// <summary>Tunggu semua log tertulis ke file (dipakai saat aplikasi ditutup).</summary>
+    public async ValueTask DisposeAsync()
     {
-        if (_directory is null)
-        {
-            return;
-        }
-
+        _fileQueue?.Writer.TryComplete();
         try
         {
-            var path = Path.Combine(_directory, entry.Time.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".log");
-            var line = $"{entry.Time.ToString("O", CultureInfo.InvariantCulture)}\t{entry.Status}\t{entry.Message}\n";
-            File.AppendAllText(path, line, Utf8NoBom);
+            await _fileWriter.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (TimeoutException)
         {
-            // Log file gagal ditulis: entri tetap tersedia di memori.
+            // Disk lambat: jangan tahan penutupan aplikasi.
         }
+    }
+
+    private static bool TryParseLine(string line, long id, out LogEntry entry)
+    {
+        entry = null!;
+        var parts = line.TrimEnd('\r').Split('\t', 3);
+        if (parts.Length != 3
+            || !DateTimeOffset.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
+            || !Enum.TryParse<LogStatus>(parts[1], true, out var status))
+        {
+            return false;
+        }
+
+        entry = new LogEntry(id, time, status, parts[2]);
+        return true;
+    }
+
+    /// <summary>Satu penulis file: membuka file harian sekali, menulis per batch, flush setiap batch.</summary>
+    private async Task FileWriterLoopAsync()
+    {
+        var reader = _fileQueue!.Reader;
+        StreamWriter? writer = null;
+        string? currentDate = null;
+        try
+        {
+            while (await reader.WaitToReadAsync().ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var entry))
+                {
+                    var date = entry.Time.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    try
+                    {
+                        if (date != currentDate || writer is null)
+                        {
+                            writer?.Dispose();
+                            writer = OpenDay(date);
+                            currentDate = date;
+                        }
+
+                        writer.Write(entry.Time.ToString("O", CultureInfo.InvariantCulture));
+                        writer.Write('\t');
+                        writer.Write(entry.Status.ToString());
+                        writer.Write('\t');
+                        writer.Write(entry.Message);
+                        writer.Write('\n');
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Disk penuh / file terkunci: buang baris ini, coba buka ulang di baris berikutnya.
+                        writer?.Dispose();
+                        writer = null;
+                        Interlocked.Increment(ref _dropped);
+                    }
+                }
+
+                try
+                {
+                    writer?.Flush();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    writer?.Dispose();
+                    writer = null;
+                }
+
+                var dropped = Interlocked.Exchange(ref _dropped, 0);
+                if (dropped > 0 && writer is not null)
+                {
+                    writer.Write($"{_time.GetLocalNow():O}\tWarn\t{dropped} baris log tidak tertulis ke file (antrean penuh / disk error)\n");
+                }
+            }
+        }
+        finally
+        {
+            writer?.Dispose();
+        }
+    }
+
+    private StreamWriter OpenDay(string date)
+    {
+        var stream = new FileStream(
+            Path.Combine(_directory!, date + ".log"),
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete);
+        return new StreamWriter(stream, Utf8NoBom, 64 * 1024);
     }
 }

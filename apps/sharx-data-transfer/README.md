@@ -89,17 +89,38 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
 
 ## Halaman
 
-- **Dashboard**: status koneksi, statistik (Received = byte dari server, Sent = byte ke printer +
-  feedback ke server), Incoming Data (Source `Server` = data masuk, `Printer` = feedback cetak),
-  Transfer Log, Start/Stop.
-- **Data Transfer**: job aktif, counter terakhir & berikutnya, status printer, counter per template
-  (ubah/reset), detail perintah yang dikirim.
-- **Log History**: log per hari (filter, cari, download).
+- **Dashboard** (satu layar untuk operator): status koneksi, statistik (Received = byte dari server,
+  Sent = byte ke printer + feedback ke server), job aktif (operator, template, counter terakhir &
+  berikutnya), status printer + tombol **Start Print / Stop Print**, Incoming Data (Source `Server` =
+  data masuk, `Printer` = feedback cetak; kolom Counter & Status), Transfer Log, Counter per Template
+  (ubah / reset), tombol Start/Stop Transfer (selalu terlihat di bawah).
+- **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
   - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test.
   - _Flow Mapping Data_: contoh data, delimiter / lebar tetap, posisi tiap field, protokol printer,
     nama template (change template), field data, format feedback, preview HEX perintah.
   - _Counter_: mode, nilai awal, step, digit, batas maksimum, jam ganti hari.
+
+Semua tampilan live dan Log History hanya menampilkan **50 baris terakhir** agar UI tetap ringan
+(file log lengkap tetap tersimpan di `data\logs\` dan bisa di-download).
+
+## Ketahanan transfer
+
+- Update ke UI digabung paling sering tiap 250 ms (maks. 50 data + 50 log), jadi data deras tidak
+  membuat UI lag.
+- Data dari server masuk antrean terbatas (1.000). Jika printer lebih lambat, pembacaan dari server
+  ditahan lewat TCP (tidak menumpuk di memori, tidak ada data dibuang).
+- Sinyal selesai cetak dari printer diproses lebih dulu daripada data server.
+- Feedback ke server dikirim oleh proses terpisah dengan antrean: server lambat / terputus tidak
+  menahan pengiriman ke printer; laporan dikirim setelah server tersambung lagi.
+- Semua komunikasi punya batas waktu (koneksi, kirim, balasan); koneksi yang macet diulang otomatis.
+- Buffer printer penuh (`P_Status 43`) atau printer belum start (`P_Status 12`): data disimpan
+  (status MENUNGGU) dan dikirim otomatis, tidak dibuang.
+- Log ditulis ke file oleh proses background; error tak terduga dicatat di `data\crash.log` tanpa
+  menutup aplikasi.
+- Hasil uji di container Linux: 20.000 data diproses dalam 7,2 detik (±2.700 data/detik termasuk
+  balasan printer), memori puncak ±220 MB, lag UI maksimum 24 ms; pada 20 cetakan/detik tidak ada
+  cetak ulang (jeda selesai cetak → data berikutnya median 1 ms).
 
 ## Uji tanpa mesin
 

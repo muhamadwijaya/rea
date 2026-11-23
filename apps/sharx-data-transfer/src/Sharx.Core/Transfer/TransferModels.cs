@@ -94,7 +94,10 @@ public sealed record ConnectionTestResult(bool Ok, string Message, long ElapsedM
 public class PrinterException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>Printer terhubung tetapi print belum di-start; data ditahan sampai printer start.</summary>
-public sealed class PrinterNotReadyException(string message) : PrinterException(message);
+public class PrinterNotReadyException(string message) : PrinterException(message);
+
+/// <summary>Antrean (buffer) printer penuh; data ditahan sampai printer selesai mencetak.</summary>
+public sealed class PrinterBusyException(string message) : PrinterNotReadyException(message);
 
 /// <summary>Status print di printer.</summary>
 public enum PrintState
