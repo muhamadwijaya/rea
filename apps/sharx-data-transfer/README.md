@@ -127,8 +127,6 @@ started_). Data **tidak dianggap error**: statusnya **MENUNGGU** (kuning) dan di
 - Printer TIJ hanya menerima **satu** klien TCP; jangan sambungkan software lain bersamaan.
 - Template di printer harus punya **remote field** dengan nomor sesuai Settings (default 0 dan 1).
 - _Buffer Setting_ `1D` di printer minimal sama dengan "Antrean data di printer" (default 1).
-- `P_Status 12` (_Print not started_): print belum di-start. Aktifkan "Kirim 11 Start Print" atau
-  start dari panel printer; job dicoba ulang otomatis.
 
 ## Struktur
 
