@@ -410,13 +410,56 @@
         <div class="pages">
           <!-- ===================== DASHBOARD ===================== -->
           <section class="page active" id="page-dashboard">
-            <div class="top-row">
+            <div class="card card-jobstrip">
+              <div class="jobstrip">
+                <div class="js-item">
+                  <div class="js-label">Operator</div>
+                  <div class="js-value" id="jobOperator">-</div>
+                </div>
+                <div class="js-item">
+                  <div class="js-label">Template CIJ</div>
+                  <div class="js-value" id="jobTemplate">-</div>
+                </div>
+                <div class="js-item js-item-counter">
+                  <div class="js-label">Counter terakhir</div>
+                  <div class="js-counter" id="jobCounter">-</div>
+                </div>
+                <div class="js-item">
+                  <div class="js-label">Berikutnya</div>
+                  <div class="js-value mono" id="jobNext">-</div>
+                  <div class="js-note" id="jobQueue"></div>
+                </div>
+                <div class="js-divider"></div>
+                <div class="js-printer">
+                  <div class="js-row">
+                    <svg class="js-printer-icon"><use href="#i-printer" /></svg>
+                    <span class="js-printer-name" id="printerEndpoint">-</span>
+                    <span class="pill" id="printerPill">-</span>
+                  </div>
+                  <div class="js-row">
+                    <span class="js-label">Status print</span>
+                    <b id="printState">-</b>
+                  </div>
+                  <div class="js-buttons">
+                    <button class="btn btn-primary" id="btnPrintStart">
+                      <svg><use href="#i-play" /></svg>Start Print
+                    </button>
+                    <button class="btn btn-danger" id="btnPrintStop">
+                      <svg><use href="#i-stop" /></svg>Stop Print
+                    </button>
+                  </div>
+                  <div class="printer-msg" id="printerMsg"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="status-row">
               <div class="card card-conn">
-                <div class="card-head">
-                  <svg class="head-icon icon-green">
+                <div class="mini-head">
+                  <svg class="mini-icon icon-green">
                     <use href="#i-antenna" />
                   </svg>
-                  <h2>Connection Status</h2>
+                  <span>Connection Status</span>
                 </div>
                 <div class="conn-body">
                   <div class="conn-state" id="connState" data-state="stopped">
@@ -429,8 +472,10 @@
                         <use href="#i-pause" />
                       </svg>
                     </div>
-                    <div class="conn-title" id="connTitle">Stopped</div>
-                    <div class="conn-sub" id="connSub">Transfer idle</div>
+                    <div class="conn-text">
+                      <div class="conn-title" id="connTitle">Stopped</div>
+                      <div class="conn-sub" id="connSub">Transfer idle</div>
+                    </div>
                   </div>
                   <div class="conn-divider"></div>
                   <div class="conn-info">
@@ -453,75 +498,40 @@
               </div>
 
               <div class="card card-stats">
-                <div class="card-head">
-                  <svg class="head-icon icon-white"><use href="#i-swap" /></svg>
-                  <h2>Transfer Statistics</h2>
+                <div class="mini-head">
+                  <svg class="mini-icon icon-white"><use href="#i-swap" /></svg>
+                  <span>Transfer Statistics</span>
                 </div>
                 <div class="stats-body">
                   <div class="stat">
                     <div class="stat-circle stat-green">
-                      <svg><use href="#i-arrow-up" /></svg>
+                      <svg><use href="#i-arrow-down" /></svg>
                     </div>
-                    <div class="stat-label">Received</div>
-                    <div class="stat-value">
-                      <span id="rxValue">0</span> <small id="rxUnit">B</small>
+                    <div class="stat-text">
+                      <div class="stat-label">Received</div>
+                      <div class="stat-value">
+                        <span id="rxValue">0</span> <small id="rxUnit">B</small>
+                        <span class="stat-rate rate-green" id="rxRate"
+                          >(0 B/s)</span
+                        >
+                      </div>
                     </div>
-                    <div class="stat-rate rate-green" id="rxRate">(0 B/s)</div>
                   </div>
                   <div class="stat-divider"></div>
                   <div class="stat">
                     <div class="stat-circle stat-blue">
-                      <svg><use href="#i-arrow-down" /></svg>
+                      <svg><use href="#i-arrow-up" /></svg>
                     </div>
-                    <div class="stat-label">Sent</div>
-                    <div class="stat-value">
-                      <span id="txValue">0</span> <small id="txUnit">B</small>
+                    <div class="stat-text">
+                      <div class="stat-label">Sent</div>
+                      <div class="stat-value">
+                        <span id="txValue">0</span> <small id="txUnit">B</small>
+                        <span class="stat-rate rate-blue" id="txRate"
+                          >(0 B/s)</span
+                        >
+                      </div>
                     </div>
-                    <div class="stat-rate rate-blue" id="txRate">(0 B/s)</div>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="card card-jobstrip">
-              <div class="jobstrip">
-                <div class="js-item">
-                  <div class="info-label">Operator</div>
-                  <div class="js-value" id="jobOperator">-</div>
-                </div>
-                <div class="js-item">
-                  <div class="info-label">Template CIJ</div>
-                  <div class="js-value" id="jobTemplate">-</div>
-                </div>
-                <div class="js-item js-item-counter">
-                  <div class="info-label">Counter terakhir</div>
-                  <div class="js-counter" id="jobCounter">-</div>
-                </div>
-                <div class="js-item">
-                  <div class="info-label">Berikutnya</div>
-                  <div class="js-value mono" id="jobNext">-</div>
-                </div>
-                <div class="js-divider"></div>
-                <div class="js-printer">
-                  <div class="js-row">
-                    <svg class="js-printer-icon"><use href="#i-printer" /></svg>
-                    <span class="js-printer-name" id="printerEndpoint">-</span>
-                    <span class="pill" id="printerPill">-</span>
-                  </div>
-                  <div class="js-row">
-                    <span class="info-label">Print</span>
-                    <b id="printState">-</b>
-                    <span class="js-note" id="jobQueue"></span>
-                    <span class="js-buttons">
-                      <button class="btn btn-sm btn-primary" id="btnPrintStart">
-                        <svg><use href="#i-play" /></svg>Start Print
-                      </button>
-                      <button class="btn btn-sm btn-danger" id="btnPrintStop">
-                        <svg><use href="#i-stop" /></svg>Stop Print
-                      </button>
-                    </span>
-                  </div>
-                  <div class="printer-msg" id="printerMsg"></div>
                 </div>
               </div>
             </div>

@@ -104,11 +104,14 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
 ## Halaman
 
 - **Dashboard** (satu layar untuk operator, tanpa scroll; ukuran menyesuaikan tinggi jendela
-  1280×720 sampai 1920×1280): status koneksi, statistik (Received = byte dari server,
-  Sent = byte ke printer + feedback ke server), job aktif (operator, template, counter terakhir &
-  berikutnya), status printer + tombol **Start Print / Stop Print**, Incoming Data (Source `Server` =
-  data masuk, `Printer` = feedback cetak; kolom Counter & Status), Transfer Log, Counter per Template
-  (ubah / reset), tombol Start/Stop Transfer (selalu terlihat di bawah).
+  1280×720 sampai 1920×1280), dari atas:
+  1. **Job aktif** (besar): operator, template, counter terakhir & berikutnya, status printer
+     dengan tombol **Start Print / Stop Print**.
+  2. Connection Status & Transfer Statistics (ringkas). Received = byte dari server (panah ke bawah),
+     Sent = byte ke printer + feedback ke server (panah ke atas).
+  3. Incoming Data (Source `Server` = data masuk, `Printer` = feedback cetak; kolom Counter & Status).
+  4. Transfer Log dan Counter per Template (ubah / reset) berdampingan.
+  5. Tombol Start/Stop Transfer.
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
   - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test.
