@@ -31,9 +31,6 @@ public sealed class SharxHostOptions
     /// <summary>Izinkan akses UI dari komputer lain di jaringan (default hanya komputer ini).</summary>
     public bool AllowRemote { get; set; }
 
-    /// <summary>"desktop" jika dibuka di jendela aplikasi (WebView2), "browser" jika di browser biasa.</summary>
-    public string Shell { get; set; } = "browser";
-
     public static string DefaultDataDirectory()
     {
         // Paket publish: run.bat + app\ (program). Data disimpan di samping run.bat.
@@ -257,7 +254,6 @@ public static class SharxWebHost
     private static object Snapshot(TransferService service, SharxHostOptions options) => new
     {
         Version,
-        options.Shell,
         DataDirectory = options.DataDirectory,
         Status = service.Status,
         Stats = service.Stats.Snapshot(),
@@ -408,16 +404,6 @@ public static class SharxWebHost
             context.Response.ContentType = "text/plain; charset=utf-8";
             context.Response.Headers.ContentDisposition = $"attachment; filename=\"sharx-log-{date}.txt\"";
             return WriteLogFileAsync(service.Log.ReadAll(date), context.Response.Body, context.RequestAborted);
-        });
-
-        app.MapPost("/api/app/shutdown", (IHostApplicationLifetime lifetime) =>
-        {
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(300);
-                lifetime.StopApplication();
-            });
-            return Results.Json(new { ok = true }, JsonOptions);
         });
 
         app.Map("/ws", async (HttpContext context) =>

@@ -6,12 +6,7 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   const SPECIAL_KEYS = ["OPERATOR", "TEMPLATE", "SERVER_COUNTER"];
-  const PAGES = {
-    dashboard: ["Data Transfer", "Real-Time Data Monitoring"],
-    logs: ["Log History", "Riwayat Log Transfer Harian"],
-    settings: ["Settings", "Koneksi, Flow Mapping Data & Counter"],
-    about: ["About", "SHARX Data Transfer"],
-  };
+  const PAGES = ["dashboard", "logs", "settings", "about"];
 
   const state = {
     status: null,
@@ -19,9 +14,9 @@
     counter: null,
     records: [],
     log: [],
+    printedLog: [],
+    serverKind: "MQTT",
     version: "1.0.0",
-    shell: "browser",
-    // Batas tampilan agar UI tetap ringan.
     settings: null,
     meta: null,
     draft: null,
@@ -93,11 +88,6 @@
       value: i === 0 ? String(Math.round(value)) : value.toFixed(1),
       unit: units[i],
     };
-  }
-
-  function formatRate(n) {
-    const f = formatBytes(n);
-    return `(${f.value} ${f.unit}/s)`;
   }
 
   const clone = (obj) => JSON.parse(JSON.stringify(obj));
@@ -203,18 +193,16 @@
 
   function applySnapshot(data) {
     state.version = data.version;
-    state.shell = data.shell;
     state.status = data.status;
     state.stats = data.stats;
     state.counter = data.counter;
     state.records = (data.records || []).slice(0, VIEW_LIMIT);
     state.log = (data.log || []).slice(-VIEW_LIMIT).reverse();
+    state.printedLog = state.log.filter(isPrintedEntry);
     state.lastSeq = state.records.length ? state.records[0].seq : 0;
     state.lastLogId = state.log.length ? state.log[0].id : 0;
-    $("#systemVersion").textContent = `v${data.version}`;
     $("#aboutVersion").textContent = `v${data.version}`;
     $("#dataDir").textContent = data.dataDirectory;
-    document.body.dataset.shell = data.shell;
     renderStatus();
     renderStats();
     renderCounter();
@@ -241,101 +229,295 @@
   }
 
   function setSystem(online) {
-    $("#systemBox").classList.toggle("offline", !online);
-    $("#systemText").textContent = online ? "System Online" : "System Offline";
+    $("#offlineBanner").hidden = online;
   }
 
   // ------------------------------------------------------------------ dashboard
 
+  /** Ubah teks hanya jika berbeda (menghindari layout ulang yang tidak perlu). */
+  function setText(el, text) {
+    if (el.textContent !== text) {
+      el.textContent = text;
+      return true;
+    }
+    return false;
+  }
+
+  function setBadge(el, text, kind) {
+    setText(el, text);
+    el.className = `hud-badge${kind ? ` ${kind}` : ""}`;
+  }
+
+  function serverBadge(s) {
+    if (!s.running) return ["STOPPED", "", "off"];
+    if (s.server === "Connected") return ["ONLINE", "ok", "on"];
+    if (s.server === "Connecting") return ["CONNECTING", "warn", "wait"];
+    return ["OFFLINE", "err", "off"];
+  }
+
+  function printerBadge(s) {
+    switch (s.printer) {
+      case "Disabled":
+        return ["MONITOR", "", "off"];
+      case "Connecting":
+        return ["CONNECTING", "warn", "wait"];
+      case "Error":
+        return ["ERROR", "err", "off"];
+      case "Connected":
+        if (s.printState === "NotStarted" || s.waitingForPrinter)
+          return ["NOT STARTED", "warn", "wait"];
+        return s.printState === "Started"
+          ? ["STARTED", "live", "on"]
+          : ["ONLINE", "ok", "on"];
+      default:
+        return ["OFFLINE", "", "off"];
+    }
+  }
+
+  /** "TIJ Protocol 4.8" → "TIJ 4.8". */
+  const printerShortName = (protocol) =>
+    String(protocol || "")
+      .replace(/\s*Protocol\s*/i, " ")
+      .trim() || "Printer";
+
   function renderStatus() {
     const s = state.status;
     if (!s) return;
-    const el = $("#connState");
-    let key = "stopped";
-    let title = "Stopped";
-    let sub = "Transfer idle";
-    if (s.running) {
-      if (s.server === "Connected") {
-        key = "connected";
-        title = "Connected";
-        sub = s.serverProtocol === "Mqtt" ? "to MQTT Broker" : "to Server";
-      } else if (s.server === "Connecting") {
-        key = "connecting";
-        title = "Connecting...";
-        sub = s.serverProtocol === "Mqtt" ? "to MQTT Broker" : "to Server";
-      } else {
-        key = "disconnected";
-        title = "Disconnected";
-        sub = "Reconnecting...";
-      }
-    }
-    el.dataset.state = key;
+    const short = printerShortName(s.printerProtocol);
+    const serverState = renderServerHud(s);
+    const printerState = renderPrinterHud(s, short);
+    renderFlowState(s, short, serverState, printerState);
+    renderControls(s);
+  }
+
+  /** Chip MQTT Broker / TCP Server di kanan atas. Mengembalikan on / wait / off. */
+  function renderServerHud(s) {
+    const [text, kind, hudState] = serverBadge(s);
+    setText(
+      $("#serverName"),
+      s.serverProtocol === "Mqtt" ? "MQTT Broker" : "TCP Server",
+    );
+    setText($("#serverEndpoint"), s.serverEndpoint);
+    setBadge($("#serverBadge"), text, kind);
+    $("#hudServer").dataset.state = hudState;
+    $("#hudServer").title = s.lastError || "";
+    return hudState;
+  }
+
+  /** Chip printer di kanan atas. Mengembalikan on / wait / off. */
+  function renderPrinterHud(s, short) {
+    const [text, kind, hudState] = printerBadge(s);
+    setText(
+      $("#printerName"),
+      /^TIJ\b/i.test(short)
+        ? short.replace(/^TIJ/i, "TIJ Printer")
+        : `Printer ${short}`,
+    );
+    setText($("#printerEndpoint"), `(${s.printerEndpoint})`);
+    setBadge($("#printerBadge"), text, kind);
+    $("#hudPrinter").dataset.state = hudState;
+    $("#hudPrinter").title = s.printerMessage || "";
+    return hudState;
+  }
+
+  /** Diagram Printer → Queue → Server: lampu, animasi kabel dan label. */
+  function renderFlowState(s, short, serverState, printerState) {
+    const svg = $("#flowSvg");
+    svg.dataset.server = serverState;
+    svg.dataset.printer = printerState;
+    svg.dataset.running = String(Boolean(s.running));
+    state.serverKind = s.serverProtocol === "Mqtt" ? "MQTT" : "TCP";
+    const changed = [
+      setText($("#flowPrinterLabel"), `[ Printer ${short} ]`),
+      setText($("#flowQueueLabel"), `[ Queue: ${s.job?.nextCounter || "-"} ]`),
+      renderServerLabel(),
+    ];
+    if (changed.some(Boolean)) layoutFlowArrows();
+  }
+
+  const PRINT_STATE_TEXT = {
+    Started: ["Started", "ok"],
+    NotStarted: ["Belum start", "wait"],
+  };
+
+  /** Tombol Control Panel dan status print di bawahnya. */
+  function renderControls(s) {
     $("#incomingEmpty").innerHTML = s.running
       ? "Menunggu data dari server..."
       : "Belum ada data. Tekan <b>Start Transfer</b> untuk mulai menerima data dari server.";
-    $("#connTitle").textContent = title;
-    $("#connSub").textContent = sub;
-    const idx = s.serverEndpoint.lastIndexOf(":");
-    $("#serverIp").textContent = s.serverEndpoint.slice(0, idx);
-    $("#serverPort").textContent = s.serverEndpoint.slice(idx + 1);
     $("#btnStart").disabled = s.running;
     $("#btnStop").disabled = !s.running;
+    const noControl = !s.canControlPrint || s.printer === "Disabled";
+    $("#btnPrintStart").disabled = noControl;
+    $("#btnPrintStop").disabled = noControl;
 
-    const pill = $("#printerPill");
-    const printerText = {
-      Disabled: ["Disabled (monitor)", "off"],
-      Idle: ["Idle", "off"],
-      Connecting: ["Connecting...", "warn"],
-      Connected: ["Connected", "ok"],
-      Error: ["Error", "err"],
-    }[s.printer] || [s.printer, "off"];
-    pill.textContent = printerText[0];
-    pill.className = `pill ${printerText[1]}`;
-    $("#printerEndpoint").textContent =
-      `${s.printerEndpoint} · ${s.printerProtocol}`;
-    $("#printerMsg").textContent = s.printerMessage || "";
+    const [label, kind] = PRINT_STATE_TEXT[s.printState] || ["-", ""];
     const printState = $("#printState");
-    const printText = {
-      Started: ["Started", "ok"],
-      NotStarted: ["Belum start", "wait"],
-      Unknown: ["-", ""],
-    }[s.printState] || ["-", ""];
     printState.textContent = s.waitingForPrinter
-      ? `${printText[0]} — menunggu (${s.waitingRecords || 1} data)`
-      : printText[0];
-    printState.className = s.waitingForPrinter ? "wait" : printText[1];
-    $("#btnPrintStart").disabled =
-      !s.canControlPrint || s.printer === "Disabled";
-    $("#btnPrintStop").disabled =
-      !s.canControlPrint || s.printer === "Disabled";
-    const job = s.job;
-    $("#jobNext").textContent = job?.nextCounter || "-";
-    const queue = [];
-    if (job)
-      queue.push(
-        job.armed ? `antrean printer ${job.pending}` : "menunggu printer siap",
+      ? `${label} — menunggu ${s.waitingRecords || 1} data`
+      : label;
+    printState.className = s.waitingForPrinter ? "wait" : kind;
+    setText($("#jobNext"), s.job?.nextCounter || "-");
+    setText($("#jobQueue"), queueText(s));
+    setText($("#printerMsg"), s.printerMessage || "");
+  }
+
+  function queueText(s) {
+    const parts = [];
+    if (s.job)
+      parts.push(
+        s.job.armed
+          ? `Antrean printer: ${s.job.pending}`
+          : "Menunggu printer siap",
       );
-    if (s.feedbackQueued)
-      queue.push(`${s.feedbackQueued} laporan menunggu server`);
-    $("#jobQueue").textContent = queue.length ? `(${queue.join(", ")})` : "";
+    // Feedback normalnya terkirim dalam milidetik; tampilkan hanya jika benar-benar tertahan.
+    if (s.feedbackQueued && (s.server !== "Connected" || s.feedbackQueued > 5))
+      parts.push(`${s.feedbackQueued} laporan menunggu server`);
+    return parts.join(" · ");
+  }
+
+  function bytesText(n) {
+    const f = formatBytes(n);
+    return `${f.value} ${f.unit}`;
+  }
+
+  function renderServerLabel() {
+    const sent = state.stats ? bytesText(state.stats.sentBytes) : "0 B";
+    return setText(
+      $("#flowServerLabel"),
+      `[ Server ${state.serverKind || "MQTT"} ${sent} ]`,
+    );
   }
 
   function renderStats() {
     const s = state.stats;
     if (!s) return;
-    const rx = formatBytes(s.receivedBytes);
-    const tx = formatBytes(s.sentBytes);
-    $("#rxValue").textContent = rx.value;
-    $("#rxUnit").textContent = rx.unit;
-    $("#txValue").textContent = tx.value;
-    $("#txUnit").textContent = tx.unit;
-    $("#rxRate").textContent = formatRate(s.receivedRate);
-    $("#txRate").textContent = formatRate(s.sentRate);
-    $("#statRecords").textContent = s.recordsReceived;
-    $("#statForwarded").textContent = s.recordsForwarded;
-    $("#statPrinted").textContent = s.recordsPrinted;
-    $("#statFailed").textContent = s.recordsFailed;
+    setText($("#rxValue"), bytesText(s.receivedBytes));
+    setText($("#txValue"), bytesText(s.sentBytes));
+    setText($("#statPrinted"), String(s.recordsPrinted));
+    setText($("#statFailed"), String(s.recordsFailed));
+    if (
+      setText($("#flowServerBytes"), bytesText(s.receivedBytes + s.sentBytes))
+    )
+      fitServerBytes();
+    const values = {
+      records: s.recordsReceived,
+      forwarded: s.recordsForwarded,
+      printed: s.recordsPrinted,
+      failed: s.recordsFailed,
+    };
+    $$("[data-stat]").forEach((el) =>
+      setText(el, String(values[el.dataset.stat])),
+    );
+    if (renderServerLabel()) layoutFlowArrows();
   }
+
+  /** Ukur ulang teks diagram (setelah font termuat, resize, atau kembali ke Dashboard). */
+  function layoutFlow() {
+    if (state.page !== "dashboard") return;
+    fitServerBytes();
+    layoutFlowArrows();
+  }
+
+  /** Teks byte di ikon server dipersempit jika terlalu panjang (mis. "1023.5 MB"). */
+  function fitServerBytes() {
+    const el = $("#flowServerBytes");
+    el.removeAttribute("textLength");
+    try {
+      if (el.getComputedTextLength() > 50) {
+        el.setAttribute("textLength", "50");
+        el.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
+    } catch {
+      // SVG belum dirender.
+    }
+  }
+
+  /** Panah antar label diagram mengikuti lebar teks label. */
+  function layoutFlowArrows() {
+    if (state.page !== "dashboard") return;
+    try {
+      const a = $("#flowPrinterLabel").getBBox();
+      const b = $("#flowQueueLabel").getBBox();
+      const c = $("#flowServerLabel").getBBox();
+      if (!a.width) return;
+      setArrow($("#flowArrow1"), a.x + a.width + 12, b.x - 12);
+      setArrow($("#flowArrow2"), b.x + b.width + 12, c.x - 12);
+    } catch {
+      // SVG belum dirender.
+    }
+  }
+
+  function setArrow(group, x1, x2) {
+    const [line, head] = group.querySelectorAll("path");
+    group.style.display = x2 - x1 > 24 ? "" : "none";
+    line.setAttribute("d", `M${x1.toFixed(1)} 196H${x2.toFixed(1)}`);
+    head.setAttribute("d", `M${(x2 - 10).toFixed(1)} 190l10 6-10 6`);
+  }
+
+  // ---- grafik kecil (sampel tiap detik dari statistik)
+
+  const spark = { printed: [], sent: [], rate: [], last: null };
+
+  function pushSample(list, value, max) {
+    list.push(value);
+    if (list.length > max) list.shift();
+  }
+
+  function sparkPath(values, width, height, slots) {
+    const n = Math.max(slots, 2);
+    // Skala terhadap puncak dan rata-rata: lalu lintas stabil tampil rendah, lonjakan menonjol.
+    const avg = values.reduce((a, b) => a + b, 0) / Math.max(1, values.length);
+    const peak = Math.max(1e-9, Math.max(...values) * 1.15, avg * 2.6);
+    const step = width / (n - 1);
+    const offset = n - values.length;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const v = i < offset ? 0 : values[i - offset];
+      pts.push([i * step, height - 1.5 - (v / peak) * (height - 4)]);
+    }
+    let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0] = pts[i - 1];
+      const [x1, y1] = pts[i];
+      const mx = (x0 + x1) / 2;
+      d += `C${mx.toFixed(1)} ${y0.toFixed(1)} ${mx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
+  }
+
+  function drawSpark(svg, values, slots) {
+    const [, , w, h] = svg.getAttribute("viewBox").split(" ").map(Number);
+    const line = sparkPath(values, w, h, slots);
+    svg.querySelector(".spark-line").setAttribute("d", line);
+    const area = svg.querySelector(".spark-area");
+    if (area) area.setAttribute("d", `${line}L${w} ${h}L0 ${h}Z`);
+  }
+
+  /** Selisih per detik: cetakan, byte terkirim, dan byte total (terima + kirim). */
+  function sampleSparks() {
+    const s = state.stats;
+    const now = s
+      ? {
+          printed: s.recordsPrinted,
+          sent: s.sentBytes,
+          total: s.receivedBytes + s.sentBytes,
+        }
+      : { printed: 0, sent: 0, total: 0 };
+    const prev = spark.last || now;
+    // Reset statistik (Start ulang) membuat selisih negatif: dianggap 0.
+    const delta = (key) => Math.max(0, now[key] - prev[key]);
+    spark.last = now;
+    pushSample(spark.printed, delta("printed"), 60);
+    pushSample(spark.sent, delta("sent"), 40);
+    pushSample(spark.rate, delta("total"), 120);
+    if (state.page !== "dashboard" || document.hidden) return;
+    drawSpark($("#sparkPrinted"), spark.printed, 60);
+    drawSpark($("#sparkSent"), spark.sent, 40);
+    drawSpark($("#sparkRate"), spark.rate, 120);
+  }
+
+  // ---- Incoming Data
 
   function incomingRow(record) {
     const tr = document.createElement("tr");
@@ -344,8 +526,8 @@
     if (failed) tr.className = "row-error";
     if (record.status === "Waiting") tr.className = "row-wait";
     tr.title = recordTooltip(record);
-    tr.innerHTML = `<td></td><td>${esc(timeText(record.time))}</td><td>${esc(record.source)}</td><td>${esc(record.data)}</td>
-      <td class="mono">${esc(record.counter || "-")}</td>
+    tr.innerHTML = `<td></td><td>${esc(timeText(record.time))}</td><td><span class="src-tag ${esc(record.source)}">${esc(record.source)}</span></td><td>${esc(record.data)}</td>
+      <td class="cell-counter">${esc(record.counter || "-")}</td>
       <td><span class="status-tag ${esc(record.status)}">${esc(statusLabel(record.status))}</span></td>`;
     return tr;
   }
@@ -418,17 +600,44 @@
     $("#incomingEmpty").classList.remove("show");
   }
 
+  // ---- Transfer Log
+
+  /** Kata kunci seperti "Printed:" dan "server:" diberi warna seperti desain. */
+  function logMessageHtml(message) {
+    const re = /(^|-> )([A-Za-z][A-Za-z0-9 ]{0,23}):(?= )/g;
+    let html = "";
+    let last = 0;
+    let m;
+    while ((m = re.exec(message))) {
+      const start = m.index + m[1].length;
+      html += `${esc(message.slice(last, start))}<span class="log-key">${esc(m[2])}</span>:`;
+      last = start + m[2].length + 1;
+    }
+    return html + esc(message.slice(last));
+  }
+
   function logLine(entry) {
     const div = document.createElement("div");
     div.className = "log-line";
     const status = entry.status.toUpperCase();
-    div.innerHTML = `[${esc(timeText(entry.time))}]  ${esc(entry.message)}  - <span class="log-status s-${esc(entry.status.toLowerCase())}">${esc(status)}</span>`;
+    div.innerHTML = `[${esc(timeText(entry.time))}] ${logMessageHtml(entry.message)}  - <span class="log-status s-${esc(entry.status.toLowerCase())}">${esc(status)}</span>`;
     div.title = entry.message;
     return div;
   }
 
+  /** Panel log kedua: hasil cetak yang dilaporkan ke server. */
+  const isPrintedEntry = (entry) => entry.message.startsWith("Printed:");
+
   function renderLog() {
     $("#logBox").replaceChildren(...state.log.map(logLine));
+    $("#logPrinted").replaceChildren(...state.printedLog.map(logLine));
+  }
+
+  function prependLines(box, entries) {
+    const fragment = document.createDocumentFragment();
+    for (const entry of entries) fragment.appendChild(logLine(entry));
+    box.prepend(fragment);
+    while (box.children.length > VIEW_LIMIT) box.lastChild.remove();
   }
 
   /** Tambah log baru (urutan lama → baru), simpan hanya 50 terakhir. */
@@ -438,11 +647,12 @@
     state.lastLogId = Math.max(...entries.map((e) => e.id));
     const fresh = entries.slice(-VIEW_LIMIT).reverse();
     state.log = fresh.concat(state.log).slice(0, VIEW_LIMIT);
-    const box = $("#logBox");
-    const fragment = document.createDocumentFragment();
-    for (const entry of fresh) fragment.appendChild(logLine(entry));
-    box.prepend(fragment);
-    while (box.children.length > VIEW_LIMIT) box.lastChild.remove();
+    prependLines($("#logBox"), fresh);
+    const printed = fresh.filter(isPrintedEntry);
+    if (printed.length) {
+      state.printedLog = printed.concat(state.printedLog).slice(0, VIEW_LIMIT);
+      prependLines($("#logPrinted"), printed);
+    }
 
     if (
       state.page === "logs" &&
@@ -468,17 +678,19 @@
   function renderCounter() {
     const c = state.counter;
     if (!c) return;
-    $("#jobOperator").textContent = c.activeOperator || "-";
-    $("#jobTemplate").textContent = c.activeTemplate || "-";
-    $("#jobCounter").textContent = c.activeValue || "-";
-    $("#jobDate").textContent = c.businessDate ? c.businessDate : "";
+    setText($("#jobOperator"), c.activeOperator || "-");
+    setText($("#jobTemplate"), c.activeTemplate || "-");
+    const big = $("#jobCounter");
+    const value = c.activeValue || "---";
+    setText(big, value);
+    big.style.setProperty("--len", String(Math.max(3, value.length)));
+    setText($("#jobDate"), c.businessDate || "");
     const body = $("#counterBody");
     const rows = (c.templates || []).map((t) => {
       const tr = document.createElement("tr");
       if (t.template === c.activeTemplate) tr.className = "highlight";
       tr.title = `Operator terakhir: ${t.lastOperator || "-"}\nUpdate: ${timeText(t.updatedAt)}`;
-      tr.innerHTML = `<td>${esc(t.template)}</td><td class="mono">${esc(t.text)}</td><td>${t.records}</td>
-        <td class="row-actions"><button class="btn btn-sm btn-icon" data-act="set" title="Ubah counter"><svg><use href="#i-edit"/></svg></button><button class="btn btn-sm btn-icon" data-act="reset" title="Reset counter template ini"><svg><use href="#i-reset"/></svg></button></td>`;
+      tr.innerHTML = `<td>${esc(t.template)}</td><td>${esc(t.text)}</td><td>${t.records}<span class="row-actions"><button class="icon-btn" data-act="set" title="Ubah counter"><svg><use href="#i-edit"/></svg></button><button class="icon-btn" data-act="reset" title="Reset counter template ini"><svg><use href="#i-reset"/></svg></button></span></td>`;
       tr.querySelector('[data-act="set"]').onclick = () => setCounter(t);
       tr.querySelector('[data-act="reset"]').onclick = () =>
         resetCounter(t.template);
@@ -963,13 +1175,13 @@
     }
   }
 
-  // ------------------------------------------------------------------ navigation & window
+  // ------------------------------------------------------------------ navigation
 
   function route() {
     const [page, sub] = (location.hash.replace("#", "") || "dashboard").split(
       "/",
     );
-    const target = PAGES[page] ? page : "dashboard";
+    const target = PAGES.includes(page) ? page : "dashboard";
     state.page = target;
     $$(".nav-item").forEach((a) =>
       a.classList.toggle("active", a.dataset.page === target),
@@ -977,8 +1189,7 @@
     $$(".page").forEach((p) =>
       p.classList.toggle("active", p.id === `page-${target}`),
     );
-    $("#pageTitle").textContent = PAGES[target][0];
-    $("#pageSubtitle").textContent = PAGES[target][1];
+    if (target === "dashboard") layoutFlow();
     if (target === "settings") {
       loadSettings().catch((err) => toast(err.message, true));
       if (sub) showTab(sub);
@@ -987,56 +1198,11 @@
       loadLogDates().catch((err) => toast(err.message, true));
   }
 
-  const webview = window.chrome?.webview;
-
-  function windowCommand(cmd) {
-    if (webview) {
-      webview.postMessage({ cmd });
-      return true;
-    }
-    return false;
-  }
-
-  async function onWindowButton(action) {
-    if (action === "close") {
-      const running = state.status?.running;
-      const ok = await modal({
-        title: "Tutup aplikasi?",
-        body: running
-          ? "Transfer sedang berjalan. Menutup aplikasi akan <b>menghentikan transfer</b> ke printer."
-          : "Aplikasi SHARX Data Transfer akan ditutup.",
-        okText: "Tutup",
-        danger: true,
-      });
-      if (!ok) return;
-      if (windowCommand("close")) return;
-      await api("POST", "/api/app/shutdown").catch(() => {});
-      document.body.innerHTML =
-        '<div style="display:grid;place-items:center;height:100vh;font-size:22px;color:#8fa3dc">Aplikasi ditutup. Tab ini boleh ditutup.</div>';
-      return;
-    }
-    if (windowCommand(action)) return;
-    if (action === "maximize") {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else document.documentElement.requestFullscreen?.();
-    } else if (action === "minimize") {
-      toast("Minimize tersedia di aplikasi desktop (SharxDataTransfer.exe)");
-    }
-  }
-
   function bindUi() {
     window.addEventListener("hashchange", route);
-    $$(".win-btn").forEach(
-      (b) => (b.onclick = () => onWindowButton(b.dataset.win)),
-    );
-    // Drag jendela dari area judul; klik dua kali cepat = maximize / restore.
-    let lastDown = 0;
-    $("#titlebar").addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || e.target.closest("button")) return;
-      const now = Date.now();
-      windowCommand(now - lastDown < 400 ? "maximize" : "drag");
-      lastDown = now;
-    });
+    window.addEventListener("resize", debounce(layoutFlow, 150));
+    document.fonts?.ready.then(layoutFlow);
+    setInterval(sampleSparks, 1000);
 
     $("#btnStart").onclick = async () => {
       try {

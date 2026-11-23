@@ -103,15 +103,19 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
 
 ## Halaman
 
-- **Dashboard** (satu layar untuk operator, tanpa scroll; ukuran menyesuaikan tinggi jendela
-  1280×720 sampai 1920×1280), dari atas:
-  1. **Job aktif** (besar): operator, template, counter terakhir & berikutnya, status printer
-     dengan tombol **Start Print / Stop Print**.
-  2. Connection Status & Transfer Statistics (ringkas). Received = byte dari server (panah ke bawah),
-     Sent = byte ke printer + feedback ke server (panah ke atas).
-  3. Incoming Data (Source `Server` = data masuk, `Printer` = feedback cetak; kolom Counter & Status).
-  4. Transfer Log dan Counter per Template (ubah / reset) berdampingan.
-  5. Tombol Start/Stop Transfer.
+- **Dashboard** (satu layar untuk operator, tanpa scroll; tampilan menyesuaikan ukuran jendela
+  mulai 1280×720):
+  - Atas: menu (Dashboard, Log History, Settings, About) dan status **MQTT Broker**
+    (ONLINE / CONNECTING / OFFLINE), **printer** (STARTED / NOT STARTED / OFFLINE) dan operator aktif.
+  - Kiri: **Counter Terakhir** (besar), counter berikutnya, template aktif, grafik cetakan per detik;
+    **Control Panel** dengan tombol **Start Print / Start Transfer / Stop Print / Stop Transfer** dan
+    status print (menunggu printer, antrean).
+  - Diagram alur **Printer → Queue → Server** (kabel bergerak saat transfer berjalan) dengan
+    Received (byte dari server), Sent (byte ke printer + feedback ke server), Tercetak, Gagal dan
+    grafik lalu lintas.
+  - **Incoming Data** (Source `Server` = data masuk, `Printer` = feedback cetak; kolom Counter & Status).
+  - **Transfer Log** kanan: semua kejadian. **Transfer Log** bawah: hasil cetak yang dilaporkan ke server.
+  - **Counter per Template** (ubah / reset) dan tombol Reset Counter.
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
   - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test.
@@ -156,7 +160,7 @@ started_). Data **tidak dianggap error**: statusnya **MENUNGGU** (kuning) dan di
 - Software mengecek printer tiap 2 detik (perintah `14` Request Printer Status; bisa diatur di
   _Flow Mapping Data → Cek printer sudah start tiap_). Begitu printer di-start dari panel printer,
   job (change template + field data) langsung dikirim otomatis.
-- Halaman **Data Transfer → Printer CIJ** punya tombol **Start Print** (`11`) dan **Stop Print** (`12`).
+- **Control Panel** di Dashboard punya tombol **Start Print** (`11`) dan **Stop Print** (`12`).
   Setelah Stop Print, job dikirim ulang otomatis saat printer start lagi.
 - Centang **"Start print otomatis jika printer belum start"** jika software boleh men-start printer sendiri.
 - Simulator: `SharxSimulator printer --started false` meniru printer yang belum start (tekan `S` di
@@ -175,7 +179,7 @@ run.bat                 menjalankan / mem-publish aplikasi
 src/Sharx.Core          logika: parser, counter, driver printer (TIJ, Generic), koneksi
 src/Sharx.Web           REST API + WebSocket + UI (wwwroot: index.html, css, js, font)
 src/Sharx.Host          exe mode browser / service
-src/Sharx.Desktop       exe Windows (WinForms + WebView2, jendela tanpa border)
+src/Sharx.Desktop       exe Windows (WinForms + WebView2, terbuka maximize)
 tools/Sharx.Simulator   simulator server & printer TIJ
 tests/Sharx.Core.Tests  xUnit (termasuk contoh checksum dari dokumen protokol)
 ```

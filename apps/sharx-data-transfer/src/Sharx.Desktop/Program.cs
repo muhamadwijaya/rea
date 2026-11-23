@@ -20,7 +20,7 @@ internal static class Program
         // Error tak terduga di UI dicatat ke data\crash.log dan aplikasi tetap berjalan.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
-        var options = new SharxHostOptions { Port = 0, Shell = "desktop" };
+        var options = new SharxHostOptions { Port = 0 };
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--data" && i + 1 < args.Length)
