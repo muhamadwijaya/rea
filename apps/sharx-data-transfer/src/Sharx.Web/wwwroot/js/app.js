@@ -6,12 +6,6 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   const SPECIAL_KEYS = ["OPERATOR", "TEMPLATE", "SERVER_COUNTER"];
-  const TRIGGERS = [
-    ["Always", "Setiap data"],
-    ["TemplateChanged", "Saat template berubah"],
-    ["OperatorChanged", "Saat operator berubah"],
-    ["JobChanged", "Saat template / operator berubah"],
-  ];
   const PAGES = {
     dashboard: ["Data Transfer", "Real-Time Data Monitoring"],
     transfer: ["Data Transfer", "Job, Counter & Printer Output"],
@@ -565,7 +559,6 @@
       .join("");
     fillBindings();
     renderFieldRows();
-    renderStepRows();
     renderRemoteRows();
     renderTokenChips();
     requestPreview();
@@ -609,7 +602,6 @@
     applyShowRules();
     if (structural) {
       renderFieldRows();
-      renderStepRows();
       renderRemoteRows();
     }
     requestPreview();
@@ -709,7 +701,7 @@
   }
 
   function renderRemoteRows() {
-    const fields = state.draft.printer.tij.fields;
+    const fields = state.draft.printer.fields;
     $("#remoteRows").replaceChildren(
       ...fields.map((f, index) => {
         const tr = document.createElement("tr");
@@ -748,58 +740,24 @@
     });
   }
 
-  function renderStepRows() {
-    const root = $("#stepRows");
-    const steps = state.draft.printer.steps;
-    root.replaceChildren(
-      ...steps.map((step, index) => {
-        const div = document.createElement("div");
-        div.className = "step";
-        div.innerHTML = `
-          <div class="step-head">
-            <span class="flow-num">${index + 1}</span>
-            <input class="input step-name" data-s="name" value="${esc(step.name)}" placeholder="Nama langkah" />
-            <select class="input" data-s="trigger">${TRIGGERS.map(([v, l]) => `<option value="${v}"${v === step.trigger ? " selected" : ""}>${l}</option>`).join("")}</select>
-            <label class="check"><input type="checkbox" data-s="enabled"${step.enabled ? " checked" : ""} /> Aktif</label>
-            <button class="btn btn-sm btn-icon" data-s="up" title="Naik"${index === 0 ? " disabled" : ""}>&uarr;</button>
-            <button class="btn btn-sm btn-icon" data-s="down" title="Turun"${index === steps.length - 1 ? " disabled" : ""}>&darr;</button>
-            <button class="btn btn-sm btn-icon" data-s="delete" title="Hapus"><svg><use href="#i-trash"/></svg></button>
-          </div>
-          <textarea class="input" rows="2" data-s="template" spellcheck="false">${esc(step.template)}</textarea>`;
-        div.addEventListener("input", (e) => updateStep(step, e.target));
-        div.addEventListener("change", (e) => updateStep(step, e.target));
-        div.querySelector('[data-s="up"]').onclick = () => moveStep(index, -1);
-        div.querySelector('[data-s="down"]').onclick = () => moveStep(index, 1);
-        div.querySelector('[data-s="delete"]').onclick = () => {
-          steps.splice(index, 1);
-          onDraftChanged(true);
-        };
-        return div;
-      }),
-    );
-  }
-
-  function updateStep(step, el) {
-    const prop = el.dataset.s;
-    if (!prop || ["up", "down", "delete"].includes(prop)) return;
-    step[prop] = el.type === "checkbox" ? el.checked : el.value;
-    onDraftChanged(false);
-  }
-
-  function moveStep(index, delta) {
-    const steps = state.draft.printer.steps;
-    const [item] = steps.splice(index, 1);
-    steps.splice(index + delta, 0, item);
-    onDraftChanged(true);
-  }
-
   let lastTemplateBox = null;
 
   function renderTokenChips() {
+    const generic =
+      state.draft.printer.protocol === "Generic"
+        ? [
+            "TEMPLATE_NAME",
+            "FIELD_ID",
+            "FIELD_NAME",
+            "FIELD_VALUE",
+            ...state.draft.printer.fields.map((f) => `FIELD_${f.fieldId}`),
+          ]
+        : [];
     const keys = [
       ...new Set([
         ...state.draft.mapping.fields.map((f) => f.key),
         ...(state.meta?.builtIns || []),
+        ...generic,
       ]),
     ];
     $("#placeholderChips").innerHTML = keys
@@ -818,6 +776,8 @@
       "ACK",
       "NAK",
       "EOT",
+      "SUM",
+      "XOR",
     ];
     $("#tokenChips").innerHTML = tokens
       .map(
@@ -834,7 +794,7 @@
     const box =
       lastTemplateBox && document.body.contains(lastTemplateBox)
         ? lastTemplateBox
-        : $("#stepRows textarea");
+        : $("#remoteRows input.mono");
     if (!box) return;
     const text = chip.dataset.insert;
     const start = box.selectionStart ?? box.value.length;
@@ -1084,20 +1044,11 @@
       onDraftChanged(true);
     };
     $("#btnAddRemote").onclick = () => {
-      const fields = state.draft.printer.tij.fields;
+      const fields = state.draft.printer.fields;
       const next = fields.length
         ? Math.max(...fields.map((f) => f.fieldId)) + 1
         : 0;
       fields.push({ fieldId: next, name: `Field ${next}`, value: "" });
-      onDraftChanged(true);
-    };
-    $("#btnAddStep").onclick = () => {
-      state.draft.printer.steps.push({
-        name: "Langkah baru",
-        enabled: true,
-        trigger: "Always",
-        template: "{COUNTER}<CR>",
-      });
       onDraftChanged(true);
     };
     $("#btnTestServer").onclick = (e) =>

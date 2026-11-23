@@ -3,6 +3,7 @@ using Sharx.Core.Configuration;
 using Sharx.Core.Counter;
 using Sharx.Core.Logging;
 using Sharx.Core.Mapping;
+using Sharx.Core.Printing;
 using Sharx.Core.Text;
 using Sharx.Core.Transport;
 
@@ -63,7 +64,7 @@ public sealed partial class TransferService
     };
 
     private static bool UsesPrintCounting(AppSettings s) =>
-        s.Printer.Enabled && s.Printer.Protocol == PrinterProtocol.Tij && s.Counter.IncrementOn == CounterIncrement.Print;
+        s.Printer.Enabled && s.Counter.IncrementOn == CounterIncrement.Print;
 
     /// <summary>Setelah aplikasi dibuka ulang: lanjutkan job terakhir hari ini (mode counter per cetak).</summary>
     private void RestoreJobFromCounter()
@@ -133,13 +134,9 @@ public sealed partial class TransferService
         var trace = new List<SentCommand>();
         try
         {
-            if (settings.Printer.Protocol == PrinterProtocol.CustomText)
+            if (settings.Counter.IncrementOn == CounterIncrement.Print)
             {
-                await SendCustomTextAsync(settings, parsed.Record, decision, seq, trace, ct).ConfigureAwait(false);
-            }
-            else if (settings.Counter.IncrementOn == CounterIncrement.Print)
-            {
-                var changed = await StartTijJobAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
+                var changed = await StartJobAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
                 if (!changed)
                 {
                     _log.Write(LogStatus.Info, $"Job sama ({decision.Template} / {decision.Operator}), printer tidak diubah");
@@ -154,7 +151,7 @@ public sealed partial class TransferService
             }
             else
             {
-                await SendTijRecordAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
+                await SendRecordAsync(settings, parsed.Record, decision, trace, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
@@ -275,50 +272,31 @@ public sealed partial class TransferService
         var parsed = RecordParser.Parse(ControlTokens.Decode(sample ?? ""), draft.Mapping);
         var settingErrors = SettingsValidator.Validate(SettingsStore.Clone(draft));
         var decision = _counter.Evaluate(parsed.Record, draft.Counter);
-        var now = _time.GetLocalNow();
-        var encoding = TextEncodings.Resolve(draft.Printer.Encoding);
         var context = new OutputContext(
             parsed.Record,
             decision.Value,
             decision.Text,
             decision.BusinessDate,
-            now,
-            Interlocked.Read(ref _sequence) + 1,
-            decision.TemplateChanged || _printerNeedsJob,
-            decision.OperatorChanged || _printerNeedsJob);
+            _time.GetLocalNow(),
+            Interlocked.Read(ref _sequence) + 1);
 
+        var driver = PrinterDrivers.For(draft.Printer);
+        var fields = PrinterDrivers.RenderFields(draft.Printer, context);
         var commands = new List<object>();
-        if (draft.Printer.Protocol == PrinterProtocol.Tij)
+        try
         {
-            try
+            var templateName = OutputFormatter.Render(draft.Printer.TemplateName, context);
+            foreach (var c in driver.Preview(draft.Printer, templateName, fields, context))
             {
-                foreach (var (name, frame, note) in TijPreviewFrames(draft, context, encoding))
-                {
-                    commands.Add(new { Name = name, Send = true, Text = note, Hex = Convert.ToHexString(frame) });
-                }
-            }
-            catch (ArgumentException ex)
-            {
-                settingErrors = [.. settingErrors, ex.Message];
+                commands.Add(new { c.Name, Send = true, c.Text, Hex = Convert.ToHexString(c.Bytes) });
             }
         }
-        else
+        catch (ArgumentException ex)
         {
-            foreach (var c in OutputFormatter.Build(draft.Printer.Steps, context))
-            {
-                commands.Add(new
-                {
-                    Name = $"Langkah {c.Step}: {c.Name}",
-                    c.Send,
-                    Text = c.Display,
-                    Hex = Convert.ToHexString(encoding.GetBytes(c.Text)),
-                });
-            }
+            settingErrors = [.. settingErrors, ex.Message];
         }
 
-        var remoteFields = draft.Printer.Protocol == PrinterProtocol.Tij
-            ? RenderFields(draft.Printer, context).Select(f => new { f.Id, Value = ControlTokens.Visualize(f.Value) }).ToArray()
-            : [];
+        var remoteFields = fields.Select(f => new { f.Id, Value = ControlTokens.Visualize(f.Value) }).ToArray();
         var feedback = OutputFormatter.Render(draft.Feedback.Template, context);
         return new
         {
@@ -341,36 +319,8 @@ public sealed partial class TransferService
             {
                 draft.Feedback.Enabled,
                 Text = ControlTokens.Visualize(feedback),
-                Hex = Convert.ToHexString(TextEncodings.Resolve(draft.Server.Encoding).GetBytes(feedback)),
+                Hex = Convert.ToHexString(CommandEncoder.Encode(feedback, TextEncodings.Resolve(draft.Server.Encoding))),
             },
         };
-    }
-
-    private static IEnumerable<(string Name, byte[] Frame, string Note)> TijPreviewFrames(
-        AppSettings s,
-        OutputContext context,
-        System.Text.Encoding encoding)
-    {
-        var tij = s.Printer.Tij;
-        var slave = SlaveAddress(s.Printer);
-        var messageName = OutputFormatter.Render(tij.MessageName, context);
-        yield return ("Load Print Message (1E)", TijProtocol.LoadMessage(slave, messageName, encoding), $"message = {messageName}");
-        if (tij.UpdateAfterLoad)
-        {
-            yield return ("Update Print Contents (01)", TijProtocol.Command(slave, TijProtocol.CmdUpdatePrint), "");
-        }
-
-        if (tij.StartPrintAfterLoad)
-        {
-            yield return ("Start Print (11)", TijProtocol.Command(slave, TijProtocol.CmdStartPrint), "");
-        }
-
-        if (tij.ClearBufferOnJobChange)
-        {
-            yield return ("Clear Buffers of 1D (21)", TijProtocol.Command(slave, TijProtocol.CmdClearBuffer), "");
-        }
-
-        var fields = RenderFields(s.Printer, context);
-        yield return ("Download Remote Field Data (1D)", TijProtocol.RemoteFields(slave, fields, encoding), DescribeFields(fields));
     }
 }

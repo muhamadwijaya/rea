@@ -365,7 +365,7 @@ public sealed class TextFrameParser(byte[] printDoneSignal) : IPrinterFrameParse
         }
 
         // Teks yang tidak mungkin jadi awal sinyal diteruskan sebagai balasan.
-        var keep = Math.Min(_buffer.Count, printDoneSignal.Length - 1);
+        var keep = PartialSignalLength();
         if (_buffer.Count > keep)
         {
             var text = _buffer.GetRange(0, _buffer.Count - keep).ToArray();
@@ -374,6 +374,26 @@ public sealed class TextFrameParser(byte[] printDoneSignal) : IPrinterFrameParse
         }
 
         return frames;
+    }
+
+    /// <summary>Panjang ekor buffer yang merupakan awalan sinyal (mungkin sinyal yang belum lengkap).</summary>
+    private int PartialSignalLength()
+    {
+        for (var length = Math.Min(_buffer.Count, printDoneSignal.Length - 1); length > 0; length--)
+        {
+            var match = true;
+            for (var i = 0; i < length && match; i++)
+            {
+                match = _buffer[_buffer.Count - length + i] == printDoneSignal[i];
+            }
+
+            if (match)
+            {
+                return length;
+            }
+        }
+
+        return 0;
     }
 
     private static int IndexOf(List<byte> buffer, byte[] pattern)

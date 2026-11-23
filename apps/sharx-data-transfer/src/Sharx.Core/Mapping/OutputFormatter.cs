@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using Sharx.Core.Configuration;
 using Sharx.Core.Text;
 
 namespace Sharx.Core.Mapping;
@@ -13,18 +12,9 @@ public sealed record OutputContext(
     string CounterText,
     string BusinessDate,
     DateTimeOffset Now,
-    long Sequence,
-    bool TemplateChanged,
-    bool OperatorChanged);
+    long Sequence);
 
-/// <summary>Satu perintah yang akan/tidak dikirim ke printer.</summary>
-public sealed record OutputCommand(int Step, string Name, StepTrigger Trigger, bool Send, string Text)
-{
-    /// <summary>Teks dengan karakter kontrol ditampilkan sebagai token (&lt;CR&gt; dll.).</summary>
-    public string Display => ControlTokens.Visualize(Text);
-}
-
-/// <summary>Menyusun data ke printer CIJ dari langkah-langkah output (flow mapping).</summary>
+/// <summary>Mengisi placeholder pada format data ke printer / server.</summary>
 public static partial class OutputFormatter
 {
     public const string Counter = "COUNTER";
@@ -38,27 +28,17 @@ public static partial class OutputFormatter
     public static IReadOnlyList<string> BuiltIns { get; } =
         [Counter, Raw, Date, Time, ProductionDate, Sequence];
 
-    public static IReadOnlyList<OutputCommand> Build(IEnumerable<OutputStep> steps, OutputContext context)
+    /// <summary>Konteks yang sama dengan nilai tambahan (mis. {FIELD_ID}, {TEMPLATE_NAME}).</summary>
+    public static OutputContext WithValues(OutputContext context, IEnumerable<KeyValuePair<string, string>> extra)
     {
-        var commands = new List<OutputCommand>();
-        var index = 0;
-        foreach (var step in steps)
+        var values = new Dictionary<string, string>(context.Record.Values, StringComparer.Ordinal);
+        foreach (var (key, value) in extra)
         {
-            index++;
-            var send = step.Enabled && ShouldSend(step.Trigger, context);
-            commands.Add(new OutputCommand(index, step.Name, step.Trigger, send, Render(step.Template, context)));
+            values[key] = value;
         }
 
-        return commands;
+        return context with { Record = new ParsedRecord(context.Record.Raw, context.Record.Fields, values) };
     }
-
-    public static bool ShouldSend(StepTrigger trigger, OutputContext context) => trigger switch
-    {
-        StepTrigger.TemplateChanged => context.TemplateChanged,
-        StepTrigger.OperatorChanged => context.OperatorChanged,
-        StepTrigger.JobChanged => context.TemplateChanged || context.OperatorChanged,
-        _ => true,
-    };
 
     /// <summary>Isi placeholder {KEY} / {KEY:FORMAT} dan token kontrol &lt;CR&gt; dsb.</summary>
     public static string Render(string template, OutputContext context)

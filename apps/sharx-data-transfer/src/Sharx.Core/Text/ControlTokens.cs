@@ -22,14 +22,22 @@ public static class ControlTokens
         ("DEL", '\u007F'),
     ];
 
+    /// <summary>Penanda checksum; dihitung saat perintah diubah ke byte (<see cref="CommandEncoder"/>).</summary>
+    public const char SumMarker = '\uE000';
+
+    /// <summary>Penanda checksum XOR.</summary>
+    public const char XorMarker = '\uE001';
+
+    private static readonly (string Name, char Value)[] Markers = [("SUM", SumMarker), ("XOR", XorMarker)];
+
     private static readonly Dictionary<string, char> ByName =
-        Named.ToDictionary(n => n.Name, n => n.Value, StringComparer.OrdinalIgnoreCase);
+        Named.Concat(Markers).ToDictionary(n => n.Name, n => n.Value, StringComparer.OrdinalIgnoreCase);
 
     private static readonly Dictionary<char, string> ByValue =
-        Named.ToDictionary(n => n.Value, n => n.Name);
+        Named.Concat(Markers).ToDictionary(n => n.Value, n => n.Name);
 
     /// <summary>Daftar nama token yang didukung (untuk UI).</summary>
-    public static IReadOnlyList<string> Names { get; } = Named.Select(n => n.Name).ToArray();
+    public static IReadOnlyList<string> Names { get; } = Named.Concat(Markers).Select(n => n.Name).ToArray();
 
     /// <summary>Ganti token &lt;NAME&gt; / &lt;0xHH&gt; dengan karakter aslinya. Teks lain tidak diubah.</summary>
     public static string Decode(string text)
@@ -69,7 +77,7 @@ public static class ControlTokens
         for (var i = 0; i < text.Length; i++)
         {
             var c = text[i];
-            var isControl = c < 0x20 || c == 0x7F;
+            var isControl = c < 0x20 || c == 0x7F || c is SumMarker or XorMarker;
             if (!isControl)
             {
                 sb?.Append(c);

@@ -140,40 +140,18 @@ public sealed class CounterSettings
 
 public enum PrinterTransport
 {
+    /// <summary>Ethernet: IP + port printer.</summary>
     Tcp,
     Serial,
 }
 
-/// <summary>Bahasa komunikasi dengan printer.</summary>
+/// <summary>Driver / protokol komunikasi dengan printer.</summary>
 public enum PrinterProtocol
 {
-    /// <summary>DOD TIJ Protocol 4.8: ESC STX addr cmd data ESC ETX checksum.</summary>
+    /// <summary>DOD TIJ Protocol 4.8: 1E load message, 1D remote field, AB print end.</summary>
     Tij,
-    /// <summary>Teks bebas sesuai langkah output (untuk printer lain).</summary>
-    CustomText,
-}
-
-/// <summary>Kapan satu langkah output dikirim ke printer.</summary>
-public enum StepTrigger
-{
-    /// <summary>Setiap data.</summary>
-    Always,
-    /// <summary>Hanya jika template berubah (atau data pertama setelah Start).</summary>
-    TemplateChanged,
-    /// <summary>Hanya jika operator berubah (atau data pertama setelah Start).</summary>
-    OperatorChanged,
-    /// <summary>Jika template atau operator berubah (atau data pertama setelah Start).</summary>
-    JobChanged,
-}
-
-public sealed class OutputStep
-{
-    public string Name { get; set; } = "";
-    public bool Enabled { get; set; } = true;
-    public StepTrigger Trigger { get; set; } = StepTrigger.Always;
-
-    /// <summary>Format data ke printer, mis. <c>&lt;STX&gt;{TEMPLATE}|{OPERATOR}|{COUNTER}&lt;ETX&gt;</c>.</summary>
-    public string Template { get; set; } = "";
+    /// <summary>Perintah diatur sendiri di Settings (untuk protokol printer lain).</summary>
+    Generic,
 }
 
 public sealed class PrinterSettings
@@ -199,71 +177,80 @@ public sealed class PrinterSettings
     /// <summary>Batas waktu menunggu balasan printer (ms).</summary>
     public int ResponseTimeoutMs { get; set; } = 1000;
 
-    public TijSettings Tij { get; set; } = new();
+    /// <summary>Nama template yang dipanggil di printer (change template). Default nama template dari server.</summary>
+    public string TemplateName { get; set; } = "{TEMPLATE}";
 
-    // ---- Mode CustomText ----
+    /// <summary>Kosongkan antrean data di printer saat job (template/operator) berubah.</summary>
+    public bool ClearOnJobChange { get; set; } = true;
 
-    /// <summary>Jeda antar langkah output (ms).</summary>
-    public int StepDelayMs { get; set; } = 50;
-
-    /// <summary>Tunggu balasan printer setelah setiap langkah.</summary>
-    public bool WaitForResponse { get; set; }
-
-    /// <summary>Balasan yang dianggap sukses (boleh token, mis. &lt;ACK&gt;). Kosong = balasan apa pun.</summary>
-    public string ExpectedResponse { get; set; } = "";
-
-    /// <summary>Teks dari printer yang berarti "selesai cetak" (feedback after print). Kosong = tidak ada.</summary>
-    public string PrintDoneSignal { get; set; } = "";
-
-    public List<OutputStep> Steps { get; set; } =
-    [
-        new()
-        {
-            Name = "Kirim data ke printer",
-            Trigger = StepTrigger.Always,
-            Template = "{TEMPLATE},{OPERATOR},{COUNTER}<CR><LF>",
-        },
-    ];
-}
-
-/// <summary>Pengaturan DOD TIJ Protocol 4.8.</summary>
-public sealed class TijSettings
-{
-    /// <summary>Slave address (byte terakhir IP printer). -1 = otomatis dari IP printer.</summary>
-    public int SlaveAddress { get; set; } = -1;
-
-    /// <summary>Nama message yang di-load (perintah 1E). Default nama template dari server.</summary>
-    public string MessageName { get; set; } = "{TEMPLATE}";
-
-    /// <summary>Kirim perintah 01 (Update Print Contents) setelah load message.</summary>
-    public bool UpdateAfterLoad { get; set; } = true;
-
-    /// <summary>Kirim perintah 11 (Start Print) setelah load message.</summary>
-    public bool StartPrintAfterLoad { get; set; }
-
-    /// <summary>Kirim perintah 21 (Clear Buffers of 1D) saat job (template/operator) berubah.</summary>
-    public bool ClearBufferOnJobChange { get; set; } = true;
-
-    /// <summary>Jumlah data 1D yang diantrikan di buffer printer (harus &lt;= Buffer Setting printer).</summary>
+    /// <summary>Jumlah data yang diantrikan di printer menunggu dicetak (1-10).</summary>
     public int Lookahead { get; set; } = 1;
 
-    /// <summary>Isi remote field (perintah 1D).</summary>
-    public List<RemoteField> Fields { get; set; } =
+    /// <summary>Field data yang dikirim untuk setiap cetakan.</summary>
+    public List<PrinterField> Fields { get; set; } =
     [
         new() { FieldId = 0, Name = "Nama operator", Value = "{OPERATOR}" },
         new() { FieldId = 1, Name = "Counter", Value = "{COUNTER}" },
     ];
+
+    public TijSettings Tij { get; set; } = new();
+    public GenericProtocolSettings Generic { get; set; } = new();
 }
 
-public sealed class RemoteField
+/// <summary>Field data di template printer.</summary>
+public sealed class PrinterField
 {
-    /// <summary>Nomor field di message printer (0-255).</summary>
+    /// <summary>Nomor field di template printer (0-255).</summary>
     public int FieldId { get; set; }
 
     public string Name { get; set; } = "";
 
     /// <summary>Isi field, boleh placeholder seperti {OPERATOR} / {COUNTER}.</summary>
     public string Value { get; set; } = "";
+}
+
+/// <summary>Opsi khusus DOD TIJ Protocol 4.8.</summary>
+public sealed class TijSettings
+{
+    /// <summary>Slave address (byte terakhir IP printer). -1 = otomatis dari IP printer.</summary>
+    public int SlaveAddress { get; set; } = -1;
+
+    /// <summary>Kirim perintah 01 (Update Print Contents) setelah load message.</summary>
+    public bool UpdateAfterLoad { get; set; } = true;
+
+    /// <summary>Kirim perintah 11 (Start Print) setelah load message.</summary>
+    public bool StartPrintAfterLoad { get; set; }
+}
+
+/// <summary>
+/// Protokol yang diatur sendiri. Semua perintah boleh memakai placeholder, karakter kontrol
+/// (&lt;STX&gt;, &lt;0x1B&gt;) dan checksum (&lt;SUM&gt;, &lt;XOR&gt;).
+/// </summary>
+public sealed class GenericProtocolSettings
+{
+    /// <summary>Perintah change template; {TEMPLATE_NAME} = nama template. Kosong = tidak dikirim.</summary>
+    public string TemplateCommand { get; set; } = "<STX>TEMPLATE:{TEMPLATE_NAME}<ETX>";
+
+    /// <summary>Perintah mengosongkan antrean data di printer. Kosong = tidak ada.</summary>
+    public string ClearCommand { get; set; } = "";
+
+    /// <summary>Perintah per field: {FIELD_ID}, {FIELD_NAME}, {FIELD_VALUE}. Kosong = tidak dipakai.</summary>
+    public string FieldCommand { get; set; } = "<STX>FIELD:{FIELD_ID}:{FIELD_VALUE}<ETX>";
+
+    /// <summary>Satu perintah untuk semua field: {FIELD_0}, {FIELD_1}, ... Kosong = tidak dipakai.</summary>
+    public string DataCommand { get; set; } = "";
+
+    /// <summary>Balasan sukses dari printer. Kosong = tidak menunggu balasan.</summary>
+    public string AckPattern { get; set; } = "<ACK>";
+
+    /// <summary>Balasan gagal dari printer. Kosong = tidak ada.</summary>
+    public string NakPattern { get; set; } = "<NAK>";
+
+    /// <summary>Sinyal dari printer setiap selesai cetak. Kosong = printer tidak mengirim feedback.</summary>
+    public string PrintDonePattern { get; set; } = "";
+
+    /// <summary>Jeda antar perintah (ms).</summary>
+    public int CommandDelayMs { get; set; }
 }
 
 /// <summary>Laporan ke server setiap printer selesai mencetak.</summary>

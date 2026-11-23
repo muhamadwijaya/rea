@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sharx.Core.Mapping;
+using Sharx.Core.Printing;
 using Sharx.Core.Text;
 
 namespace Sharx.Core.Configuration;
@@ -46,12 +47,18 @@ public sealed class SettingsStore
         s.Feedback ??= new FeedbackSettings();
         s.General ??= new GeneralSettings();
         s.Mapping.Fields ??= [];
-        s.Printer.Steps ??= [];
+        s.Printer.Fields ??= [];
         s.Printer.Tij ??= new TijSettings();
-        s.Printer.Tij.Fields ??= [];
-        s.Printer.Tij.MessageName ??= "";
-        s.Printer.PrintDoneSignal ??= "";
-        s.Printer.ExpectedResponse ??= "";
+        s.Printer.Generic ??= new GenericProtocolSettings();
+        s.Printer.TemplateName ??= "";
+        var g = s.Printer.Generic;
+        g.TemplateCommand ??= "";
+        g.ClearCommand ??= "";
+        g.FieldCommand ??= "";
+        g.DataCommand ??= "";
+        g.AckPattern ??= "";
+        g.NakPattern ??= "";
+        g.PrintDonePattern ??= "";
         s.Feedback.Template ??= "";
         foreach (var field in s.Mapping.Fields)
         {
@@ -59,13 +66,7 @@ public sealed class SettingsStore
             field.Label ??= "";
         }
 
-        foreach (var step in s.Printer.Steps)
-        {
-            step.Name ??= "";
-            step.Template ??= "";
-        }
-
-        foreach (var field in s.Printer.Tij.Fields)
+        foreach (var field in s.Printer.Fields)
         {
             field.Name ??= "";
             field.Value ??= "";
@@ -141,7 +142,7 @@ public static partial class SettingsValidator
             {
                 errors.Add($"Kunci field '{f.Key}' tidak valid (huruf besar, angka, garis bawah; diawali huruf)");
             }
-            else if (OutputFormatter.BuiltIns.Contains(f.Key) || FieldIndexKey().IsMatch(f.Key))
+            else if (OutputFormatter.BuiltIns.Contains(f.Key) || FieldIndexKey().IsMatch(f.Key) || ReservedKey().IsMatch(f.Key))
             {
                 errors.Add($"Kunci field '{f.Key}' sudah dipakai placeholder bawaan");
             }
@@ -228,14 +229,7 @@ public static partial class SettingsValidator
         }
 
         var keys = s.Mapping.Fields.Select(f => f.Key).ToArray();
-        if (p.Protocol == PrinterProtocol.Tij)
-        {
-            ValidateTij(p.Tij, keys, errors);
-        }
-        else
-        {
-            ValidateCustomText(s, keys, errors);
-        }
+        ValidatePrinterJob(s, keys, errors);
 
         if (s.Feedback.Enabled)
         {
@@ -251,30 +245,27 @@ public static partial class SettingsValidator
         }
     }
 
-    private static void ValidateTij(TijSettings tij, string[] keys, List<string> errors)
+    private static void ValidatePrinterJob(AppSettings s, string[] keys, List<string> errors)
     {
-        if (tij.SlaveAddress is < -1 or > 255)
+        var p = s.Printer;
+        var driver = PrinterDrivers.For(p);
+        if (p.Lookahead is < 1 or > 10)
         {
-            errors.Add("Slave address -1 (otomatis) atau 0-255");
+            errors.Add("Jumlah antrean data di printer harus 1-10");
         }
 
-        if (tij.Lookahead is < 1 or > 10)
+        foreach (var error in OutputFormatter.Validate(p.TemplateName, keys))
         {
-            errors.Add("Jumlah antrean buffer 1D harus 1-10");
+            errors.Add($"Nama template (change template): {error}");
         }
 
-        foreach (var error in OutputFormatter.Validate(tij.MessageName, keys))
+        if (p.Fields.Count == 0)
         {
-            errors.Add($"Nama message (1E): {error}");
-        }
-
-        if (tij.Fields.Count == 0)
-        {
-            errors.Add("Minimal satu remote field (1D)");
+            errors.Add("Minimal satu field data ke printer");
         }
 
         var ids = new HashSet<int>();
-        foreach (var field in tij.Fields)
+        foreach (var field in p.Fields)
         {
             if (field.FieldId is < 0 or > 255)
             {
@@ -290,34 +281,11 @@ public static partial class SettingsValidator
                 errors.Add($"Field {field.FieldId}: {error}");
             }
         }
-    }
 
-    private static void ValidateCustomText(AppSettings s, string[] keys, List<string> errors)
-    {
-        var p = s.Printer;
-        if (p.StepDelayMs is < 0 or > 10000)
+        errors.AddRange(driver.Validate(s, keys));
+        if (s.Counter.IncrementOn == CounterIncrement.Print && !driver.HasPrintFeedback(p))
         {
-            errors.Add("Jeda langkah 0-10000 ms");
-        }
-
-        if (p.Steps.Count == 0 || p.Steps.All(step => !step.Enabled))
-        {
-            errors.Add("Minimal satu langkah output printer aktif");
-        }
-
-        if (s.Counter.IncrementOn == CounterIncrement.Print)
-        {
-            errors.Add("Mode Custom text hanya mendukung counter per data (Record)");
-        }
-
-        var index = 0;
-        foreach (var step in p.Steps)
-        {
-            index++;
-            foreach (var error in OutputFormatter.Validate(step.Template, keys))
-            {
-                errors.Add($"Langkah {index} ({step.Name}): {error}");
-            }
+            errors.Add("Counter per cetak butuh sinyal selesai cetak dari printer (isi 'Sinyal selesai cetak' atau pilih counter per data)");
         }
     }
 
@@ -326,4 +294,8 @@ public static partial class SettingsValidator
 
     [GeneratedRegex("^F[0-9]+$")]
     private static partial Regex FieldIndexKey();
+
+    /// <summary>Placeholder khusus perintah printer Generic.</summary>
+    [GeneratedRegex("^(TEMPLATE_NAME|FIELD_ID|FIELD_NAME|FIELD_VALUE|FIELD_[0-9]+)$")]
+    private static partial Regex ReservedKey();
 }

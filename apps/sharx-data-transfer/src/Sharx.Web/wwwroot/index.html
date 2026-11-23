@@ -714,12 +714,9 @@
           <!-- ===================== SETTINGS ===================== -->
           <section class="page" id="page-settings">
             <div class="settings-tabs" id="settingsTabs">
-              <button class="tab active" data-tab="server">
-                Koneksi Server
-              </button>
+              <button class="tab active" data-tab="server">Koneksi</button>
               <button class="tab" data-tab="mapping">Flow Mapping Data</button>
               <button class="tab" data-tab="counter">Counter</button>
-              <button class="tab" data-tab="printer">Printer CIJ</button>
               <button class="tab" data-tab="general">Umum</button>
               <div class="tabs-spacer"></div>
               <span class="dirty-note" id="dirtyNote" hidden
@@ -815,6 +812,129 @@
                 </button>
                 <span class="test-result" id="testServerResult"></span>
               </div>
+              <div class="card-head sub-head">
+                <svg class="head-icon icon-white">
+                  <use href="#i-printer" />
+                </svg>
+                <h2>Koneksi ke Printer</h2>
+              </div>
+              <div class="form-grid">
+                <label class="check"
+                  ><input type="checkbox" data-bind="printer.enabled" />Teruskan
+                  data ke printer (nonaktif = monitor saja)</label
+                >
+                <label
+                  >Koneksi
+                  <select class="input" data-bind="printer.transport">
+                    <option value="Tcp">TCP/IP (IP + port)</option>
+                    <option value="Serial">Serial (RS232)</option>
+                  </select>
+                </label>
+                <label data-show="printer.transport=Tcp"
+                  >Printer IP<input class="input" data-bind="printer.host"
+                /></label>
+                <label data-show="printer.transport=Tcp"
+                  >Port<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    data-bind="printer.port"
+                    data-type="int"
+                /></label>
+                <label data-show="printer.transport=Serial"
+                  >COM port<input
+                    class="input"
+                    list="serialPorts"
+                    data-bind="printer.serialPort" /><datalist
+                    id="serialPorts"
+                  ></datalist
+                ></label>
+                <label data-show="printer.transport=Serial"
+                  >Baud rate
+                  <select
+                    class="input"
+                    data-bind="printer.baudRate"
+                    data-type="int"
+                  >
+                    <option>1200</option>
+                    <option>2400</option>
+                    <option>4800</option>
+                    <option>9600</option>
+                    <option>19200</option>
+                    <option>38400</option>
+                    <option>57600</option>
+                    <option>115200</option>
+                  </select>
+                </label>
+                <label data-show="printer.transport=Serial"
+                  >Data bits<select
+                    class="input"
+                    data-bind="printer.dataBits"
+                    data-type="int"
+                  >
+                    <option>7</option>
+                    <option>8</option>
+                  </select></label
+                >
+                <label data-show="printer.transport=Serial"
+                  >Parity<select class="input" data-bind="printer.parity">
+                    <option>None</option>
+                    <option>Odd</option>
+                    <option>Even</option>
+                    <option>Mark</option>
+                    <option>Space</option>
+                  </select></label
+                >
+                <label data-show="printer.transport=Serial"
+                  >Stop bits<select class="input" data-bind="printer.stopBits">
+                    <option>One</option>
+                    <option>OnePointFive</option>
+                    <option>Two</option>
+                  </select></label
+                >
+                <label
+                  >Encoding<select
+                    class="input"
+                    data-bind="printer.encoding"
+                    data-options="encodings"
+                  ></select
+                ></label>
+                <label
+                  >Connect timeout (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="printer.connectTimeoutSeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Reconnect printer (detik)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    data-bind="printer.reconnectDelaySeconds"
+                    data-type="int"
+                /></label>
+                <label
+                  >Timeout balasan (ms)<input
+                    class="input"
+                    type="number"
+                    min="50"
+                    data-bind="printer.responseTimeoutMs"
+                    data-type="int"
+                /></label>
+              </div>
+              <div class="form-actions">
+                <button class="btn" id="btnTestPrinter">
+                  <svg><use href="#i-plug" /></svg>Test Koneksi Printer
+                </button>
+                <span class="test-result" id="testPrinterResult"></span>
+              </div>
+              <p class="hint">
+                Protokol printer, change template dan field data diatur di tab
+                <a href="#settings/mapping">Flow Mapping Data</a>.
+              </p>
             </div>
 
             <!-- Flow Mapping -->
@@ -925,78 +1045,152 @@
                 >
               </div>
 
-              <div class="show-group" data-show="printer.protocol=Tij">
-                <div class="section-title">
-                  <span class="flow-num">5</span>Kirim ke printer TIJ (protokol
-                  4.8)
-                </div>
-                <div class="form-grid">
+              <div class="section-title">
+                <span class="flow-num">5</span>Kirim ke printer (change template
+                &amp; field data)
+              </div>
+              <div class="form-grid">
+                <label
+                  >Protokol printer
+                  <select class="input" data-bind="printer.protocol">
+                    <option value="Tij">TIJ Protocol 4.8 (1E / 1D / AB)</option>
+                    <option value="Generic">
+                      Generic (perintah diatur sendiri)
+                    </option>
+                  </select>
+                </label>
+                <label
+                  >Nama template di printer (change template)<input
+                    class="input mono"
+                    data-bind="printer.templateName"
+                    placeholder="{TEMPLATE}"
+                /></label>
+                <label
+                  >Antrean data di printer (1-10)<input
+                    class="input"
+                    type="number"
+                    min="1"
+                    max="10"
+                    data-bind="printer.lookahead"
+                    data-type="int"
+                /></label>
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    data-bind="printer.clearOnJobChange"
+                  />Kosongkan antrean printer saat job berubah</label
+                >
+                <div class="show-group" data-show="printer.protocol=Tij">
                   <label
-                    >Nama message / template di printer (1E Load Print
-                    Message)<input
-                      class="input mono"
-                      data-bind="printer.tij.messageName"
-                      placeholder="{TEMPLATE}"
+                    >Slave address (-1 = byte terakhir IP)<input
+                      class="input"
+                      type="number"
+                      min="-1"
+                      max="255"
+                      data-bind="printer.tij.slaveAddress"
+                      data-type="int"
                   /></label>
                   <label class="check"
                     ><input
                       type="checkbox"
                       data-bind="printer.tij.updateAfterLoad"
-                    />Kirim 01 Update Print Contents setelah load</label
+                    />Kirim 01 Update Print Contents setelah change
+                    template</label
                   >
                   <label class="check"
                     ><input
                       type="checkbox"
                       data-bind="printer.tij.startPrintAfterLoad"
-                    />Kirim 11 Start Print setelah load</label
-                  >
-                  <label class="check"
-                    ><input
-                      type="checkbox"
-                      data-bind="printer.tij.clearBufferOnJobChange"
-                    />Kosongkan buffer 1D (21) saat job berubah</label
-                  >
-                </div>
-                <div class="sub-title">
-                  Remote field (1D Download Remote Field Data)
-                </div>
-                <div class="table-wrap">
-                  <table class="data-table compact form-table">
-                    <thead>
-                      <tr>
-                        <th style="width: 120px">Field</th>
-                        <th style="width: 220px">Nama</th>
-                        <th>Isi</th>
-                        <th style="width: 260px">Hasil</th>
-                        <th style="width: 56px"></th>
-                      </tr>
-                    </thead>
-                    <tbody id="remoteRows"></tbody>
-                  </table>
-                </div>
-                <div class="form-actions">
-                  <button class="btn btn-sm" id="btnAddRemote">
-                    <svg><use href="#i-plus" /></svg>Tambah remote field
-                  </button>
-                  <span class="hint"
-                    >Default: <b>field 0 = nama operator</b>,
-                    <b>field 1 = counter</b>. Nomor field sesuai field remote di
-                    message printer.</span
+                    />Kirim 11 Start Print setelah change template</label
                   >
                 </div>
               </div>
 
-              <div class="show-group" data-show="printer.protocol=CustomText">
-                <div class="section-title">
-                  <span class="flow-num">5</span>Format data ke printer (urutan
-                  langkah teks)
+              <div class="show-group" data-show="printer.protocol=Generic">
+                <div class="sub-title">
+                  Perintah printer (boleh placeholder, &lt;STX&gt;,
+                  &lt;0x1B&gt;, checksum &lt;SUM&gt; / &lt;XOR&gt;)
                 </div>
-                <div id="stepRows"></div>
-                <div class="form-actions">
-                  <button class="btn btn-sm" id="btnAddStep">
-                    <svg><use href="#i-plus" /></svg>Tambah langkah
-                  </button>
+                <div class="form-grid">
+                  <label class="span-2"
+                    >Change template <span class="muted">{TEMPLATE_NAME}</span
+                    ><input
+                      class="input mono"
+                      data-bind="printer.generic.templateCommand"
+                  /></label>
+                  <label
+                    >Kosongkan antrean (opsional)<input
+                      class="input mono"
+                      data-bind="printer.generic.clearCommand"
+                  /></label>
+                  <label class="span-2"
+                    >Perintah per field
+                    <span class="muted"
+                      >{FIELD_ID} {FIELD_NAME} {FIELD_VALUE}</span
+                    ><input
+                      class="input mono"
+                      data-bind="printer.generic.fieldCommand"
+                  /></label>
+                  <label
+                    >Jeda antar perintah (ms)<input
+                      class="input"
+                      type="number"
+                      min="0"
+                      data-bind="printer.generic.commandDelayMs"
+                      data-type="int"
+                  /></label>
+                  <label class="span-2"
+                    >Atau satu perintah untuk semua field
+                    <span class="muted">{FIELD_0} {FIELD_1} ...</span
+                    ><input
+                      class="input mono"
+                      data-bind="printer.generic.dataCommand"
+                  /></label>
+                  <label
+                    >Balasan sukses (kosong = tidak menunggu)<input
+                      class="input mono"
+                      data-bind="printer.generic.ackPattern"
+                  /></label>
+                  <label
+                    >Balasan gagal<input
+                      class="input mono"
+                      data-bind="printer.generic.nakPattern"
+                  /></label>
+                  <label
+                    >Sinyal selesai cetak (feedback)<input
+                      class="input mono"
+                      data-bind="printer.generic.printDonePattern"
+                      placeholder="kosong = tidak ada"
+                  /></label>
                 </div>
+              </div>
+
+              <div class="sub-title">
+                Field data (dikirim untuk setiap cetakan)
+              </div>
+              <div class="table-wrap">
+                <table class="data-table compact form-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 120px">Field</th>
+                      <th style="width: 220px">Nama</th>
+                      <th>Isi</th>
+                      <th style="width: 260px">Hasil</th>
+                      <th style="width: 56px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="remoteRows"></tbody>
+                </table>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-sm" id="btnAddRemote">
+                  <svg><use href="#i-plus" /></svg>Tambah field
+                </button>
+                <span class="hint"
+                  >Default: <b>field 0 = nama operator</b>,
+                  <b>field 1 = counter</b>. Nomor field sesuai field data di
+                  template printer.</span
+                >
               </div>
 
               <div class="section-title">
@@ -1132,189 +1326,6 @@
                   001)</label
                 >
               </div>
-            </div>
-
-            <!-- Printer -->
-            <div class="card settings-panel" data-panel="printer">
-              <div class="card-head">
-                <svg class="head-icon icon-white">
-                  <use href="#i-printer" />
-                </svg>
-                <h2>Koneksi Printer CIJ</h2>
-              </div>
-              <div class="form-grid">
-                <label class="check"
-                  ><input type="checkbox" data-bind="printer.enabled" />Teruskan
-                  data ke printer (nonaktif = monitor saja)</label
-                >
-                <label
-                  >Protokol
-                  <select class="input" data-bind="printer.protocol">
-                    <option value="Tij">TIJ Protocol 4.8 (1E / 1D / AB)</option>
-                    <option value="CustomText">Custom text</option>
-                  </select>
-                </label>
-                <label
-                  >Koneksi
-                  <select class="input" data-bind="printer.transport">
-                    <option value="Tcp">TCP/IP (Ethernet)</option>
-                    <option value="Serial">Serial (RS232)</option>
-                  </select>
-                </label>
-                <label data-show="printer.transport=Tcp"
-                  >IP printer<input class="input" data-bind="printer.host"
-                /></label>
-                <label data-show="printer.transport=Tcp"
-                  >Port printer<input
-                    class="input"
-                    type="number"
-                    min="1"
-                    max="65535"
-                    data-bind="printer.port"
-                    data-type="int"
-                /></label>
-                <label data-show="printer.transport=Serial"
-                  >COM port<input
-                    class="input"
-                    list="serialPorts"
-                    data-bind="printer.serialPort" /><datalist
-                    id="serialPorts"
-                  ></datalist
-                ></label>
-                <label data-show="printer.transport=Serial"
-                  >Baud rate
-                  <select
-                    class="input"
-                    data-bind="printer.baudRate"
-                    data-type="int"
-                  >
-                    <option>1200</option>
-                    <option>2400</option>
-                    <option>4800</option>
-                    <option>9600</option>
-                    <option>19200</option>
-                    <option>38400</option>
-                    <option>57600</option>
-                    <option>115200</option>
-                  </select>
-                </label>
-                <label data-show="printer.transport=Serial"
-                  >Data bits<select
-                    class="input"
-                    data-bind="printer.dataBits"
-                    data-type="int"
-                  >
-                    <option>7</option>
-                    <option>8</option>
-                  </select></label
-                >
-                <label data-show="printer.transport=Serial"
-                  >Parity<select class="input" data-bind="printer.parity">
-                    <option>None</option>
-                    <option>Odd</option>
-                    <option>Even</option>
-                    <option>Mark</option>
-                    <option>Space</option>
-                  </select></label
-                >
-                <label data-show="printer.transport=Serial"
-                  >Stop bits<select class="input" data-bind="printer.stopBits">
-                    <option>One</option>
-                    <option>OnePointFive</option>
-                    <option>Two</option>
-                  </select></label
-                >
-                <div class="show-group" data-show="printer.protocol=Tij">
-                  <label
-                    >Slave address (-1 = byte terakhir IP)<input
-                      class="input"
-                      type="number"
-                      min="-1"
-                      max="255"
-                      data-bind="printer.tij.slaveAddress"
-                      data-type="int"
-                  /></label>
-                  <label
-                    >Antrean buffer 1D (1-10)<input
-                      class="input"
-                      type="number"
-                      min="1"
-                      max="10"
-                      data-bind="printer.tij.lookahead"
-                      data-type="int"
-                  /></label>
-                </div>
-                <label
-                  >Encoding<select
-                    class="input"
-                    data-bind="printer.encoding"
-                    data-options="encodings"
-                  ></select
-                ></label>
-                <label
-                  >Connect timeout (detik)<input
-                    class="input"
-                    type="number"
-                    min="1"
-                    data-bind="printer.connectTimeoutSeconds"
-                    data-type="int"
-                /></label>
-                <label
-                  >Reconnect printer (detik)<input
-                    class="input"
-                    type="number"
-                    min="1"
-                    data-bind="printer.reconnectDelaySeconds"
-                    data-type="int"
-                /></label>
-                <label
-                  >Timeout balasan (ms)<input
-                    class="input"
-                    type="number"
-                    min="50"
-                    data-bind="printer.responseTimeoutMs"
-                    data-type="int"
-                /></label>
-                <div class="show-group" data-show="printer.protocol=CustomText">
-                  <label
-                    >Jeda antar langkah (ms)<input
-                      class="input"
-                      type="number"
-                      min="0"
-                      data-bind="printer.stepDelayMs"
-                      data-type="int"
-                  /></label>
-                  <label class="check"
-                    ><input
-                      type="checkbox"
-                      data-bind="printer.waitForResponse"
-                    />Tunggu balasan printer setiap langkah</label
-                  >
-                  <label
-                    >Balasan sukses (kosong = apa saja)<input
-                      class="input mono"
-                      data-bind="printer.expectedResponse"
-                      placeholder="&lt;ACK&gt;"
-                  /></label>
-                  <label
-                    >Sinyal selesai cetak (feedback)<input
-                      class="input mono"
-                      data-bind="printer.printDoneSignal"
-                      placeholder="kosong = tidak ada"
-                  /></label>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="btn" id="btnTestPrinter">
-                  <svg><use href="#i-plug" /></svg>Test Koneksi Printer
-                </button>
-                <span class="test-result" id="testPrinterResult"></span>
-              </div>
-              <p class="hint">
-                Isi field (operator, counter) dan nama message diatur di tab
-                <a href="#settings/mapping">Flow Mapping Data</a>. Tombol test
-                juga menampilkan daftar message yang ada di printer TIJ.
-              </p>
             </div>
 
             <!-- General -->

@@ -89,3 +89,20 @@ public class TijProtocolTests
         return [.. bytes];
     }
 }
+
+public class TextFrameParserTests
+{
+    [Fact]
+    public void Text_parser_passes_replies_and_detects_split_print_done_signal()
+    {
+        var parser = new TextFrameParser(Encoding.ASCII.GetBytes("DONE\r"));
+
+        var ack = parser.Push([0x06]);
+        Assert.Equal(PrinterFrameKind.Text, Assert.Single(ack).Kind);
+
+        Assert.Empty(parser.Push(Encoding.ASCII.GetBytes("DO")));
+        var frames = parser.Push(Encoding.ASCII.GetBytes("NE\rOK"));
+        Assert.Equal([PrinterFrameKind.PrintEnd, PrinterFrameKind.Text], frames.Select(f => f.Kind));
+        Assert.Equal("OK", Encoding.ASCII.GetString(frames[1].Data));
+    }
+}

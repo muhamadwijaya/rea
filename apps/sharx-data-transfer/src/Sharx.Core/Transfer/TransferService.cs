@@ -101,7 +101,7 @@ public sealed partial class TransferService : IAsyncDisposable
                 _connectedSince,
                 s.Printer.Enabled ? _printerState : PrinterState.Disabled,
                 PrinterLinks.Describe(s.Printer),
-                s.Printer.Protocol == PrinterProtocol.Tij ? "TIJ Protocol 4.8" : "Custom text",
+                Printing.PrinterDrivers.For(s.Printer).Name,
                 _printerMessage,
                 _lastError,
                 jobStatus,

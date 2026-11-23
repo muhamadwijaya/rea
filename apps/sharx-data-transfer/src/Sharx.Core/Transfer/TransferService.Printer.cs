@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Net.Sockets;
-using System.Text;
 using Sharx.Core.Configuration;
 using Sharx.Core.Counter;
 using Sharx.Core.Logging;
 using Sharx.Core.Mapping;
+using Sharx.Core.Printing;
 using Sharx.Core.Text;
 using Sharx.Core.Transport;
 
@@ -12,14 +12,13 @@ namespace Sharx.Core.Transfer;
 
 public sealed partial class TransferService
 {
-    /// <summary>Data yang sudah dikirim ke printer (1D) dan menunggu dicetak.</summary>
+    /// <summary>Field data yang sudah dikirim ke printer dan menunggu dicetak.</summary>
     private sealed record PendingPrint(
         ParsedRecord Record,
         long Counter,
         string CounterText,
         string BusinessDate,
-        long Epoch,
-        string Fields);
+        long Epoch);
 
     private readonly LinkedList<PendingPrint> _pending = new();
     private readonly Queue<byte[]> _outbox = new();
@@ -41,17 +40,6 @@ public sealed partial class TransferService
 
     private bool PrinterConnected => _printer?.IsConnected == true;
 
-    public static byte SlaveAddress(PrinterSettings p) =>
-        p.Tij.SlaveAddress is >= 0 and <= 255
-            ? (byte)p.Tij.SlaveAddress
-            : p.Transport == PrinterTransport.Tcp ? TijProtocol.SlaveFromHost(p.Host) : (byte)0;
-
-    private static (byte Id, string Value)[] RenderFields(PrinterSettings p, OutputContext context) =>
-        p.Tij.Fields.Select(f => ((byte)Math.Clamp(f.FieldId, 0, 255), OutputFormatter.Render(f.Value, context))).ToArray();
-
-    private static string DescribeFields(IEnumerable<(byte Id, string Value)> fields) =>
-        string.Join(", ", fields.Select(f => $"field {f.Id}={ControlTokens.Visualize(f.Value)}"));
-
     // ------------------------------------------------------------------ koneksi printer
 
     private async Task<PrinterSession> EnsurePrinterAsync(PrinterSettings p, CancellationToken ct)
@@ -71,9 +59,8 @@ public sealed partial class TransferService
         _lastPrinterAttempt = _time.GetUtcNow();
         SetPrinterState(PrinterState.Connecting, null);
         var generation = Interlocked.Increment(ref _printerGeneration);
-        IPrinterFrameParser parser = p.Protocol == PrinterProtocol.Tij
-            ? new TijFrameParser()
-            : new TextFrameParser(TextEncodings.Resolve(p.Encoding).GetBytes(ControlTokens.Decode(p.PrintDoneSignal ?? "")));
+        var driver = PrinterDrivers.For(p);
+        var parser = driver.CreateParser(p);
 
         PrinterSession session;
         try
@@ -104,7 +91,7 @@ public sealed partial class TransferService
         _pendingCount = 0;
         _lastPrinterError = null;
         SetPrinterState(PrinterState.Connected, null);
-        _log.Write(LogStatus.Ok, $"Connected to printer {session.Endpoint} ({(p.Protocol == PrinterProtocol.Tij ? "TIJ" : "custom text")})");
+        _log.Write(LogStatus.Ok, $"Connected to printer {session.Endpoint} ({driver.Name})");
         return session;
     }
 
@@ -196,94 +183,49 @@ public sealed partial class TransferService
         }
     }
 
-    // ------------------------------------------------------------------ TIJ
+    // ------------------------------------------------------------------ job (semua protokol)
 
-    private async Task<PrinterFrame> TijRequestAsync(
-        PrinterSession session,
-        AppSettings s,
-        byte command,
-        byte[] payload,
-        string detail,
-        List<SentCommand> trace,
-        CancellationToken ct,
-        params byte[] okStatuses)
+    private PrinterCall Call(PrinterSession session, AppSettings s, List<SentCommand> trace, CancellationToken ct) =>
+        new(session, s, _stats, _log, trace, ct);
+
+    private OutputContext ContextFor(AppSettings s, ParsedRecord record, long counter)
     {
-        var name = TijProtocol.CommandName(command);
-        var frame = await session.RequestAsync(
-            payload,
-            f => f.Kind is PrinterFrameKind.Ack or PrinterFrameKind.Nak && f.Command == command,
-            TimeSpan.FromMilliseconds(Math.Max(50, s.Printer.ResponseTimeoutMs)),
-            ct).ConfigureAwait(false) ?? throw new IOException($"{name}: tidak ada balasan");
-        _stats.AddSent(payload.Length);
-        trace.Add(new SentCommand(trace.Count + 1, name, detail, payload.Length, frame.Describe()));
-
-        if (frame.Kind == PrinterFrameKind.Nak)
-        {
-            throw new PrinterException(
-                $"{name} ditolak printer: {TijProtocol.CommandStatusText(frame.Status)} (NAK {frame.Status:X2})");
-        }
-
-        if (frame.Status == 0x01)
-        {
-            _log.Write(LogStatus.Warn, $"{name}: printer melaporkan error/warning aktif (P_Status 01)");
-            return frame;
-        }
-
-        if (!okStatuses.Contains(frame.Status))
-        {
-            throw new PrinterException($"{name}: {TijProtocol.PrinterStatusText(frame.Status)} (P_Status {frame.Status:X2})");
-        }
-
-        // 42 (buffer now full) normal saat buffer 1D terisi penuh; status lain yang diterima dicatat.
-        if (frame.Status is not (0x00 or 0x42))
-        {
-            _log.Write(LogStatus.Warn, $"{name}: {TijProtocol.PrinterStatusText(frame.Status)} (P_Status {frame.Status:X2})");
-        }
-
-        return frame;
+        var now = _time.GetLocalNow();
+        return new OutputContext(
+            record,
+            counter,
+            CounterEngine.Format(counter, s.Counter.Digits),
+            CounterEngine.BusinessDateFor(now, s.Counter.DayStartTime),
+            now,
+            Interlocked.Read(ref _sequence));
     }
 
-    /// <summary>Load template (1E [+01] [+11]) dan/atau kosongkan buffer 1D (21).</summary>
-    private async Task SetupTijJobAsync(
+    /// <summary>Change template (jika perlu) lalu kosongkan antrean data printer (jika perlu).</summary>
+    private async Task PrepareJobAsync(
         PrinterSession session,
         AppSettings s,
         ParsedRecord record,
-        bool loadTemplate,
-        bool clearBuffer,
+        bool changeTemplate,
+        bool clear,
         List<SentCommand> trace,
         CancellationToken ct)
     {
-        var tij = s.Printer.Tij;
-        var slave = SlaveAddress(s.Printer);
-        var encoding = TextEncodings.Resolve(s.Printer.Encoding);
-        if (loadTemplate)
+        var driver = PrinterDrivers.For(s.Printer);
+        var context = ContextFor(s, record, 0);
+        if (changeTemplate)
         {
-            var context = new OutputContext(record, 0, "", "", _time.GetLocalNow(), 0, true, true);
-            var name = OutputFormatter.Render(tij.MessageName, context);
-            await TijRequestAsync(session, s, TijProtocol.CmdLoadMessage, TijProtocol.LoadMessage(slave, name, encoding),
-                $"message {name}", trace, ct, 0x00).ConfigureAwait(false);
-            _log.Write(LogStatus.Ok, $"Load template {name} ke printer (1E)");
-            if (tij.UpdateAfterLoad)
-            {
-                await TijRequestAsync(session, s, TijProtocol.CmdUpdatePrint, TijProtocol.Command(slave, TijProtocol.CmdUpdatePrint),
-                    "", trace, ct, 0x00, 0x12).ConfigureAwait(false);
-            }
-
-            if (tij.StartPrintAfterLoad)
-            {
-                await TijRequestAsync(session, s, TijProtocol.CmdStartPrint, TijProtocol.Command(slave, TijProtocol.CmdStartPrint),
-                    "", trace, ct, 0x00, 0x11).ConfigureAwait(false);
-            }
+            var name = OutputFormatter.Render(s.Printer.TemplateName, context);
+            await driver.ChangeTemplateAsync(Call(session, s, trace, ct), name, context).ConfigureAwait(false);
+            _log.Write(LogStatus.Ok, $"Change template ke {name} ({driver.Name})");
         }
 
-        if (clearBuffer)
+        if (clear)
         {
-            await TijRequestAsync(session, s, TijProtocol.CmdClearBuffer, TijProtocol.Command(slave, TijProtocol.CmdClearBuffer),
-                "", trace, ct, 0x00, 0x12).ConfigureAwait(false);
+            await driver.ClearAsync(Call(session, s, trace, ct), context).ConfigureAwait(false);
         }
     }
 
-    /// <summary>Kirim isi remote field (1D) untuk satu nilai counter.</summary>
+    /// <summary>Kirim field data (operator, counter, ...) untuk satu nilai counter.</summary>
     private async Task<PendingPrint> SendFieldsAsync(
         PrinterSession session,
         AppSettings s,
@@ -292,22 +234,16 @@ public sealed partial class TransferService
         List<SentCommand> trace,
         CancellationToken ct)
     {
-        var now = _time.GetLocalNow();
-        var date = CounterEngine.BusinessDateFor(now, s.Counter.DayStartTime);
-        var text = CounterEngine.Format(counter, s.Counter.Digits);
-        var context = new OutputContext(record, counter, text, date, now, Interlocked.Read(ref _sequence), false, false);
-        var fields = RenderFields(s.Printer, context);
-        var describe = DescribeFields(fields);
-        var payload = TijProtocol.RemoteFields(SlaveAddress(s.Printer), fields, TextEncodings.Resolve(s.Printer.Encoding));
-        await TijRequestAsync(session, s, TijProtocol.CmdRemoteFields, payload, describe, trace, ct, 0x00, 0x42)
-            .ConfigureAwait(false);
-        return new PendingPrint(record, counter, text, date, _counter.Epoch, describe);
+        var context = ContextFor(s, record, counter);
+        var fields = PrinterDrivers.RenderFields(s.Printer, context);
+        await PrinterDrivers.For(s.Printer).SendFieldsAsync(Call(session, s, trace, ct), fields, context).ConfigureAwait(false);
+        return new PendingPrint(record, counter, context.CounterText, context.BusinessDate, _counter.Epoch);
     }
 
     /// <summary>
     /// Mode counter per cetak: siapkan job baru di printer. Mengembalikan false jika job sama dengan yang aktif.
     /// </summary>
-    private async Task<bool> StartTijJobAsync(
+    private async Task<bool> StartJobAsync(
         AppSettings s,
         ParsedRecord record,
         CounterDecision decision,
@@ -331,8 +267,8 @@ public sealed partial class TransferService
         _job = new ActiveJob(record);
         _jobArmed = false;
         var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
-        var load = decision.TemplateChanged || _printerNeedsJob || firstJob;
-        await SetupTijJobAsync(session, s, record, load, s.Printer.Tij.ClearBufferOnJobChange, trace, ct).ConfigureAwait(false);
+        var changeTemplate = decision.TemplateChanged || _printerNeedsJob || firstJob;
+        await PrepareJobAsync(session, s, record, changeTemplate, s.Printer.ClearOnJobChange, trace, ct).ConfigureAwait(false);
         ResetQueue(_counter.NextValue(record.Template, s.Counter) ?? decision.Value);
         await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
         _jobArmed = true;
@@ -341,7 +277,7 @@ public sealed partial class TransferService
     }
 
     /// <summary>Mode counter per data: setiap record dikirim ke printer dengan counter berikutnya.</summary>
-    private async Task SendTijRecordAsync(
+    private async Task SendRecordAsync(
         AppSettings s,
         ParsedRecord record,
         CounterDecision decision,
@@ -349,12 +285,8 @@ public sealed partial class TransferService
         CancellationToken ct)
     {
         var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
-        var load = decision.TemplateChanged || _printerNeedsJob || _job is null;
-        if (load)
-        {
-            await SetupTijJobAsync(session, s, record, true, false, trace, ct).ConfigureAwait(false);
-        }
-
+        var changeTemplate = decision.TemplateChanged || _printerNeedsJob || _job is null;
+        await PrepareJobAsync(session, s, record, changeTemplate, false, trace, ct).ConfigureAwait(false);
         var pending = await SendFieldsAsync(session, s, record, decision.Value, trace, ct).ConfigureAwait(false);
         if (!_counter.Commit(decision))
         {
@@ -388,11 +320,11 @@ public sealed partial class TransferService
         _nextToSendText = _pending.First?.Value.CounterText;
     }
 
-    /// <summary>Isi buffer printer sampai <see cref="TijSettings.Lookahead"/> data menunggu cetak.</summary>
+    /// <summary>Isi antrean printer sampai <see cref="PrinterSettings.Lookahead"/> data menunggu cetak.</summary>
     private async Task TopUpAsync(PrinterSession session, AppSettings s, List<SentCommand> trace, CancellationToken ct)
     {
         var job = _job ?? throw new InvalidOperationException("Belum ada job aktif");
-        var lookahead = Math.Clamp(s.Printer.Tij.Lookahead, 1, 10);
+        var lookahead = Math.Clamp(s.Printer.Lookahead, 1, 10);
         while (_pending.Count < lookahead)
         {
             var value = _nextToSend;
@@ -424,7 +356,7 @@ public sealed partial class TransferService
 
             var trace = new List<SentCommand>();
             _jobArmed = false;
-            await SetupTijJobAsync(session, s, job.Record, _printerNeedsJob, true, trace, ct).ConfigureAwait(false);
+            await PrepareJobAsync(session, s, job.Record, _printerNeedsJob, true, trace, ct).ConfigureAwait(false);
             ResetQueue(_counter.NextValue(job.Record.Template, s.Counter) ?? decision.Value);
             await TopUpAsync(session, s, trace, ct).ConfigureAwait(false);
             _jobArmed = true;
@@ -449,84 +381,6 @@ public sealed partial class TransferService
         }
 
         RaiseStatus();
-    }
-
-    // ------------------------------------------------------------------ custom text
-
-    private async Task SendCustomTextAsync(
-        AppSettings s,
-        ParsedRecord record,
-        CounterDecision decision,
-        long seq,
-        List<SentCommand> trace,
-        CancellationToken ct)
-    {
-        var session = await EnsurePrinterAsync(s.Printer, ct).ConfigureAwait(false);
-        var force = _printerNeedsJob;
-        var context = new OutputContext(
-            record,
-            decision.Value,
-            decision.Text,
-            decision.BusinessDate,
-            _time.GetLocalNow(),
-            seq,
-            decision.TemplateChanged || force,
-            decision.OperatorChanged || force);
-        var encoding = TextEncodings.Resolve(s.Printer.Encoding);
-        var expected = ControlTokens.Decode(s.Printer.ExpectedResponse ?? "");
-        foreach (var command in OutputFormatter.Build(s.Printer.Steps, context).Where(c => c.Send))
-        {
-            if (trace.Count > 0 && s.Printer.StepDelayMs > 0)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(s.Printer.StepDelayMs), _time, ct).ConfigureAwait(false);
-            }
-
-            Func<PrinterFrame, bool>? isReply = null;
-            if (s.Printer.WaitForResponse)
-            {
-                var received = new StringBuilder();
-                isReply = f =>
-                {
-                    if (f.Kind != PrinterFrameKind.Text)
-                    {
-                        return false;
-                    }
-
-                    received.Append(encoding.GetString(f.Data));
-                    return expected.Length == 0 || received.ToString().Contains(expected, StringComparison.Ordinal);
-                };
-            }
-
-            var bytes = encoding.GetBytes(command.Text);
-            PrinterFrame? reply;
-            try
-            {
-                reply = await session.RequestAsync(bytes, isReply, TimeSpan.FromMilliseconds(s.Printer.ResponseTimeoutMs), ct)
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                throw new PrinterException($"Langkah {command.Step}: printer tidak membalas / balasan tidak sesuai dalam {s.Printer.ResponseTimeoutMs} ms");
-            }
-
-            _stats.AddSent(bytes.Length);
-            trace.Add(new SentCommand(command.Step, command.Name, command.Display, bytes.Length,
-                reply is null ? null : ControlTokens.Visualize(encoding.GetString(reply.Data))));
-        }
-
-        if (!_counter.Commit(decision))
-        {
-            _log.Write(LogStatus.Warn, $"Counter direset saat pengiriman; nilai {decision.Text} tidak disimpan");
-        }
-
-        if (!string.IsNullOrEmpty(s.Printer.PrintDoneSignal))
-        {
-            AddPending(new PendingPrint(record, decision.Value, decision.Text, decision.BusinessDate, _counter.Epoch, ""));
-        }
-
-        _job = new ActiveJob(record);
-        _jobArmed = true;
-        _printerNeedsJob = false;
     }
 
     // ------------------------------------------------------------------ after print → server
@@ -570,9 +424,9 @@ public sealed partial class TransferService
         var bytes = 0;
         if (s.Feedback.Enabled)
         {
-            var context = new OutputContext(printed.Record, printed.Counter, printed.CounterText, printed.BusinessDate, now, seq, false, false);
+            var context = new OutputContext(printed.Record, printed.Counter, printed.CounterText, printed.BusinessDate, now, seq);
             feedback = OutputFormatter.Render(s.Feedback.Template, context);
-            var payload = TextEncodings.Resolve(s.Server.Encoding).GetBytes(feedback);
+            var payload = CommandEncoder.Encode(feedback, TextEncodings.Resolve(s.Server.Encoding));
             bytes = payload.Length;
             note = await SendFeedbackAsync(payload, ct).ConfigureAwait(false);
         }
@@ -700,42 +554,22 @@ public sealed partial class TransferService
     public async Task<ConnectionTestResult> TestPrinterAsync(PrinterSettings printer, CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
+        var driver = PrinterDrivers.For(printer);
         var active = _printer;
         var useActive = active is { IsConnected: true } && _printerKey == PrinterLinks.ConnectionKey(printer);
         PrinterSession? temporary = null;
         try
         {
-            var session = active!;
-            if (!useActive)
+            var session = useActive ? active! : null;
+            if (session is null)
             {
-                IPrinterFrameParser parser = printer.Protocol == PrinterProtocol.Tij
-                    ? new TijFrameParser()
-                    : new TextFrameParser([]);
-                temporary = await PrinterSession.OpenAsync(_printerFactory(printer), parser, _ => { }, null, ct).ConfigureAwait(false);
+                temporary = await PrinterSession.OpenAsync(_printerFactory(printer), driver.CreateParser(printer), _ => { }, null, ct)
+                    .ConfigureAwait(false);
                 session = temporary;
             }
 
-            var message = $"Printer {session.Endpoint} terhubung";
-            if (printer.Protocol == PrinterProtocol.Tij)
-            {
-                var reply = await session.RequestAsync(
-                    TijProtocol.Command(SlaveAddress(printer), TijProtocol.CmdMessageNames),
-                    f => f.Kind is PrinterFrameKind.Ack or PrinterFrameKind.Nak && f.Command == TijProtocol.CmdMessageNames,
-                    TimeSpan.FromMilliseconds(Math.Max(500, printer.ResponseTimeoutMs)),
-                    ct).ConfigureAwait(false);
-                if (reply is { Kind: PrinterFrameKind.Ack })
-                {
-                    var names = TijProtocol.ParseMessageNames(reply.Data, TextEncodings.Resolve(printer.Encoding));
-                    message += names.Count > 0
-                        ? $". Message di printer: {string.Join(", ", names)}"
-                        : $". Status {reply.Status:X2} ({TijProtocol.PrinterStatusText(reply.Status)})";
-                }
-                else if (reply is not null)
-                {
-                    message += $", tetapi {reply.Describe()}";
-                }
-            }
-
+            var detail = await driver.InspectAsync(session, printer, ct).ConfigureAwait(false);
+            var message = $"Printer {session.Endpoint} terhubung ({driver.Name})" + (detail is null ? "" : $". {detail}");
             return new ConnectionTestResult(true, message, watch.ElapsedMilliseconds);
         }
         catch (Exception ex) when (IsTransportError(ex) || ex is PrinterException)

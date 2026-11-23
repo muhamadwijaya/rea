@@ -1,6 +1,7 @@
 using System.Text;
 using Sharx.Core.Configuration;
 using Sharx.Core.Mapping;
+using Sharx.Core.Text;
 using Sharx.Core.Transport;
 
 namespace Sharx.Core.Tests;
@@ -74,7 +75,7 @@ public class MappingTests
     public void Output_template_expands_placeholders_formats_and_control_tokens()
     {
         var record = RecordParser.Parse("ANANDA02,867892,000", new MappingSettings()).Record;
-        var context = new OutputContext(record, 7, "007", "2026-11-23", new DateTimeOffset(2026, 11, 23, 8, 5, 9, TimeSpan.Zero), 3, false, false);
+        var context = new OutputContext(record, 7, "007", "2026-11-23", new DateTimeOffset(2026, 11, 23, 8, 5, 9, TimeSpan.Zero), 3);
 
         var text = OutputFormatter.Render("<STX>{TEMPLATE}|{OPERATOR:L10}|{COUNTER}|{COUNTER:D5}|{DATE:ddMMyy}|{F3}|{{x}}<ETX>", context);
 
@@ -85,7 +86,7 @@ public class MappingTests
     public void Data_values_are_not_decoded_as_control_tokens()
     {
         var record = RecordParser.Parse("<CR>,867892,000", new MappingSettings()).Record;
-        var context = new OutputContext(record, 1, "001", "2026-11-23", DateTimeOffset.UnixEpoch, 1, false, false);
+        var context = new OutputContext(record, 1, "001", "2026-11-23", DateTimeOffset.UnixEpoch, 1);
 
         Assert.Equal("<CR>", OutputFormatter.Render("{OPERATOR}", context));
     }
@@ -127,15 +128,26 @@ public class MappingTests
     }
 
     [Fact]
-    public void Default_settings_are_valid_and_custom_text_requires_record_counting()
+    public void Default_settings_are_valid_and_generic_print_counting_needs_print_done_signal()
     {
         Assert.Empty(SettingsValidator.Validate(new AppSettings()));
 
-        var custom = new AppSettings();
-        custom.Printer.Protocol = PrinterProtocol.CustomText;
-        Assert.Contains(SettingsValidator.Validate(custom), e => e.Contains("Custom text"));
+        var generic = new AppSettings();
+        generic.Printer.Protocol = PrinterProtocol.Generic;
+        Assert.Contains(SettingsValidator.Validate(generic), e => e.Contains("sinyal selesai cetak"));
 
-        custom.Counter.IncrementOn = CounterIncrement.Record;
-        Assert.Empty(SettingsValidator.Validate(custom));
+        generic.Printer.Generic.PrintDonePattern = "<EOT>";
+        Assert.Empty(SettingsValidator.Validate(generic));
+    }
+
+    [Fact]
+    public void Command_encoder_computes_checksum_tokens()
+    {
+        // Contoh dokumen TIJ 4.8 bab 2.4 ditulis sebagai perintah Generic: checksum <SUM> = B0.
+        var text = ControlTokens.Decode("<ESC><STX><0x00><0x1D><0x01><0x01><0x0B>TIJ Printer<ESC><ETX><SUM>");
+        Assert.Equal("1B02001D01010B54494A205072696E7465721B03B0", Convert.ToHexString(CommandEncoder.Encode(text, Encoding.ASCII)));
+
+        var xor = CommandEncoder.Encode(ControlTokens.Decode("<STX>AB<XOR>"), Encoding.ASCII);
+        Assert.Equal(0x02 ^ 0x41 ^ 0x42, xor[^1]);
     }
 }

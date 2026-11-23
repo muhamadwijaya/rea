@@ -1,0 +1,3 @@
+# Script Windows harus CRLF.
+*.bat text eol=crlf
+*.sln text eol=crlf

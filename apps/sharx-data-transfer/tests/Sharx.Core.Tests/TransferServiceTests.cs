@@ -199,3 +199,92 @@ public class TransferServiceTests
         listener.Stop();
     }
 }
+
+/// <summary>Printer teks di memori: membalas &lt;ACK&gt; dan bisa mengirim sinyal selesai cetak.</summary>
+internal sealed class FakeTextLink(ConcurrentQueue<string> commands) : IPrinterLink
+{
+    private readonly Channel<byte[]> _toHost = Channel.CreateUnbounded<byte[]>();
+
+    public string Endpoint => "fake-text";
+
+    public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public Task SendAsync(byte[] data, CancellationToken ct)
+    {
+        commands.Enqueue(Sharx.Core.Text.ControlTokens.Visualize(Encoding.ASCII.GetString(data)));
+        _toHost.Writer.TryWrite([0x06]);
+        return Task.CompletedTask;
+    }
+
+    public void Print() => _toHost.Writer.TryWrite(Encoding.ASCII.GetBytes("DONE\r"));
+
+    public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct)
+    {
+        try
+        {
+            var bytes = await _toHost.Reader.ReadAsync(ct);
+            bytes.CopyTo(buffer);
+            return bytes.Length;
+        }
+        catch (ChannelClosedException)
+        {
+            return 0;
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _toHost.Writer.TryComplete();
+        return ValueTask.CompletedTask;
+    }
+}
+
+public class GenericProtocolTests
+{
+    [Fact]
+    public async Task Generic_commands_change_template_send_fields_and_report_prints()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var commands = new ConcurrentQueue<string>();
+        FakeTextLink? printer = null;
+        var settings = new AppSettings();
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Printer.Protocol = PrinterProtocol.Generic;
+        settings.Printer.Generic = new GenericProtocolSettings
+        {
+            TemplateCommand = "<STX>SEL:{TEMPLATE_NAME}<ETX>",
+            ClearCommand = "<STX>CLR<ETX>",
+            FieldCommand = "<STX>F{FIELD_ID}={FIELD_VALUE}<ETX>",
+            AckPattern = "<ACK>",
+            PrintDonePattern = "DONE<CR>",
+        };
+        Assert.Empty(SettingsValidator.Validate(settings));
+
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ => printer = new FakeTextLink(commands));
+        service.Start();
+        using var server = await listener.AcceptTcpClientAsync();
+        var stream = server.GetStream();
+        var reader = new StreamReader(stream, Encoding.UTF8);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("ANANDA02,867892,000\r\n"));
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (commands.Count < 4 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(
+            ["<STX>SEL:867892<ETX>", "<STX>CLR<ETX>", "<STX>F0=ANANDA02<ETX>", "<STX>F1=001<ETX>"],
+            commands.ToArray());
+
+        printer!.Print();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.Equal("ANANDA02,867892,001", await reader.ReadLineAsync(timeout.Token));
+        await service.StopAsync();
+        listener.Stop();
+    }
+}

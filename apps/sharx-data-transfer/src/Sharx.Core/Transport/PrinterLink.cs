@@ -25,8 +25,8 @@ public static class PrinterLinks
 
     /// <summary>Kunci koneksi; jika berubah, koneksi printer dibuat ulang.</summary>
     public static string ConnectionKey(PrinterSettings s) => s.Transport == PrinterTransport.Serial
-        ? $"serial|{s.Protocol}|{s.SerialPort}|{s.BaudRate}|{s.DataBits}|{s.Parity}|{s.StopBits}|{s.PrintDoneSignal}"
-        : $"tcp|{s.Protocol}|{s.Host}|{s.Port}|{s.ConnectTimeoutSeconds}|{s.PrintDoneSignal}";
+        ? $"serial|{s.Protocol}|{s.SerialPort}|{s.BaudRate}|{s.DataBits}|{s.Parity}|{s.StopBits}|{s.Generic.PrintDonePattern}"
+        : $"tcp|{s.Protocol}|{s.Host}|{s.Port}|{s.ConnectTimeoutSeconds}|{s.Generic.PrintDonePattern}";
 
     public static string Describe(PrinterSettings s) => s.Transport == PrinterTransport.Serial
         ? $"{s.SerialPort} @ {s.BaudRate}"
