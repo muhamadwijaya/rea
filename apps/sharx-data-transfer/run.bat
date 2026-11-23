@@ -9,7 +9,8 @@ rem  run.bat browser     mode browser / service (http://127.0.0.1:5080)
 rem  run.bat simulator   jalankan simulator server + printer TIJ untuk uji coba
 rem  run.bat publish     buat paket siap pakai di folder publish\ (butuh .NET 8 SDK)
 rem
-rem  Settings, counter dan log disimpan di folder data\ di samping run.bat.
+rem  Paket siap pakai: run.bat + folder app\ (program). Settings, counter dan
+rem  log disimpan di folder data\ di samping run.bat.
 rem ==========================================================================
 
 set "MODE=%~1"
@@ -26,7 +27,7 @@ exit /b 1
 
 rem --------------------------------------------------------------- desktop
 :desktop
-if exist "%~dp0SharxDataTransfer.exe" goto desktop_packaged
+if exist "%~dp0app\SharxDataTransfer.exe" goto desktop_packaged
 call :hassdk
 if errorlevel 1 goto desktop_fallback
 echo Menyiapkan aplikasi desktop...
@@ -36,29 +37,29 @@ start "" "%~dp0src\Sharx.Desktop\bin\Release\net8.0-windows\SharxDataTransfer.ex
 exit /b 0
 
 :desktop_packaged
-start "" "%~dp0SharxDataTransfer.exe" --data "%DATA%"
+start "" "%~dp0app\SharxDataTransfer.exe" --data "%DATA%"
 exit /b 0
 
 :desktop_fallback
-if not exist "%~dp0publish\SharxDataTransfer.exe" goto nosdk
-start "" "%~dp0publish\SharxDataTransfer.exe" --data "%DATA%"
+if not exist "%~dp0publish\app\SharxDataTransfer.exe" goto nosdk
+start "" "%~dp0publish\app\SharxDataTransfer.exe" --data "%DATA%"
 exit /b 0
 
 rem --------------------------------------------------------------- browser
 :browser
-if exist "%~dp0server\SharxDataTransfer.Server.exe" goto browser_packaged
+if exist "%~dp0app\SharxDataTransfer.Server.exe" goto browser_packaged
 call :hassdk
 if errorlevel 1 goto nosdk
 dotnet run --project "src\Sharx.Host\Sharx.Host.csproj" -c Release -- --data "%DATA%"
 exit /b %errorlevel%
 
 :browser_packaged
-"%~dp0server\SharxDataTransfer.Server.exe" --data "%DATA%"
+"%~dp0app\SharxDataTransfer.Server.exe" --data "%DATA%"
 exit /b %errorlevel%
 
 rem --------------------------------------------------------------- simulator
 :simulator
-set "SIM=%~dp0simulator\SharxSimulator.exe"
+set "SIM=%~dp0app\SharxSimulator.exe"
 if exist "%SIM%" goto simulator_start
 call :hassdk
 if errorlevel 1 goto nosdk
@@ -78,16 +79,19 @@ rem --------------------------------------------------------------- publish
 :publish
 call :hassdk
 if errorlevel 1 goto nosdk
-set "PUB=-c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -nologo"
+rem Ketiga program berbagi satu runtime .NET di publish\app (lebih kecil).
+set "PUB=-c Release -r win-x64 --self-contained true -p:DebugType=none -nologo"
 dotnet test "tests\Sharx.Core.Tests\Sharx.Core.Tests.csproj" -c Release -nologo
 if errorlevel 1 goto failed
-dotnet publish "src\Sharx.Desktop\Sharx.Desktop.csproj" %PUB% -o "publish"
+dotnet publish "src\Sharx.Desktop\Sharx.Desktop.csproj" %PUB% -o "publish\app"
 if errorlevel 1 goto failed
-dotnet publish "src\Sharx.Host\Sharx.Host.csproj" %PUB% -o "publish\server"
+dotnet publish "src\Sharx.Host\Sharx.Host.csproj" %PUB% -o "publish\app"
 if errorlevel 1 goto failed
-dotnet publish "tools\Sharx.Simulator\Sharx.Simulator.csproj" %PUB% -o "publish\simulator"
+dotnet publish "tools\Sharx.Simulator\Sharx.Simulator.csproj" %PUB% -o "publish\app"
 if errorlevel 1 goto failed
+del /q "publish\app\*.xml" 2>nul
 copy /y "run.bat" "publish\run.bat" >nul
+copy /y "README.md" "publish\README.md" >nul
 echo.
 echo Selesai. Salin folder publish\ ke PC produksi lalu jalankan publish\run.bat
 echo (tidak perlu .NET SDK di PC produksi; butuh WebView2 Runtime untuk aplikasi desktop).

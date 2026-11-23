@@ -36,7 +36,11 @@ public sealed class SharxHostOptions
 
     public static string DefaultDataDirectory()
     {
-        var portable = Path.Combine(AppContext.BaseDirectory, "data");
+        // Paket publish: run.bat + app\ (program). Data disimpan di samping run.bat.
+        var baseDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent = Directory.GetParent(baseDirectory)?.FullName;
+        var root = parent is not null && File.Exists(Path.Combine(parent, "run.bat")) ? parent : baseDirectory;
+        var portable = Path.Combine(root, "data");
         try
         {
             Directory.CreateDirectory(portable);

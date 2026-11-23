@@ -25,9 +25,10 @@ run.bat publish     :: buat paket siap pakai di folder publish\
 
 - Di folder source, `run.bat` butuh [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
   (build otomatis lalu jalan).
-- `run.bat publish` menghasilkan folder `publish\` (exe self-contained + `run.bat`).
-  Salin folder itu ke PC produksi dan jalankan `publish\run.bat`; PC produksi **tidak perlu**
-  .NET SDK. Aplikasi desktop butuh **Microsoft Edge WebView2 Runtime** (sudah ada di Windows 10/11).
+- `run.bat publish` menghasilkan folder `publish\` berisi `run.bat`, `README.md` dan folder
+  `app\` (program + runtime .NET). Salin folder itu ke PC produksi dan jalankan `run.bat`;
+  PC produksi **tidak perlu** .NET SDK. Aplikasi desktop butuh **Microsoft Edge WebView2 Runtime**
+  (sudah ada di Windows 10/11).
 - Settings, counter dan log disimpan di folder `data\` di samping `run.bat`.
 
 ## Aturan counter
