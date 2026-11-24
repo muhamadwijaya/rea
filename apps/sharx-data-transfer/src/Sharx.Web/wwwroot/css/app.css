@@ -140,25 +140,24 @@ code {
 }
 
 .logo {
-  width: calc(var(--u) * 186);
-  height: calc(var(--u) * 132);
+  width: auto;
+  height: calc(var(--u) * 120);
+  margin-top: calc(var(--u) * 4);
+  object-fit: contain;
+  filter: drop-shadow(
+    0 calc(var(--u) * 2) calc(var(--u) * 4) rgba(0, 0, 0, 0.5)
+  );
+  pointer-events: none;
 }
 
 .brand-name {
-  margin-top: calc(var(--u) * 2);
+  margin-top: calc(var(--u) * 8);
   color: #eef3f9;
   font-size: calc(var(--u) * 30);
   font-weight: 700;
   letter-spacing: 0.14em;
   line-height: 1;
-  text-shadow: 0 0 calc(var(--u) * 10) rgba(95, 229, 116, 0.35);
-}
-
-.logo-powered {
-  fill: #ffffff;
-  font-family: "Segoe UI", Arial, sans-serif;
-  font-size: 11.5px;
-  font-weight: 600;
+  text-shadow: 0 0 calc(var(--u) * 10) rgba(255, 255, 255, 0.25);
 }
 
 .main {
