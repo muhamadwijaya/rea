@@ -56,6 +56,9 @@ internal sealed class FakeTijLink(ConcurrentQueue<string> commands, bool started
 
     public void Print() => _toHost.Writer.TryWrite(TijProtocolTests.Reply(TijProtocol.Ack, 0x00, TijProtocol.SignalPrintEnd));
 
+    /// <summary>Printer menutup koneksi TCP dari sisinya.</summary>
+    public void Drop() => _toHost.Writer.TryComplete();
+
     public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct)
     {
         try
@@ -449,6 +452,105 @@ public class PrintNotStartedTests
 
 public class RobustnessTests
 {
+    private static (TcpListener Listener, AppSettings Settings) TcpServerRig()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var settings = new AppSettings();
+        settings.Server.Host = "127.0.0.1";
+        settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        settings.Server.Protocol = ServerProtocol.Tcp;
+        return (listener, settings);
+    }
+
+    [Fact]
+    public async Task Printer_drop_after_a_stable_connection_reconnects_at_once_and_resends_the_job()
+    {
+        var (listener, settings) = TcpServerRig();
+        settings.Printer.ReconnectDelaySeconds = 60; // jeda panjang: sambung ulang tetap harus langsung
+        var commands = new ConcurrentQueue<string>();
+        var links = new ConcurrentQueue<FakeTijLink>();
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ =>
+            {
+                var link = new FakeTijLink(commands);
+                links.Enqueue(link);
+                return link;
+            });
+        service.Start();
+        using var server = await listener.AcceptTcpClientAsync();
+        await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes("ANANDA02,867892,000\n"));
+        await WaitUntil(() => commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+
+        await Task.Delay(TransferService.StableConnection + TimeSpan.FromMilliseconds(300));
+        commands.Clear();
+        links.Single().Drop();
+
+        await WaitUntil(() => links.Count == 2 && commands.Contains("1D:0=ANANDA02;1=001"), "tersambung lagi + job dikirim ulang", 3);
+        Assert.Contains("1E:867892", commands);
+        Assert.Equal(PrinterState.Connected, service.Status.Printer);
+        var messages = service.Log.Recent(50).Select(e => e.Message).ToArray();
+        Assert.Contains(messages, m => m.Contains("terputus (ditutup oleh printer); menyambung ulang", StringComparison.Ordinal));
+        Assert.Contains(messages, m => m.Contains("tersambung lagi setelah", StringComparison.Ordinal));
+        await service.StopAsync();
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Test_printer_while_running_reuses_the_active_connection()
+    {
+        var (listener, settings) = TcpServerRig();
+        var commands = new ConcurrentQueue<string>();
+        var opened = 0;
+        var time = TimeProvider.System;
+        await using var service = new TransferService(settings, null, new CounterEngine(null, time),
+            new TransferLog(null, time), new TransferStats(), time, _ =>
+            {
+                Interlocked.Increment(ref opened);
+                return new FakeTijLink(commands);
+            });
+        service.Start();
+        using var server = await listener.AcceptTcpClientAsync();
+        await server.GetStream().WriteAsync(Encoding.UTF8.GetBytes("ANANDA02,867892,000\n"));
+        await WaitUntil(() => commands.Contains("1D:0=ANANDA02;1=001"), "job terkirim");
+
+        // Form Settings belum disimpan (timeout berbeda) tetapi printernya sama: tidak boleh koneksi kedua.
+        var draft = SettingsStore.Clone(settings).Printer;
+        draft.ConnectTimeoutSeconds = 9;
+        var result = await service.TestPrinterAsync(draft, CancellationToken.None);
+        Assert.True(result.Ok, result.Message);
+        Assert.Equal(1, opened);
+        Assert.Equal(PrinterState.Connected, service.Status.Printer);
+
+        draft.Protocol = PrinterProtocol.Generic;
+        Assert.False((await service.TestPrinterAsync(draft, CancellationToken.None)).Ok);
+        Assert.Equal(1, opened);
+        await service.StopAsync();
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Tcp_connections_use_keepalive_and_report_why_they_closed()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+        TcpTuning.Apply(client);
+        Assert.NotEqual(0, (int)client.Client.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive)!);
+        Assert.Equal(TcpTuning.KeepAliveIdleSeconds,
+            (int)client.Client.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime)!);
+        Assert.True(client.NoDelay);
+        listener.Stop();
+
+        Assert.Equal("ditutup oleh printer", TcpTuning.DescribeClose(null, "printer"));
+        Assert.Equal("direset oleh printer",
+            TcpTuning.DescribeClose(new IOException("x", new SocketException((int)SocketError.ConnectionReset)), "printer"));
+        Assert.Equal("server tidak merespon (keepalive)",
+            TcpTuning.DescribeClose(new IOException("x", new SocketException((int)SocketError.TimedOut)), "server"));
+    }
+
     private static async Task WaitUntil(Func<bool> condition, string what, int seconds = 20)
     {
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
@@ -531,6 +633,7 @@ public class RobustnessTests
         }
 
         await WaitUntil(() => service.Status.Server != ServerState.Connected, "server terputus");
+        Assert.Contains(service.Log.Recent(50), e => e.Message.Contains("terputus (ditutup oleh server)", StringComparison.Ordinal));
         printer!.Print();
         printer.Print();
         await WaitUntil(() => service.Status.FeedbackQueued == 2, "feedback diantrikan");

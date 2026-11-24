@@ -61,6 +61,7 @@ public sealed partial class TransferService : IAsyncDisposable
     private ServerState _serverState = ServerState.Stopped;
     private DateTimeOffset? _connectedSince;
     private string? _lastError;
+    private DateTimeOffset? _serverDroppedAt;
     private long _sequence;
 
     public TransferService(
@@ -411,18 +412,12 @@ public sealed partial class TransferService : IAsyncDisposable
                 using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
                 _connectionCts = connectionCts;
                 var reconnectNow = false;
+                string? dropped = null; // penyebab putus dari koneksi yang sudah tersambung
                 try
                 {
-                    if (server.Protocol == ServerProtocol.Mqtt)
-                    {
-                        await ReceiveMqttAsync(server, connectionCts.Token).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await ReceiveTcpAsync(server, connectionCts.Token).ConfigureAwait(false);
-                    }
-
-                    _log.Write(LogStatus.Warn, "Koneksi server terputus");
+                    dropped = server.Protocol == ServerProtocol.Mqtt
+                        ? await ReceiveMqttAsync(server, connectionCts.Token).ConfigureAwait(false)
+                        : await ReceiveTcpAsync(server, connectionCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
                 {
@@ -431,6 +426,11 @@ public sealed partial class TransferService : IAsyncDisposable
                 catch (OperationCanceledException)
                 {
                     reconnectNow = true;
+                }
+                catch (Exception ex) when (_serverState == ServerState.Connected)
+                {
+                    dropped = TcpTuning.DescribeClose(ex, "server");
+                    _lastError = dropped;
                 }
                 catch (Exception ex)
                 {
@@ -443,6 +443,7 @@ public sealed partial class TransferService : IAsyncDisposable
                     _connectionCts = null;
                 }
 
+                var lasted = _connectedSince is { } since ? _time.GetLocalNow() - since : TimeSpan.Zero;
                 _serverState = ServerState.Disconnected;
                 _connectedSince = null;
                 RaiseStatus();
@@ -451,14 +452,30 @@ public sealed partial class TransferService : IAsyncDisposable
                     continue;
                 }
 
+                if (dropped is not null)
+                {
+                    _serverDroppedAt = _time.GetLocalNow();
+                    // Koneksi yang sudah stabil langsung disambung ulang (tanpa jeda reconnect).
+                    var immediately = lasted >= StableConnection && _settings.Server.AutoReconnect;
+                    _log.Write(LogStatus.Warn,
+                        $"Koneksi {DescribeServer(server)} terputus ({dropped})" + (immediately ? "; menyambung ulang" : ""));
+                    if (immediately)
+                    {
+                        continue;
+                    }
+                }
+
                 if (!_settings.Server.AutoReconnect)
                 {
                     _log.Write(LogStatus.Warn, "Auto reconnect nonaktif: koneksi server tidak diulang (tekan Stop lalu Start)");
                     break;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(_settings.Server.ReconnectDelaySeconds), _time, stopToken)
-                    .ConfigureAwait(false);
+                // Sesaat setelah koneksi terputus: coba tiap detik, lalu sesuai jeda reconnect di Settings.
+                var delay = _serverDroppedAt is { } droppedAt && _time.GetLocalNow() - droppedAt < FastRetryWindow
+                    ? TimeSpan.FromSeconds(1)
+                    : TimeSpan.FromSeconds(_settings.Server.ReconnectDelaySeconds);
+                await Task.Delay(delay, _time, stopToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
@@ -467,10 +484,23 @@ public sealed partial class TransferService : IAsyncDisposable
         }
     }
 
+    /// <summary>Teks tambahan saat tersambung lagi setelah koneksi server terputus.</summary>
+    private string ServerReconnectedNote()
+    {
+        if (_serverDroppedAt is not { } dropped)
+        {
+            return "";
+        }
+
+        _serverDroppedAt = null;
+        return $" (tersambung lagi setelah {(_time.GetLocalNow() - dropped).TotalSeconds:0.0} detik)";
+    }
+
     private static string DescribeServer(ServerSettings s) =>
         s.Protocol == ServerProtocol.Mqtt ? $"MQTT broker {s.Host}:{s.Port}" : $"server {s.Host}:{s.Port}";
 
-    private async Task ReceiveTcpAsync(ServerSettings server, CancellationToken ct)
+    /// <summary>Terima data dari server TCP; kembali dengan penyebab saat server menutup koneksi.</summary>
+    private async Task<string> ReceiveTcpAsync(ServerSettings server, CancellationToken ct)
     {
         _serverState = ServerState.Connecting;
         RaiseStatus();
@@ -489,7 +519,7 @@ public sealed partial class TransferService : IAsyncDisposable
             }
         }
 
-        client.NoDelay = true;
+        TcpTuning.Apply(client);
         var stream = client.GetStream();
         _serverSender = async (payload, token) =>
         {
@@ -506,7 +536,7 @@ public sealed partial class TransferService : IAsyncDisposable
         _serverState = ServerState.Connected;
         _connectedSince = _time.GetLocalNow();
         _lastError = null;
-        _log.Write(LogStatus.Ok, $"Connected to server {server.Host}:{server.Port}");
+        _log.Write(LogStatus.Ok, $"Connected to server {server.Host}:{server.Port}{ServerReconnectedNote()}");
         RaiseStatus();
 
         var decoder = new FrameDecoder(server);
@@ -552,7 +582,7 @@ public sealed partial class TransferService : IAsyncDisposable
                     signal.Release();
                 }
 
-                return;
+                return TcpTuning.DescribeClose(null, "server");
             }
 
             _stats.AddReceived(n);
@@ -635,7 +665,13 @@ public sealed partial class TransferService : IAsyncDisposable
             return;
         }
 
-        if (now - _lastPrinterAttempt < TimeSpan.FromSeconds(Math.Max(1, s.Printer.ReconnectDelaySeconds)))
+        if (PrinterConnected && _printer!.IdleFor >= PrinterIdleCheck && now - _lastIdleCheck >= PrinterIdleCheck)
+        {
+            _lastIdleCheck = now;
+            Enqueue(new IdleCheckItem());
+        }
+
+        if (now - _lastPrinterAttempt < PrinterRetryDelay(s.Printer))
         {
             return;
         }

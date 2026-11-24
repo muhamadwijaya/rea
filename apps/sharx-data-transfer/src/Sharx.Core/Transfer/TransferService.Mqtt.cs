@@ -51,7 +51,8 @@ public sealed partial class TransferService
         return frames;
     }
 
-    private async Task ReceiveMqttAsync(ServerSettings server, CancellationToken ct)
+    /// <summary>Terima job dari broker; kembali dengan penyebab saat koneksi broker terputus.</summary>
+    private async Task<string> ReceiveMqttAsync(ServerSettings server, CancellationToken ct)
     {
         _serverState = ServerState.Connecting;
         RaiseStatus();
@@ -120,13 +121,13 @@ public sealed partial class TransferService
         _connectedSince = _time.GetLocalNow();
         _lastError = null;
         _log.Write(LogStatus.Ok,
-            $"Connected to MQTT broker {server.Host}:{server.Port} (data: {m.SubscribeTopic}, feedback: {m.PublishTopic})");
+            $"Connected to MQTT broker {server.Host}:{server.Port} (data: {m.SubscribeTopic}, feedback: {m.PublishTopic})"
+            + ServerReconnectedNote());
         RaiseStatus();
 
         try
         {
-            var reason = await disconnected.Task.WaitAsync(ct).ConfigureAwait(false);
-            _log.Write(LogStatus.Warn, $"MQTT broker terputus: {reason}");
+            return await disconnected.Task.WaitAsync(ct).ConfigureAwait(false);
         }
         finally
         {

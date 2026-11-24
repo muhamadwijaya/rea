@@ -16,6 +16,8 @@ public sealed class PrinterSession : IAsyncDisposable
     private PendingRequest? _pending;
     private Task _readTask = Task.CompletedTask;
     private int _disposed;
+    private long _lastActivity = Environment.TickCount64;
+    private volatile string? _closeReason;
 
     private PrinterSession(
         IPrinterLink link,
@@ -35,6 +37,14 @@ public sealed class PrinterSession : IAsyncDisposable
     public Task Completion => _readTask;
 
     public bool IsConnected => !_readTask.IsCompleted && Volatile.Read(ref _disposed) == 0;
+
+    /// <summary>Penyebab koneksi terputus dari sisi printer / jaringan (null selama terhubung).</summary>
+    public string? CloseReason => _closeReason;
+
+    /// <summary>Lama tidak ada data dikirim ke / diterima dari printer.</summary>
+    public TimeSpan IdleFor => TimeSpan.FromMilliseconds(Environment.TickCount64 - Interlocked.Read(ref _lastActivity));
+
+    private void Touch() => Interlocked.Exchange(ref _lastActivity, Environment.TickCount64);
 
     public static async Task<PrinterSession> OpenAsync(
         IPrinterLink link,
@@ -93,6 +103,7 @@ public sealed class PrinterSession : IAsyncDisposable
                 try
                 {
                     await _link.SendAsync(payload, sendTimeout.Token).ConfigureAwait(false);
+                    Touch();
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -162,9 +173,15 @@ public sealed class PrinterSession : IAsyncDisposable
                 var n = await _link.ReadAsync(buffer, ct).ConfigureAwait(false);
                 if (n <= 0)
                 {
+                    if (!ct.IsCancellationRequested)
+                    {
+                        _closeReason = TcpTuning.DescribeClose(null, "printer");
+                    }
+
                     break;
                 }
 
+                Touch();
                 _onBytesReceived?.Invoke(n);
                 foreach (var frame in _parser.Push(buffer.AsSpan(0, n)))
                 {
@@ -175,7 +192,11 @@ public sealed class PrinterSession : IAsyncDisposable
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException
                                        or InvalidOperationException or UnauthorizedAccessException)
         {
-            // Koneksi terputus / ditutup.
+            // Ditutup aplikasi (Dispose) bukan penyebab dari sisi printer.
+            if (!ct.IsCancellationRequested)
+            {
+                _closeReason = TcpTuning.DescribeClose(ex, "printer");
+            }
         }
         finally
         {

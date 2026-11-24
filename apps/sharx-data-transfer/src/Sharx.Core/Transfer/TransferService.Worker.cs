@@ -27,6 +27,8 @@ public sealed partial class TransferService
 
     private sealed record ReadyCheckItem : WorkItem;
 
+    private sealed record IdleCheckItem : WorkItem;
+
     private sealed record PrintControlItem(bool Start, TaskCompletionSource<ConnectionTestResult> Result) : WorkItem;
 
     /// <summary>Job aktif: record terakhir dari server yang menentukan template &amp; operator.</summary>
@@ -109,6 +111,7 @@ public sealed partial class TransferService
         ResyncItem r => ResyncAsync(r.Reason, ct),
         SettingsChangedItem s => OnSettingsChangedAsync(s, ct),
         ReadyCheckItem => CheckPrinterReadyAsync(ct),
+        IdleCheckItem => CheckPrinterIdleAsync(ct),
         PrintControlItem p => OnPrintControlAsync(p, ct),
         _ => Task.CompletedTask,
     };

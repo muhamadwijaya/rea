@@ -42,7 +42,7 @@ public sealed class TcpPrinterLink(PrinterSettings settings) : IPrinterLink
 
     public async Task ConnectAsync(CancellationToken ct)
     {
-        var client = new TcpClient { NoDelay = true };
+        var client = new TcpClient();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, settings.ConnectTimeoutSeconds)));
         try
@@ -60,6 +60,7 @@ public sealed class TcpPrinterLink(PrinterSettings settings) : IPrinterLink
             throw;
         }
 
+        TcpTuning.Apply(client);
         _client = client;
         _stream = client.GetStream();
     }

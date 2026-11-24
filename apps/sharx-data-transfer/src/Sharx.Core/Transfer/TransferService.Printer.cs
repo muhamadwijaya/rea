@@ -26,6 +26,27 @@ public sealed partial class TransferService
     private volatile int _waitingCount;
     private volatile PrintState _printState = PrintState.Unknown;
     private DateTimeOffset _lastReadyCheck;
+    private DateTimeOffset _lastIdleCheck;
+
+    /// <summary>Koneksi yang bertahan minimal selama ini dan terputus disambung ulang tanpa menunggu.</summary>
+    internal static readonly TimeSpan StableConnection = TimeSpan.FromSeconds(5);
+
+    /// <summary>Setelah koneksi printer terputus, coba tiap detik selama ini sebelum memakai jeda reconnect.</summary>
+    private static readonly TimeSpan FastRetryWindow = TimeSpan.FromSeconds(15);
+
+    /// <summary>Jeda antar percobaan konek printer: cepat sesaat setelah terputus, lalu sesuai Settings.</summary>
+    private TimeSpan PrinterRetryDelay(PrinterSettings p) =>
+        Environment.TickCount64 < _fastRetryUntilTick
+            ? TimeSpan.FromSeconds(1)
+            : TimeSpan.FromSeconds(Math.Max(1, p.ReconnectDelaySeconds));
+
+    private long _fastRetryUntilTick;
+
+    /// <summary>Cek status printer jika koneksi diam selama ini (status Start/Stop tetap terkini).</summary>
+    internal static readonly TimeSpan PrinterIdleCheck = TimeSpan.FromSeconds(5);
+
+    private long _printerConnectedTick;
+    private long _printerDroppedTick;
     private bool _waitingNoticeLogged;
     private PrinterSession? _printer;
     private string? _printerKey;
@@ -297,7 +318,12 @@ public sealed partial class TransferService
         catch (Exception ex) when (IsTransportError(ex))
         {
             SetPrinterState(PrinterState.Error, ex.Message);
-            throw new PrinterException($"Tidak bisa konek ke printer {PrinterLinks.Describe(p)}: {ex.Message}", ex);
+            // Printer TIJ hanya menerima satu klien TCP: koneksi yang menggantung (timeout) setelah terputus
+            // biasanya karena ada software / PC lain yang sedang terhubung ke printer yang sama.
+            var hint = _printerDroppedTick != 0 && ex is TimeoutException
+                ? "; printer hanya menerima 1 koneksi, pastikan tidak ada software / PC lain yang terhubung ke printer ini"
+                : "";
+            throw new PrinterException($"Tidak bisa konek ke printer {PrinterLinks.Describe(p)}: {ex.Message}{hint}", ex);
         }
 
         _ = session.Completion.ContinueWith(
@@ -313,7 +339,12 @@ public sealed partial class TransferService
         _pendingCount = 0;
         _lastPrinterError = null;
         SetPrinterState(PrinterState.Connected, null);
-        _log.Write(LogStatus.Ok, $"Connected to printer {session.Endpoint} ({driver.Name})");
+        var reconnected = _printerDroppedTick != 0
+            ? $", tersambung lagi setelah {(Environment.TickCount64 - _printerDroppedTick) / 1000.0:0.0} detik"
+            : "";
+        _printerDroppedTick = 0;
+        _printerConnectedTick = Environment.TickCount64;
+        _log.Write(LogStatus.Ok, $"Connected to printer {session.Endpoint} ({driver.Name}{reconnected})");
         return session;
     }
 
@@ -358,7 +389,7 @@ public sealed partial class TransferService
         {
             if (_lastPrinterError != ex.Message)
             {
-                _log.Write(LogStatus.Warn, $"{ex.Message} (dicoba ulang tiap {s.Printer.ReconnectDelaySeconds} detik)");
+                _log.Write(LogStatus.Warn, $"{ex.Message} (dicoba ulang tiap {PrinterRetryDelay(s.Printer).TotalSeconds:0} detik)");
                 _lastPrinterError = ex.Message;
             }
 
@@ -383,8 +414,70 @@ public sealed partial class TransferService
         }
 
         var endpoint = _printer.Endpoint;
-        await ClosePrinterAsync(PrinterState.Error, "Koneksi printer terputus").ConfigureAwait(false);
-        _log.Write(LogStatus.Warn, $"Koneksi printer {endpoint} terputus");
+        var reason = _printer.CloseReason ?? "terputus";
+        var lasted = TimeSpan.FromMilliseconds(Environment.TickCount64 - _printerConnectedTick);
+        await ClosePrinterAsync(PrinterState.Error, $"Koneksi printer terputus: {reason}").ConfigureAwait(false);
+        _printerDroppedTick = Environment.TickCount64;
+        _lastPrinterError = null;
+        if (lasted >= StableConnection)
+        {
+            // Koneksi yang sudah stabil langsung disambung ulang; job dikirim ulang setelah tersambung.
+            _log.Write(LogStatus.Warn, $"Koneksi printer {endpoint} terputus ({reason}); menyambung ulang");
+            _fastRetryUntilTick = Environment.TickCount64 + (long)FastRetryWindow.TotalMilliseconds;
+            Enqueue(new EnsurePrinterItem());
+        }
+        else
+        {
+            // Putus lagi tak lama setelah tersambung: tunggu jeda reconnect agar printer tidak dibanjiri koneksi.
+            _fastRetryUntilTick = 0;
+            _log.Write(LogStatus.Warn,
+                $"Koneksi printer {endpoint} terputus ({reason}); dicoba lagi dalam {_settings.Printer.ReconnectDelaySeconds} detik");
+        }
+    }
+
+    /// <summary>
+    /// Koneksi diam: minta status printer (TIJ: 14) supaya tombol Start / Stop Print sesuai keadaan printer.
+    /// Gagal / tidak dibalas tidak memutus koneksi; koneksi yang benar-benar mati dideteksi TCP keepalive.
+    /// </summary>
+    private async Task CheckPrinterIdleAsync(CancellationToken ct)
+    {
+        var s = _settings;
+        if (WaitingForPrinter || _printer is not { IsConnected: true } session || session.IdleFor < PrinterIdleCheck)
+        {
+            return;
+        }
+
+        bool? started;
+        try
+        {
+            started = await PrinterDrivers.For(s.Printer).IsPrintStartedAsync(Call(session, s, [], ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is PrinterException || IsTransportError(ex))
+        {
+            return;
+        }
+
+        var next = started switch
+        {
+            true => PrintState.Started,
+            false => PrintState.NotStarted,
+            null => _printState,
+        };
+        if (next == _printState)
+        {
+            return;
+        }
+
+        if (next == PrintState.Started)
+        {
+            MarkPrintStarted();
+        }
+        else
+        {
+            _printState = next;
+        }
+
+        RaiseStatus();
     }
 
     private async Task OnPrinterFrameAsync(PrinterFrameItem item, CancellationToken ct)
@@ -838,11 +931,25 @@ public sealed partial class TransferService
         var watch = Stopwatch.StartNew();
         var driver = PrinterDrivers.For(printer);
         var active = _printer;
-        var useActive = active is { IsConnected: true } && _printerKey == PrinterLinks.ConnectionKey(printer);
+        var current = _settings.Printer;
+        // Printer hanya menerima satu koneksi: koneksi kedua dari tombol Test bisa memutus transfer.
+        var samePrinter = _running && current.Enabled
+            && printer.Transport == current.Transport
+            && PrinterLinks.Describe(printer) == PrinterLinks.Describe(current);
+        if (samePrinter && (printer.Protocol != current.Protocol || active is not { IsConnected: true }))
+        {
+            return new ConnectionTestResult(
+                false,
+                printer.Protocol != current.Protocol
+                    ? "Printer ini sedang dipakai transfer dengan protokol lain. Simpan settings atau Stop Transfer dulu untuk menguji."
+                    : "Printer ini sedang dipakai transfer dan sedang menyambung ulang. Test tidak membuka koneksi kedua.",
+                0);
+        }
+
         PrinterSession? temporary = null;
         try
         {
-            var session = useActive ? active! : null;
+            var session = samePrinter ? active! : null;
             if (session is null)
             {
                 temporary = await PrinterSession.OpenAsync(_printerFactory(printer), driver.CreateParser(printer), _ => { }, null, ct)

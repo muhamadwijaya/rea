@@ -146,6 +146,14 @@ Semua tampilan live dan Log History hanya menampilkan **50 baris terakhir** agar
 - Feedback ke server dikirim oleh proses terpisah dengan antrean: server lambat / terputus tidak
   menahan pengiriman ke printer; laporan dikirim setelah server tersambung lagi.
 - Semua komunikasi punya batas waktu (koneksi, kirim, balasan); koneksi yang macet diulang otomatis.
+- Koneksi printer dan server memakai **TCP keepalive** (probe tiap 5 detik saat diam): koneksi tetap
+  terjaga di jaringan dan kabel / perangkat yang mati terdeteksi dalam ±11 detik. Saat printer diam,
+  status printer dicek tiap 5 detik (perintah `14`) agar tombol Start / Stop Print sesuai.
+- Jika koneksi printer / server yang sudah stabil terputus, aplikasi langsung menyambung ulang (tiap
+  1 detik selama 15 detik pertama, lalu sesuai jeda reconnect). Setelah printer tersambung, change
+  template dan field data dikirim ulang; feedback ke server yang tertunda dikirim setelah server
+  tersambung. Log mencatat penyebabnya, mis. `terputus (ditutup oleh printer)`, `direset oleh printer`,
+  `printer tidak merespon (keepalive)`, dan lama terputus (`tersambung lagi setelah 1.2 detik`).
 - Buffer printer penuh (`P_Status 43`) atau printer belum start (`P_Status 12`): data disimpan
   (status MENUNGGU) dan dikirim otomatis, tidak dibuang.
 - Log ditulis ke file oleh proses background; error tak terduga dicatat di `data\crash.log` tanpa
@@ -178,7 +186,10 @@ started_). Data **tidak dianggap error**: statusnya **MENUNGGU** (kuning) dan di
 
 ## Catatan pemasangan printer TIJ
 
-- Printer TIJ hanya menerima **satu** klien TCP; jangan sambungkan software lain bersamaan.
+- Printer TIJ hanya menerima **satu** klien TCP; jangan sambungkan software lain bersamaan (software
+  printer, NetAssist, PC / aplikasi SHARX lain). Jika log berisi `terputus (ditutup oleh printer)` lalu
+  `Tidak bisa konek ... timeout`, biasanya ada klien lain yang mengambil koneksi printer.
+  **Test Koneksi Printer** saat transfer berjalan memakai koneksi yang sudah ada (tidak membuka koneksi kedua).
 - Template di printer harus punya **remote field** dengan nomor sesuai Settings (default 0 dan 1).
 - _Buffer Setting_ `1D` di printer minimal sama dengan "Antrean data di printer" (default 1).
 
