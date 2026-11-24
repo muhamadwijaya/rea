@@ -113,7 +113,8 @@
     setTimeout(() => el.remove(), isError ? 6000 : 3200);
   }
 
-  function modal({ title, body, okText = "OK", danger = false, input = null }) {
+  /** Dialog konfirmasi: OK hijau (lanjut), Batal merah. */
+  function modal({ title, body, okText = "OK", input = null }) {
     return new Promise((resolve) => {
       const root = $("#modal");
       $("#modalTitle").textContent = title;
@@ -129,7 +130,6 @@
       }
       const ok = $("#modalOk");
       ok.textContent = okText;
-      ok.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
       root.hidden = false;
       (field || ok).focus();
       const close = (result) => {
@@ -897,7 +897,6 @@
         ? `Reset counter template <b>${esc(template)}</b>? Data berikutnya untuk template ini mulai dari nilai awal.`
         : "Reset <b>semua</b> counter template? Data berikutnya mulai dari nilai awal / counter server.",
       okText: "Reset",
-      danger: true,
     });
     if (!ok) return;
     try {

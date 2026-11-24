@@ -122,8 +122,8 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
     printer mengirim sinyal selesai cetak, data yang dikirim balik ke server dengan statusnya
     (`OK` = diterima server, `MENUNGGU` = server terputus / antre, `DIBUANG` = antrean penuh).
   - **Counter per Template** (ubah / reset) dan tombol Reset Counter.
-  - **Cockpit Command Dock**: toggle **Start / Stop Print** dan **Start / Stop Transfer** (belum
-    jalan = Start menyala, Stop mati; sudah jalan = Start mati, Stop menyala; status printer yang
+  - **Cockpit Command Dock**: toggle **Start / Stop Print** dan **Start / Stop Transfer** (Start hijau,
+    Stop merah menyala; tombol Batal juga merah). Belum jalan = Start menyala, Stop mati; sudah jalan = Start mati, Stop menyala; status printer yang
     belum terbaca dianggap belum start).
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
