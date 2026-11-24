@@ -309,88 +309,62 @@ code {
 
 .control-card {
   flex: 1;
-  gap: calc(var(--u) * 16);
+  gap: calc(var(--u) * 24);
   padding: calc(var(--u) * 18) calc(var(--u) * 14) calc(var(--u) * 14);
 }
 
 .control-title {
   padding: calc(var(--u) * 2) 0 calc(var(--u) * 0) calc(var(--u) * 6);
-  margin-bottom: calc(var(--u) * -4);
+  margin-bottom: calc(var(--u) * -10);
   color: var(--text);
   font-size: calc(var(--u) * 25);
 }
 
-/* Start / Stop berpasangan seperti saklar: tombol keadaan sekarang menyala, pasangannya padam
-   (tetap bisa ditekan untuk mengganti keadaan). */
+/* Start / Stop berpasangan: hanya tombol yang bisa mengubah keadaan yang menyala,
+   pasangannya redup (mis. saat transfer berjalan: Start redup, Stop menyala). */
 .ctl-pair {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 5);
+  gap: calc(var(--u) * 12);
   flex: none;
-  padding: calc(var(--u) * 5);
-  border: calc(var(--u) * 1.5) solid #2c3d57;
-  border-radius: calc(var(--u) * 11);
-  background: rgba(4, 10, 22, 0.45);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 .ctl {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 14);
+  gap: calc(var(--u) * 16);
   flex: none;
-  height: calc(var(--u) * 76);
+  height: calc(var(--u) * 80);
   padding: 0 calc(var(--u) * 6);
-  border: calc(var(--u) * 2) solid;
+  border: 0;
   border-radius: calc(var(--u) * 7);
-  background: #15253c;
-  font-size: calc(var(--u) * 30);
-  white-space: nowrap;
+  color: #0f1828;
+  font-size: calc(var(--u) * 31);
   font-weight: 400;
+  white-space: nowrap;
   cursor: pointer;
+  box-shadow:
+    inset 0 calc(var(--u) * 2) 0 rgba(255, 255, 255, 0.35),
+    inset 0 calc(var(--u) * -3) 0 rgba(0, 0, 0, 0.14),
+    0 calc(var(--u) * 3) calc(var(--u) * 8) rgba(0, 0, 0, 0.35);
   transition:
-    background 0.15s,
-    color 0.15s,
     filter 0.15s,
     transform 0.05s,
     opacity 0.15s;
 }
 
-.ctl-start {
-  border-color: rgba(206, 252, 104, 0.42);
-  color: #cefc68;
-}
-
-.ctl-stop {
-  border-color: rgba(236, 67, 72, 0.5);
-  color: #ff7276;
-}
-
-.ctl.is-on {
-  color: #0f1828;
-  cursor: default;
-  box-shadow:
-    inset 0 calc(var(--u) * 2) 0 rgba(255, 255, 255, 0.35),
-    inset 0 calc(var(--u) * -3) 0 rgba(0, 0, 0, 0.14),
-    0 0 calc(var(--u) * 14) var(--on-glow);
-}
-
-.ctl-start.is-on {
-  --on-glow: rgba(206, 252, 104, 0.4);
-  border-color: #dafe8c;
-  background: linear-gradient(180deg, #d6fd7c 0%, #cefc68 45%, #c2f45a 100%);
-}
-
-.ctl-stop.is-on {
-  --on-glow: rgba(236, 67, 72, 0.45);
-  border-color: #f77a7e;
-  background: linear-gradient(180deg, #f2555a 0%, #ec4348 45%, #df3a3f 100%);
-}
-
 .ctl svg {
   width: calc(var(--u) * 28);
   height: calc(var(--u) * 28);
+}
+
+.ctl-start {
+  background: linear-gradient(180deg, #d6fd7c 0%, #cefc68 45%, #c2f45a 100%);
+}
+
+.ctl-stop {
+  background: linear-gradient(180deg, #f2555a 0%, #ec4348 45%, #df3a3f 100%);
 }
 
 .ctl-stop svg {
@@ -399,17 +373,18 @@ code {
 }
 
 .ctl:not(:disabled):hover {
-  background: #1d3250;
+  filter: brightness(1.07);
 }
 
 .ctl:not(:disabled):active {
   transform: translateY(1px);
 }
 
-.ctl:disabled:not(.is-on) {
-  cursor: not-allowed;
-  opacity: 0.35;
-  filter: saturate(0.4);
+.ctl:disabled {
+  cursor: default;
+  opacity: 0.38;
+  filter: saturate(0.55);
+  box-shadow: none;
 }
 
 .ctl-info {

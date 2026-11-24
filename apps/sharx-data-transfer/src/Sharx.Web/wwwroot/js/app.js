@@ -352,12 +352,10 @@
     $("#incomingEmpty").innerHTML = s.running
       ? "Menunggu data dari server..."
       : "Belum ada data. Tekan <b>Start Transfer</b> untuk mulai menerima data dari server.";
-    setPair($("#pairTransfer"), s.running ? "start" : "stop", false);
-    const printOn =
-      { Started: "start", NotStarted: "stop" }[s.printState] || "";
+    setPair($("#pairTransfer"), s.running, false);
     setPair(
       $("#pairPrint"),
-      printOn,
+      { Started: true, NotStarted: false }[s.printState] ?? null,
       !s.canControlPrint || s.printer === "Disabled",
     );
 
@@ -373,21 +371,13 @@
   }
 
   /**
-   * Pasangan Start / Stop seperti saklar: tombol keadaan sekarang menyala (tidak perlu ditekan lagi),
-   * pasangannya padam dan bisa ditekan. Keadaan belum diketahui: keduanya padam dan bisa ditekan.
+   * Pasangan Start / Stop: hanya tombol yang bisa mengubah keadaan yang menyala, pasangannya redup.
+   * running true = berjalan (Start redup), false = berhenti (Stop redup), null = belum diketahui
+   * (keduanya menyala). locked = tidak bisa dikendalikan (keduanya redup).
    */
-  function setPair(pair, on, locked) {
-    pair.dataset.on = on;
-    pair.classList.toggle("locked", locked);
-    for (const button of pair.querySelectorAll(".ctl")) {
-      const lit =
-        !locked &&
-        ((on === "start" && button.classList.contains("ctl-start")) ||
-          (on === "stop" && button.classList.contains("ctl-stop")));
-      button.classList.toggle("is-on", lit);
-      button.setAttribute("aria-pressed", String(lit));
-      button.disabled = locked || lit;
-    }
+  function setPair(pair, running, locked) {
+    pair.querySelector(".ctl-start").disabled = locked || running === true;
+    pair.querySelector(".ctl-stop").disabled = locked || running === false;
   }
 
   function queueText(s) {

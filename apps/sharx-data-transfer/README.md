@@ -112,9 +112,9 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
   - Atas: menu (Dashboard, Log History, Settings, About) dan status **MQTT Broker**
     (ONLINE / CONNECTING / OFFLINE), **printer** (STARTED / NOT STARTED / OFFLINE) dan operator aktif.
   - Kiri: **Counter Terakhir** (besar), counter berikutnya, template aktif, grafik cetakan per detik;
-    **Control Panel** dengan pasangan **Start / Stop Print** dan **Start / Stop Transfer**. Seperti saklar:
-    tombol keadaan sekarang menyala (mis. Start Transfer menyala saat transfer berjalan), pasangannya
-    padam dan ditekan untuk mengganti keadaan. Di bawahnya status print (menunggu printer, antrean).
+    **Control Panel** dengan pasangan **Start / Stop Print** dan **Start / Stop Transfer**: hanya tombol
+    yang bisa mengubah keadaan yang menyala, pasangannya redup (transfer berjalan = Start Transfer redup,
+    Stop Transfer menyala; berhenti = sebaliknya). Di bawahnya status print (menunggu printer, antrean).
   - Diagram alur **Printer → Queue → Server** (kabel bergerak saat transfer berjalan) dengan
     Received (byte dari server), Sent (byte ke printer + feedback ke server), Tercetak, Gagal dan
     grafik lalu lintas.
