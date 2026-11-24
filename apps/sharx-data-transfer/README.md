@@ -109,20 +109,22 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
 
 - **Dashboard** (satu layar untuk operator, tanpa scroll; tampilan menyesuaikan ukuran jendela
   mulai 1280×720):
-  - Atas: menu (Dashboard, Log History, Settings, About) dan status **MQTT Broker**
-    (ONLINE / CONNECTING / OFFLINE), **printer** (STARTED / NOT STARTED / OFFLINE) dan operator aktif.
-  - Kiri: **Counter Terakhir** (besar), counter berikutnya, template aktif, grafik cetakan per detik;
-    **Control Panel** dengan toggle **Start / Stop Print** dan **Start / Stop Transfer**: belum jalan =
-    Start menyala, Stop mati; sudah jalan = Start mati, Stop menyala (status printer yang belum terbaca
-    dianggap belum start). Di bawahnya status print (menunggu printer, antrean).
-  - Diagram alur **Printer → Queue → Server** (kabel bergerak saat transfer berjalan) dengan
-    Received (byte dari server), Sent (byte ke printer + feedback ke server), Tercetak, Gagal dan
-    grafik lalu lintas.
-  - **Incoming Data** (Source `Server` = data masuk, `Printer` = feedback cetak; kolom Counter & Status).
+  - Sidebar: logo, menu (Dashboard, Log History, Settings, About), status **MQTT Broker**
+    (ONLINE / CONNECTING / OFFLINE) dan **printer** (STARTED / NOT STARTED / OFFLINE), status print
+    (menunggu printer, antrean) dan operator aktif.
+  - Header: judul halaman; di aplikasi desktop juga tombol minimize, fullscreen/restore dan tutup.
+  - Diagram **Printer → Queue → Server** yang bergerak sesuai data: setiap data masuk dari server,
+    paket cyan berjalan di kabel server → queue → printer; setiap hasil cetak dikirim ke server,
+    paket hijau berjalan printer → queue → server (kabel yang dilewati menyala). Ikon queue berisi
+    counter berikutnya. Di kanannya **Counter Terakhir**, **Template** dan grafik lalu lintas data.
+  - **Incoming Data** (data terbaru disorot hijau; Source `Server` = data masuk, `Printer` = hasil cetak).
   - **Transfer Log** kanan: semua kejadian. **Transfer Log** bawah (_After Print → Server_): setiap
     printer mengirim sinyal selesai cetak, data yang dikirim balik ke server dengan statusnya
     (`OK` = diterima server, `MENUNGGU` = server terputus / antre, `DIBUANG` = antrean penuh).
   - **Counter per Template** (ubah / reset) dan tombol Reset Counter.
+  - **Cockpit Command Dock**: toggle **Start / Stop Print** dan **Start / Stop Transfer** (belum
+    jalan = Start menyala, Stop mati; sudah jalan = Start mati, Stop menyala; status printer yang
+    belum terbaca dianggap belum start).
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
   - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test, serta

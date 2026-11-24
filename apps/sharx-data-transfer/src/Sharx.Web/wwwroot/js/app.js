@@ -6,7 +6,12 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   const SPECIAL_KEYS = ["OPERATOR", "TEMPLATE", "SERVER_COUNTER"];
-  const PAGES = ["dashboard", "logs", "settings", "about"];
+  const PAGES = {
+    dashboard: ["Data Transfer", "Real-Time Data Monitoring"],
+    logs: ["Log History", "Riwayat Log Transfer Harian"],
+    settings: ["Settings", "Koneksi, Flow Mapping Data & Counter"],
+    about: ["About", "TC+SM Data Transfer"],
+  };
 
   const state = {
     status: null,
@@ -328,9 +333,11 @@
     svg.dataset.printer = printerState;
     svg.dataset.running = String(Boolean(s.running));
     state.serverKind = s.serverProtocol === "Mqtt" ? "MQTT" : "TCP";
+    const next = s.job?.nextCounter || "-";
+    if (setText($("#flowQueueText"), next)) fitText($("#flowQueueText"), 62);
     const changed = [
       setText($("#flowPrinterLabel"), `[ ${s.printerName} ]`),
-      setText($("#flowQueueLabel"), `[ Queue: ${s.job?.nextCounter || "-"} ]`),
+      setText($("#flowQueueLabel"), `[ Queue: ${next} ]`),
       renderServerLabel(),
     ];
     if (changed.some(Boolean)) layoutFlowArrows();
@@ -360,7 +367,6 @@
       ? `${label} — menunggu ${s.waitingRecords || 1} data`
       : label;
     printState.className = s.waitingForPrinter ? "wait" : kind;
-    setText($("#jobNext"), s.job?.nextCounter || "-");
     setText($("#jobQueue"), queueText(s));
     setText($("#printerMsg"), s.printerMessage || "");
   }
@@ -404,14 +410,10 @@
   function renderStats() {
     const s = state.stats;
     if (!s) return;
-    setText($("#rxValue"), bytesText(s.receivedBytes));
-    setText($("#txValue"), bytesText(s.sentBytes));
-    setText($("#statPrinted"), String(s.recordsPrinted));
-    setText($("#statFailed"), String(s.recordsFailed));
     if (
       setText($("#flowServerBytes"), bytesText(s.receivedBytes + s.sentBytes))
     )
-      fitServerBytes();
+      fitText($("#flowServerBytes"), 50);
     const values = {
       records: s.recordsReceived,
       forwarded: s.recordsForwarded,
@@ -427,17 +429,17 @@
   /** Ukur ulang teks diagram (setelah font termuat, resize, atau kembali ke Dashboard). */
   function layoutFlow() {
     if (state.page !== "dashboard") return;
-    fitServerBytes();
+    fitText($("#flowServerBytes"), 50);
+    fitText($("#flowQueueText"), 62);
     layoutFlowArrows();
   }
 
-  /** Teks byte di ikon server dipersempit jika terlalu panjang (mis. "1023.5 MB"). */
-  function fitServerBytes() {
-    const el = $("#flowServerBytes");
+  /** Teks di ikon diagram dipersempit jika terlalu panjang (mis. "1023.5 MB", counter 6 digit). */
+  function fitText(el, max) {
     el.removeAttribute("textLength");
     try {
-      if (el.getComputedTextLength() > 50) {
-        el.setAttribute("textLength", "50");
+      if (el.getComputedTextLength() > max) {
+        el.setAttribute("textLength", String(max));
         el.setAttribute("lengthAdjust", "spacingAndGlyphs");
       }
     } catch {
@@ -469,7 +471,8 @@
 
   // ---- grafik kecil (sampel tiap detik dari statistik)
 
-  const spark = { printed: [], sent: [], rate: [], last: null };
+  /** Byte per detik (terima + kirim) untuk grafik di panel diagram. */
+  const spark = { traffic: [], last: null };
 
   function pushSample(list, value, max) {
     list.push(value);
@@ -506,27 +509,138 @@
     if (area) area.setAttribute("d", `${line}L${w} ${h}L0 ${h}Z`);
   }
 
-  /** Selisih per detik: cetakan, byte terkirim, dan byte total (terima + kirim). */
   function sampleSparks() {
     const s = state.stats;
-    const now = s
-      ? {
-          printed: s.recordsPrinted,
-          sent: s.sentBytes,
-          total: s.receivedBytes + s.sentBytes,
-        }
-      : { printed: 0, sent: 0, total: 0 };
-    const prev = spark.last || now;
+    const total = s ? s.receivedBytes + s.sentBytes : 0;
     // Reset statistik (Start ulang) membuat selisih negatif: dianggap 0.
-    const delta = (key) => Math.max(0, now[key] - prev[key]);
-    spark.last = now;
-    pushSample(spark.printed, delta("printed"), 60);
-    pushSample(spark.sent, delta("sent"), 40);
-    pushSample(spark.rate, delta("total"), 120);
+    const delta = spark.last === null ? 0 : Math.max(0, total - spark.last);
+    spark.last = total;
+    pushSample(spark.traffic, delta, 120);
     if (state.page !== "dashboard" || document.hidden) return;
-    drawSpark($("#sparkPrinted"), spark.printed, 60);
-    drawSpark($("#sparkSent"), spark.sent, 40);
-    drawSpark($("#sparkRate"), spark.rate, 120);
+    drawSpark($("#sparkTraffic"), spark.traffic, 120);
+  }
+
+  // ---- Animasi paket data di kabel
+  // Data masuk: server → antrean → printer. Data keluar (hasil cetak ke server): printer → antrean → server.
+
+  const FLOW_ROUTES = {
+    in: {
+      from: ".dev-server",
+      legs: [
+        { cable: "#cableInB", reverse: true, to: ".dev-queue" },
+        { cable: "#cableInA", reverse: true, to: ".dev-printer" },
+      ],
+    },
+    out: {
+      from: ".dev-printer",
+      legs: [
+        { cable: "#cableOutA", reverse: false, to: ".dev-queue" },
+        { cable: "#cableOutB", reverse: false, to: ".dev-server" },
+      ],
+    },
+  };
+  const LEG_MS = 650;
+  const QUEUE_MS = 140;
+  const PACKET_GAP_MS = 170;
+  const MAX_PACKETS = 36;
+  const packets = [];
+  const cableBusy = new Map();
+  const deviceTimers = new Map();
+  const sentFeedback = new Set();
+  let packetFrame = 0;
+
+  function flashDevice(selector) {
+    const el = $(`#flowSvg ${selector}`);
+    if (!el) return;
+    el.classList.add("hit");
+    clearTimeout(deviceTimers.get(selector));
+    deviceTimers.set(
+      selector,
+      setTimeout(() => el.classList.remove("hit"), 220),
+    );
+  }
+
+  function markCable(selector, kind, delta) {
+    const count = Math.max(0, (cableBusy.get(selector) || 0) + delta);
+    cableBusy.set(selector, count);
+    $(selector)?.classList.toggle(`busy-${kind}`, count > 0);
+  }
+
+  /** Kirim paket animasi sebanyak data (maks. 6 per kiriman agar tetap ringan). */
+  function sendPackets(kind, count) {
+    if (count <= 0 || state.page !== "dashboard" || document.hidden) return;
+    const layer = $("#packetLayer");
+    const now = performance.now();
+    const queued = packets.filter((p) => p.kind === kind);
+    const after = queued.length ? queued[queued.length - 1].start : now;
+    for (let i = 0; i < Math.min(count, 6); i++) {
+      const dot = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "circle",
+      );
+      dot.setAttribute("r", "11");
+      dot.setAttribute("class", `packet packet-${kind}`);
+      dot.style.opacity = "0";
+      layer.appendChild(dot);
+      packets.push({
+        kind,
+        dot,
+        start: Math.max(now, after + PACKET_GAP_MS) + i * PACKET_GAP_MS,
+        leg: -1,
+      });
+    }
+    while (packets.length > MAX_PACKETS) finishPacket(packets[0]);
+    if (!packetFrame) packetFrame = requestAnimationFrame(stepPackets);
+  }
+
+  function finishPacket(p) {
+    if (p.leg >= 0)
+      markCable(FLOW_ROUTES[p.kind].legs[p.leg].cable, p.kind, -1);
+    p.dot.remove();
+    packets.splice(packets.indexOf(p), 1);
+  }
+
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+
+  function stepPackets(now) {
+    for (const p of packets.slice()) {
+      const route = FLOW_ROUTES[p.kind];
+      const t = now - p.start;
+      if (t < 0) continue;
+      const leg = t < LEG_MS ? 0 : t < LEG_MS + QUEUE_MS ? -1 : 1;
+      if (t >= 2 * LEG_MS + QUEUE_MS) {
+        flashDevice(route.legs[1].to);
+        finishPacket(p);
+        continue;
+      }
+      if (leg !== p.leg) {
+        if (p.leg >= 0) {
+          markCable(route.legs[p.leg].cable, p.kind, -1);
+          flashDevice(route.legs[p.leg].to);
+        } else if (leg === 0) {
+          flashDevice(route.from);
+        }
+        if (leg >= 0) markCable(route.legs[leg].cable, p.kind, 1);
+        p.leg = leg;
+      }
+      if (leg < 0) {
+        p.dot.style.opacity = "0"; // di dalam antrean
+        continue;
+      }
+      const spec = route.legs[leg];
+      const path = $(spec.cable);
+      const len = path.getTotalLength();
+      const progress = ease(
+        Math.min(1, (leg === 0 ? t : t - LEG_MS - QUEUE_MS) / LEG_MS),
+      );
+      const pt = path.getPointAtLength(
+        spec.reverse ? len * (1 - progress) : len * progress,
+      );
+      p.dot.setAttribute("cx", pt.x.toFixed(1));
+      p.dot.setAttribute("cy", pt.y.toFixed(1));
+      p.dot.style.opacity = "1";
+    }
+    packetFrame = packets.length ? requestAnimationFrame(stepPackets) : 0;
   }
 
   // ---- Incoming Data
@@ -587,6 +701,10 @@
     // Lewati data yang sudah tampil (mis. ikut di snapshot saat browser baru terhubung).
     const unseen = records.filter((r) => r.seq > state.lastSeq);
     if (!unseen.length) return;
+    sendPackets("in", unseen.filter((r) => r.source === "Server").length);
+    // Tanpa feedback ke server, hasil cetak tetap digambarkan keluar dari printer.
+    if (!state.status?.feedbackEnabled)
+      sendPackets("out", unseen.filter((r) => r.source === "Printer").length);
     state.lastSeq = Math.max(...unseen.map((r) => r.seq));
     const fresh = unseen.slice(-VIEW_LIMIT).reverse();
     state.records = fresh.concat(state.records).slice(0, VIEW_LIMIT);
@@ -715,6 +833,12 @@
   /** Feedback baru (urutan lama → baru) atau perubahan status dengan Seq yang sama. */
   function addFeedback(items) {
     const box = $("#feedbackBox");
+    const delivered = items.filter(
+      (f) => f.state === "Sent" && !sentFeedback.has(f.seq),
+    );
+    for (const f of delivered) sentFeedback.add(f.seq);
+    if (sentFeedback.size > 500) sentFeedback.clear();
+    sendPackets("out", delivered.length);
     for (const f of items) {
       const index = state.feedback.findIndex((x) => x.seq === f.seq);
       if (index >= 0) {
@@ -738,11 +862,16 @@
     const c = state.counter;
     if (!c) return;
     setText($("#jobOperator"), c.activeOperator || "-");
-    setText($("#jobTemplate"), c.activeTemplate || "-");
     const big = $("#jobCounter");
     const value = c.activeValue || "---";
     setText(big, value);
-    big.style.setProperty("--len", String(Math.max(3, value.length)));
+    big.style.setProperty("--len", String(Math.max(6, value.length)));
+    const template = $("#jobTemplate");
+    setText(template, c.activeTemplate || "-");
+    template.style.setProperty(
+      "--len",
+      String(Math.max(6, template.textContent.length)),
+    );
     setText($("#jobDate"), c.businessDate || "");
     const body = $("#counterBody");
     const rows = (c.templates || []).map((t) => {
@@ -1330,8 +1459,10 @@
     const [page, sub] = (location.hash.replace("#", "") || "dashboard").split(
       "/",
     );
-    const target = PAGES.includes(page) ? page : "dashboard";
+    const target = PAGES[page] ? page : "dashboard";
     state.page = target;
+    $("#pageTitle").textContent = PAGES[target][0];
+    $("#pageSubtitle").textContent = PAGES[target][1];
     $$(".nav-item").forEach((a) =>
       a.classList.toggle("active", a.dataset.page === target),
     );
@@ -1381,7 +1512,7 @@
       send(now - lastDown < 400 ? "maximize" : "drag");
       lastDown = now;
     };
-    $(".topbar").addEventListener("mousedown", onDragArea);
+    $("#headbar").addEventListener("mousedown", onDragArea);
     $(".brand").addEventListener("mousedown", onDragArea);
     document.addEventListener("keydown", (e) => {
       if (e.key === "F11") {

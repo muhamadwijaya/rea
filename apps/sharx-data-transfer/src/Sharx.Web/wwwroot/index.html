@@ -241,142 +241,127 @@
           d="M9 3v5m6-5v5M6 8h12v3a6 6 0 0 1-12 0Zm6 9v4"
         />
       </symbol>
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 2.6 1.9 11.4c-.5.4-.2 1.1.4 1.1H4.4V21c0 .6.4 1 1 1H10v-6.2h4V22h4.6c.6 0 1-.4 1-1v-8.5h2.1c.6 0 .9-.7.4-1.1z"
+        />
+      </symbol>
+      <symbol id="i-chevrons" viewBox="0 0 56 32">
+        <path fill="currentColor" d="M0 0h13l15 16-15 16H0l15-16Z" />
+        <path fill="currentColor" d="M26 0h13l15 16-15 16H26l15-16Z" />
+      </symbol>
     </svg>
-
-    <div class="win-controls" id="winControls" hidden>
-      <button class="win-btn" data-win="minimize" title="Minimize">
-        <svg><use href="#i-min" /></svg>
-      </button>
-      <button
-        class="win-btn"
-        data-win="maximize"
-        id="winMaximize"
-        title="Restore (F11)"
-      >
-        <svg><use href="#i-restore" /></svg>
-      </button>
-      <button class="win-btn win-close" data-win="close" title="Tutup">
-        <svg><use href="#i-close" /></svg>
-      </button>
-    </div>
 
     <div class="offline-banner" id="offlineBanner" hidden>
       Koneksi ke aplikasi terputus &mdash; menyambung ulang...
     </div>
 
     <div class="app" id="app">
-      <!-- ===================== KOLOM KIRI ===================== -->
+      <!-- ===================== SIDEBAR ===================== -->
       <aside class="side">
         <div class="brand" aria-label="TC+SM">
           <img class="logo" src="img/logo.png" alt="" draggable="false" />
           <div class="brand-name">TC+SM</div>
         </div>
 
-        <section class="card counter-card">
-          <h3 class="counter-title">Counter Terakhir</h3>
-          <div class="counter-big" id="jobCounter">---</div>
-          <div class="counter-meta">
-            <div class="cm-next">
-              <span class="cm-label">Next:</span> <b id="jobNext">-</b>
-            </div>
-            <div class="cm-tpl">
-              <span class="cm-label">Template:</span>
-              <b id="jobTemplate">-</b>
-            </div>
-          </div>
-          <svg
-            class="spark spark-cyan"
-            id="sparkPrinted"
-            viewBox="0 0 240 40"
-            preserveAspectRatio="none"
-          >
-            <path class="spark-line" d="M0 38H240" />
-          </svg>
-        </section>
+        <nav class="nav" id="nav">
+          <a href="#dashboard" data-page="dashboard" class="nav-item active">
+            <svg class="nav-icon"><use href="#i-home" /></svg
+            ><span>Dashboard</span>
+          </a>
+          <a href="#logs" data-page="logs" class="nav-item">
+            <svg class="nav-icon"><use href="#i-doc" /></svg
+            ><span>Log History</span>
+          </a>
+          <a href="#settings" data-page="settings" class="nav-item">
+            <svg class="nav-icon"><use href="#i-gear" /></svg
+            ><span>Settings</span>
+          </a>
+          <a href="#about" data-page="about" class="nav-item">
+            <svg class="nav-icon"><use href="#i-info" /></svg><span>About</span>
+          </a>
+        </nav>
 
-        <section class="card control-card">
-          <h3 class="control-title">Control Panel</h3>
-          <div class="ctl-pair" id="pairPrint">
-            <button class="ctl ctl-start" id="btnPrintStart">
-              <svg><use href="#i-play" /></svg><span>Start Print</span>
-            </button>
-            <button class="ctl ctl-stop" id="btnPrintStop">
-              <svg><use href="#i-stop" /></svg><span>Stop Print</span>
-            </button>
+        <div class="hw-label">Hardware Status</div>
+        <div class="hud-card hud-server" id="hudServer" data-state="off">
+          <div class="hud-title">
+            <svg class="hud-icon"><use href="#i-radio" /></svg>
+            <span id="serverName">MQTT Broker</span>
           </div>
-          <div class="ctl-pair" id="pairTransfer">
-            <button class="ctl ctl-start" id="btnStart">
-              <svg><use href="#i-arrow-right" /></svg
-              ><span>Start Transfer</span>
-            </button>
-            <button class="ctl ctl-stop" id="btnStop">
-              <svg><use href="#i-stop" /></svg><span>Stop Transfer</span>
-            </button>
+          <div class="hud-addr" id="serverEndpoint">-</div>
+          <span class="hud-badge" id="serverBadge">STOPPED</span>
+          <a class="hud-more" href="#settings/server" title="Settings koneksi"
+            ><svg><use href="#i-kebab" /></svg
+          ></a>
+        </div>
+        <div class="hud-card hud-printer" id="hudPrinter" data-state="off">
+          <div class="hud-title">
+            <svg class="hud-icon"><use href="#i-printer" /></svg>
+            <span id="printerName">Printer</span>
           </div>
-          <div class="ctl-info">
-            <div>Print: <b id="printState">-</b></div>
-            <div id="jobQueue"></div>
-            <div class="ctl-msg" id="printerMsg"></div>
+          <div class="hud-addr" id="printerEndpoint">-</div>
+          <span class="hud-badge" id="printerBadge">OFFLINE</span>
+          <a class="hud-more" href="#settings/server" title="Settings printer"
+            ><svg><use href="#i-kebab" /></svg
+          ></a>
+        </div>
+
+        <div class="ctl-info">
+          <div>Print: <b id="printState">-</b></div>
+          <div id="jobQueue"></div>
+          <div class="ctl-msg" id="printerMsg"></div>
+        </div>
+
+        <div class="hud-card hud-operator">
+          <div class="op-avatar">
+            <svg><use href="#i-user" /></svg>
           </div>
-        </section>
+          <div class="op-text">
+            <div class="op-label">Operator</div>
+            <div class="op-name" id="jobOperator">-</div>
+          </div>
+        </div>
       </aside>
 
       <!-- ===================== KOLOM UTAMA ===================== -->
       <main class="main">
-        <header class="topbar">
-          <nav class="nav" id="nav">
-            <div class="nav-group">
-              <a href="#dashboard" data-page="dashboard" class="nav-item active"
-                >Dashboard</a
-              >
-              <a href="#logs" data-page="logs" class="nav-item">Log History</a>
-            </div>
-            <a href="#settings" data-page="settings" class="nav-item nav-solo"
-              >Settings</a
+        <header class="card headbar" id="headbar">
+          <span class="hb-dots" aria-hidden="true"></span>
+          <svg class="hb-chev"><use href="#i-chevrons" /></svg>
+          <div class="hb-title">
+            <h1 id="pageTitle">Data Transfer</h1>
+            <p id="pageSubtitle">Real-Time Data Monitoring</p>
+          </div>
+          <svg
+            class="hb-barcode"
+            viewBox="0 0 430 24"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M2 4v14M8 7h22M8 9h22M60 4v14M66 5v8M70 5v8M74 5v8M78 5v10M83 5v8M88 5v8M92 5v8M98 4v12M108 5v3M114 5v3M118 5v3M126 5v3M132 5v3M138 5v3M146 5v3M150 5v3M158 5v3M164 5v3M170 5v3M178 5v3M190 4v14M196 5v8M201 5v6M206 5v8M212 5v6M218 5v8M226 5v6M232 5v8M318 4v14M324 6h20M324 8h20"
+            />
+          </svg>
+          <div class="hb-ruler" aria-hidden="true">
+            <span style="left: 18%">10</span><span style="left: 66%">20</span
+            ><span style="left: 82%">X2</span><span style="left: 98%">40</span>
+          </div>
+          <div class="win-controls" id="winControls" hidden>
+            <button class="win-btn" data-win="minimize" title="Minimize">
+              <svg><use href="#i-min" /></svg>
+            </button>
+            <button
+              class="win-btn"
+              data-win="maximize"
+              id="winMaximize"
+              title="Restore (F11)"
             >
-            <a href="#about" data-page="about" class="nav-item nav-solo"
-              >About</a
-            >
-          </nav>
-
-          <div class="hud">
-            <div class="hud-card hud-server" id="hudServer" data-state="off">
-              <div class="hud-title">
-                <svg class="hud-icon"><use href="#i-radio" /></svg>
-                <span id="serverName">MQTT Broker</span>
-              </div>
-              <div class="hud-addr" id="serverEndpoint">-</div>
-              <span class="hud-badge" id="serverBadge">STOPPED</span>
-              <a
-                class="hud-more"
-                href="#settings/server"
-                title="Settings koneksi"
-                ><svg><use href="#i-kebab" /></svg
-              ></a>
-            </div>
-            <div class="hud-card hud-printer" id="hudPrinter" data-state="off">
-              <div class="hud-title">
-                <svg class="hud-icon"><use href="#i-printer" /></svg>
-                <span id="printerName">Printer</span>
-              </div>
-              <div class="hud-addr" id="printerEndpoint">-</div>
-              <span class="hud-badge" id="printerBadge">OFFLINE</span>
-              <a
-                class="hud-more"
-                href="#settings/mapping"
-                title="Settings printer"
-                ><svg><use href="#i-kebab" /></svg
-              ></a>
-            </div>
-            <div class="hud-card hud-operator">
-              <div class="op-avatar">
-                <svg><use href="#i-user" /></svg>
-              </div>
-              <div class="op-text">
-                <div class="op-label">Operator</div>
-                <div class="op-name" id="jobOperator">-</div>
-              </div>
-            </div>
+              <svg><use href="#i-restore" /></svg>
+            </button>
+            <button class="win-btn win-close" data-win="close" title="Tutup">
+              <svg><use href="#i-close" /></svg>
+            </button>
           </div>
         </header>
 
@@ -396,26 +381,32 @@
                 >
                   <defs>
                     <linearGradient id="g-shell" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stop-color="#3a4554" />
-                      <stop offset="1" stop-color="#1c242f" />
+                      <stop offset="0" stop-color="#3b4350" />
+                      <stop offset="1" stop-color="#1b2029" />
                     </linearGradient>
                     <linearGradient id="g-face" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stop-color="#1f2833" />
-                      <stop offset="1" stop-color="#141b24" />
+                      <stop offset="0" stop-color="#20262f" />
+                      <stop offset="1" stop-color="#14181f" />
                     </linearGradient>
                     <linearGradient id="g-plug" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0" stop-color="#9aa4b0" />
                       <stop offset="0.5" stop-color="#4b5563" />
                       <stop offset="1" stop-color="#262e38" />
                     </linearGradient>
-                    <linearGradient id="g-print" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stop-color="#86f58c" />
-                      <stop offset="1" stop-color="#2fcf55" />
-                    </linearGradient>
                     <linearGradient id="g-rack" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0" stop-color="#7fdcff" />
                       <stop offset="1" stop-color="#2fb4f0" />
                     </linearGradient>
+                    <radialGradient id="g-packet-in">
+                      <stop offset="0" stop-color="#ffffff" />
+                      <stop offset="0.45" stop-color="#7fe8ff" />
+                      <stop offset="1" stop-color="#2fb4f0" stop-opacity="0" />
+                    </radialGradient>
+                    <radialGradient id="g-packet-out">
+                      <stop offset="0" stop-color="#ffffff" />
+                      <stop offset="0.45" stop-color="#8dff9c" />
+                      <stop offset="1" stop-color="#2fcf55" stop-opacity="0" />
+                    </radialGradient>
                     <filter
                       id="f-glow"
                       x="-50%"
@@ -431,14 +422,15 @@
                     </filter>
                   </defs>
 
-                  <!-- kabel printer → antrean -->
-                  <g class="cables cables-a">
+                  <!-- kabel printer ↔ antrean -->
+                  <g class="cables">
                     <path
                       class="cable-base"
                       d="M214 80C300 80 330 125 420 125"
                     />
                     <path
                       class="cable c-gray"
+                      id="cableOutA"
                       d="M214 80C300 80 330 125 420 125"
                     />
                     <path
@@ -447,10 +439,7 @@
                     />
                     <path
                       class="cable c-cyan"
-                      d="M214 102C300 102 330 80 420 80"
-                    />
-                    <path
-                      class="cable-flow f-cyan"
+                      id="cableInA"
                       d="M214 102C300 102 330 80 420 80"
                     />
                     <rect
@@ -486,8 +475,8 @@
                       rx="3"
                     />
                   </g>
-                  <!-- kabel antrean → server -->
-                  <g class="cables cables-b">
+                  <!-- kabel antrean ↔ server -->
+                  <g class="cables">
                     <path class="cable-base dim" d="M564 102H771" />
                     <path class="cable c-dim" d="M564 102H771" />
                     <path
@@ -496,6 +485,7 @@
                     />
                     <path
                       class="cable c-gray"
+                      id="cableInB"
                       d="M564 125C654 125 682 80 771 80"
                     />
                     <path
@@ -504,10 +494,7 @@
                     />
                     <path
                       class="cable c-green"
-                      d="M564 80C654 80 682 125 771 125"
-                    />
-                    <path
-                      class="cable-flow f-green"
+                      id="cableOutB"
                       d="M564 80C654 80 682 125 771 125"
                     />
                     <rect
@@ -543,6 +530,9 @@
                       rx="3"
                     />
                   </g>
+
+                  <!-- paket data yang bergerak di kabel (diisi app.js) -->
+                  <g id="packetLayer"></g>
 
                   <!-- printer -->
                   <g class="dev dev-printer" transform="translate(83 45)">
@@ -680,10 +670,17 @@
                     />
                     <path
                       class="ico-folder"
-                      d="M28 38a5 5 0 0 1 5-5h16l6 6h30a5 5 0 0 1 5 5v35a5 5 0 0 1-5 5H33a5 5 0 0 1-5-5Z"
+                      d="M26 38a5 5 0 0 1 5-5h16l6 6h34a5 5 0 0 1 5 5v35a5 5 0 0 1-5 5H31a5 5 0 0 1-5-5Z"
                     />
-                    <path class="ico-folder" d="M28 46h62" />
-                    <text class="ico-folder-text" x="59" y="73">DSG</text>
+                    <path class="ico-folder" d="M26 46h66" />
+                    <text
+                      class="ico-folder-text"
+                      id="flowQueueText"
+                      x="59"
+                      y="74"
+                    >
+                      -
+                    </text>
                   </g>
 
                   <!-- server -->
@@ -781,56 +778,39 @@
                 </svg>
               </div>
 
-              <div class="fc-stats">
-                <div class="fs-grid">
-                  <div class="fs">
-                    <div class="fs-label">Received</div>
-                    <div class="fs-value v-green" id="rxValue">0 B</div>
+              <div class="fc-side">
+                <div class="kpis">
+                  <div class="kpi">
+                    <div class="kpi-label">Counter Terakhir</div>
+                    <div class="kpi-value kpi-counter" id="jobCounter">---</div>
                   </div>
-                  <div class="fs">
-                    <div class="fs-label">Sent</div>
-                    <div class="fs-value v-yellow" id="txValue">0 B</div>
-                    <svg
-                      class="spark spark-mini"
-                      id="sparkSent"
-                      viewBox="0 0 140 14"
-                      preserveAspectRatio="none"
-                    >
-                      <path class="spark-area" d="M0 14H140Z" />
-                      <path class="spark-line" d="M0 13H140" />
-                    </svg>
-                  </div>
-                  <div class="fs">
-                    <div class="fs-label">Tercetak</div>
-                    <div class="fs-value" id="statPrinted">0</div>
-                  </div>
-                  <div class="fs">
-                    <div class="fs-label">Gagal</div>
-                    <div class="fs-value v-red" id="statFailed">0</div>
+                  <div class="kpi">
+                    <div class="kpi-label">Template</div>
+                    <div class="kpi-value" id="jobTemplate">-</div>
                   </div>
                 </div>
                 <svg
-                  class="spark spark-big"
-                  id="sparkRate"
-                  viewBox="0 0 620 64"
+                  class="spark spark-teal"
+                  id="sparkTraffic"
+                  viewBox="0 0 620 90"
                   preserveAspectRatio="none"
                 >
                   <defs>
-                    <linearGradient id="g-area" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="g-teal" x1="0" y1="0" x2="0" y2="1">
                       <stop
                         offset="0"
-                        stop-color="#e5f97e"
-                        stop-opacity="0.45"
+                        stop-color="#3fd6c8"
+                        stop-opacity="0.5"
                       />
                       <stop
                         offset="1"
-                        stop-color="#e5f97e"
+                        stop-color="#3fd6c8"
                         stop-opacity="0.02"
                       />
                     </linearGradient>
                   </defs>
-                  <path class="spark-area" d="M0 64H620Z" />
-                  <path class="spark-line" d="M0 62H620" />
+                  <path class="spark-area" d="M0 90H620Z" />
+                  <path class="spark-line" d="M0 88H620" />
                 </svg>
               </div>
             </div>
@@ -949,6 +929,30 @@
                   <div class="empty-hint" id="counterEmpty">
                     Belum ada counter hari ini.
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="dock">
+              <div class="dock-tab">Cockpit Command Dock</div>
+              <div class="dock-body">
+                <div class="ctl-pair" id="pairPrint">
+                  <button class="ctl ctl-start" id="btnPrintStart">
+                    <svg><use href="#i-play" /></svg><span>Start Print</span>
+                  </button>
+                  <button class="ctl ctl-stop" id="btnPrintStop">
+                    <svg><use href="#i-stop" /></svg><span>Stop Print</span>
+                  </button>
+                </div>
+                <span class="dock-sep" aria-hidden="true"></span>
+                <div class="ctl-pair" id="pairTransfer">
+                  <button class="ctl ctl-start" id="btnStart">
+                    <svg><use href="#i-arrow-right" /></svg
+                    ><span>Start Transfer</span>
+                  </button>
+                  <button class="ctl ctl-stop" id="btnStop">
+                    <svg><use href="#i-stop" /></svg><span>Stop Transfer</span>
+                  </button>
                 </div>
               </div>
             </div>
