@@ -276,19 +276,12 @@
     }
   }
 
-  /** "TIJ Protocol 4.8" → "TIJ 4.8". */
-  const printerShortName = (protocol) =>
-    String(protocol || "")
-      .replace(/\s*Protocol\s*/i, " ")
-      .trim() || "Printer";
-
   function renderStatus() {
     const s = state.status;
     if (!s) return;
-    const short = printerShortName(s.printerProtocol);
     const serverState = renderServerHud(s);
-    const printerState = renderPrinterHud(s, short);
-    renderFlowState(s, short, serverState, printerState);
+    const printerState = renderPrinterHud(s);
+    renderFlowState(s, serverState, printerState);
     renderControls(s);
     renderFeedbackEmpty();
     setText(
@@ -312,30 +305,31 @@
   }
 
   /** Chip printer di kanan atas. Mengembalikan on / wait / off. */
-  function renderPrinterHud(s, short) {
+  function renderPrinterHud(s) {
     const [text, kind, hudState] = printerBadge(s);
-    setText(
-      $("#printerName"),
-      /^TIJ\b/i.test(short)
-        ? short.replace(/^TIJ/i, "TIJ Printer")
-        : `Printer ${short}`,
-    );
+    // Nama mesin (jenis TIJ / CIJ + nama) diatur di Settings → Koneksi.
+    setText($("#printerName"), s.printerName);
     setText($("#printerEndpoint"), `(${s.printerEndpoint})`);
     setBadge($("#printerBadge"), text, kind);
     $("#hudPrinter").dataset.state = hudState;
-    $("#hudPrinter").title = s.printerMessage || "";
+    $("#hudPrinter").title = [
+      `${s.printerName} · ${s.printerProtocol}`,
+      s.printerMessage,
+    ]
+      .filter(Boolean)
+      .join("\n");
     return hudState;
   }
 
   /** Diagram Printer → Queue → Server: lampu, animasi kabel dan label. */
-  function renderFlowState(s, short, serverState, printerState) {
+  function renderFlowState(s, serverState, printerState) {
     const svg = $("#flowSvg");
     svg.dataset.server = serverState;
     svg.dataset.printer = printerState;
     svg.dataset.running = String(Boolean(s.running));
     state.serverKind = s.serverProtocol === "Mqtt" ? "MQTT" : "TCP";
     const changed = [
-      setText($("#flowPrinterLabel"), `[ Printer ${short} ]`),
+      setText($("#flowPrinterLabel"), `[ ${s.printerName} ]`),
       setText($("#flowQueueLabel"), `[ Queue: ${s.job?.nextCounter || "-"} ]`),
       renderServerLabel(),
     ];

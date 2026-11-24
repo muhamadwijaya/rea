@@ -77,6 +77,7 @@ public sealed record TransferStatus(
     PrinterState Printer,
     string PrinterEndpoint,
     string PrinterProtocol,
+    string PrinterName,
     string? PrinterMessage,
     string? LastError,
     JobStatus? Job,

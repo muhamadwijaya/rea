@@ -180,7 +180,7 @@ public class MappingTests
 
 public class FeedbackSettingsTests
 {
-    private static AppSettings LoadJson(string json)
+    internal static AppSettings LoadJson(string json)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sharx-settings-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -244,5 +244,29 @@ public class FeedbackSettingsTests
 
         s.Feedback.Enabled = false; // feedback nonaktif: susunan data tidak diperiksa
         Assert.Empty(SettingsValidator.Validate(s));
+    }
+}
+
+public class PrinterMachineTests
+{
+    [Fact]
+    public void Old_settings_show_the_default_tij_machine_name()
+    {
+        var s = FeedbackSettingsTests.LoadJson("""{"printer":{"host":"10.0.0.5","port":9100}}""");
+        Assert.Equal(PrinterMachineType.Tij, s.Printer.MachineType);
+        Assert.Equal("TIJ Printer 4.8", s.Printer.DisplayName());
+    }
+
+    [Fact]
+    public void Machine_type_and_name_are_configurable()
+    {
+        var s = FeedbackSettingsTests.LoadJson("""{"printer":{"machineType":"Cij","machineName":"  Line 2 "}}""");
+        Assert.Equal("CIJ Line 2", s.Printer.DisplayName());
+
+        s.Printer.MachineName = "";
+        Assert.Equal("CIJ", s.Printer.DisplayName());
+
+        s.Printer.MachineName = new string('x', PrinterSettings.MachineNameMaxLength + 1);
+        Assert.Contains(SettingsValidator.Validate(s), e => e.StartsWith("Nama mesin", StringComparison.Ordinal));
     }
 }

@@ -195,6 +195,16 @@ public enum PrinterTransport
     Serial,
 }
 
+/// <summary>Jenis mesin yang ditampilkan di dashboard. Tidak mengubah protokol komunikasi.</summary>
+public enum PrinterMachineType
+{
+    /// <summary>Thermal inkjet.</summary>
+    Tij,
+
+    /// <summary>Continuous inkjet.</summary>
+    Cij,
+}
+
 /// <summary>Driver / protokol komunikasi dengan printer.</summary>
 public enum PrinterProtocol
 {
@@ -206,8 +216,24 @@ public enum PrinterProtocol
 
 public sealed class PrinterSettings
 {
+    public const int MachineNameMaxLength = 40;
+
     /// <summary>false = mode monitor saja, data tidak diteruskan ke printer.</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Jenis mesin (TIJ / CIJ) untuk tampilan; protokol dipilih terpisah di <see cref="Protocol"/>.</summary>
+    public PrinterMachineType MachineType { get; set; } = PrinterMachineType.Tij;
+
+    /// <summary>Nama mesin di dashboard tanpa jenisnya, mis. "Printer 4.8" atau "Line 1".</summary>
+    public string MachineName { get; set; } = "Printer 4.8";
+
+    /// <summary>Nama yang tampil di dashboard, mis. "TIJ Printer 4.8" atau "CIJ Line 1".</summary>
+    public string DisplayName()
+    {
+        var type = MachineType.ToString().ToUpperInvariant();
+        var name = MachineName.Trim();
+        return name.Length == 0 ? type : $"{type} {name}";
+    }
 
     public PrinterProtocol Protocol { get; set; } = PrinterProtocol.Tij;
     public PrinterTransport Transport { get; set; } = PrinterTransport.Tcp;

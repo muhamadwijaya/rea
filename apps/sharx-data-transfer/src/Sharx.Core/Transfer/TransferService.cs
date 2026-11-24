@@ -132,6 +132,7 @@ public sealed partial class TransferService : IAsyncDisposable
                 s.Printer.Enabled ? _printerState : PrinterState.Disabled,
                 PrinterLinks.Describe(s.Printer),
                 Printing.PrinterDrivers.For(s.Printer).Name,
+                s.Printer.DisplayName(),
                 _printerMessage,
                 _lastError,
                 jobStatus,

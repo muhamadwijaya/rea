@@ -649,10 +649,14 @@ public class MqttServerTests
         settings.Server.Port = port;
         settings.Server.Mqtt.SubscribeTopic = "pabrik/line1/job";
         settings.Server.Mqtt.PublishTopic = "pabrik/line1/printed";
+        settings.Printer.MachineType = PrinterMachineType.Cij;
+        settings.Printer.MachineName = "Line 1";
         Assert.Empty(SettingsValidator.Validate(settings));
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
             new TransferLog(null, time), new TransferStats(), time, _ => printer = new FakeTijLink(commands));
+        Assert.Equal("CIJ Line 1", service.Status.PrinterName);
+        Assert.Equal("TIJ Protocol 4.8", service.Status.PrinterProtocol); // jenis mesin tidak mengubah protokol
         service.Start();
         await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(15));
         await WaitUntil(() => service.Status.Server == ServerState.Connected, "terhubung ke broker");

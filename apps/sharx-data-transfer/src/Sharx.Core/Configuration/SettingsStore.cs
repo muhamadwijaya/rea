@@ -57,6 +57,7 @@ public sealed class SettingsStore
         s.Printer.Tij ??= new TijSettings();
         s.Printer.Generic ??= new GenericProtocolSettings();
         s.Printer.TemplateName ??= "";
+        s.Printer.MachineName = s.Printer.MachineName?.Trim() ?? "";
         var g = s.Printer.Generic;
         g.TemplateCommand ??= "";
         g.ClearCommand ??= "";
@@ -291,6 +292,11 @@ public static partial class SettingsValidator
             || p.ReconnectDelaySeconds is < 1 or > 3600)
         {
             errors.Add("Timeout balasan 50-60000 ms, connect timeout 1-120 detik, reconnect printer 1-3600 detik");
+        }
+
+        if (p.MachineName.Length > PrinterSettings.MachineNameMaxLength)
+        {
+            errors.Add($"Nama mesin maksimal {PrinterSettings.MachineNameMaxLength} karakter");
         }
 
         var keys = s.Mapping.Fields.Select(f => f.Key).ToArray();

@@ -125,7 +125,9 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
   - **Counter per Template** (ubah / reset) dan tombol Reset Counter.
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
-  - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test.
+  - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test, serta
+    **jenis mesin** (TIJ / CIJ) dan **nama mesin** yang tampil di dashboard (mis. "TIJ Printer 4.8",
+    "CIJ Line 1"). Jenis mesin hanya untuk tampilan; protokol printer dipilih di Flow Mapping Data.
   - _Flow Mapping Data_: contoh data, delimiter / lebar tetap, posisi tiap field, protokol printer,
     nama template (change template), field data, data feedback ke server (pilih data, urutan, format,
     pemisah, akhiran; atau format custom), preview HEX perintah.

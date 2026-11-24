@@ -357,7 +357,7 @@
             <div class="hud-card hud-printer" id="hudPrinter" data-state="off">
               <div class="hud-title">
                 <svg class="hud-icon"><use href="#i-printer" /></svg>
-                <span id="printerName">TIJ Printer 4.8</span>
+                <span id="printerName">Printer</span>
               </div>
               <div class="hud-addr" id="printerEndpoint">-</div>
               <span class="hud-badge" id="printerBadge">OFFLINE</span>
@@ -761,7 +761,7 @@
                   <!-- label -->
                   <g class="flow-labels">
                     <text id="flowPrinterLabel" x="142" y="204">
-                      [ Printer TIJ 4.8 ]
+                      [ Printer ]
                     </text>
                     <text id="flowQueueLabel" x="492" y="204">
                       [ Queue: - ]
@@ -1185,6 +1185,23 @@
                 <h2>Koneksi ke Printer</h2>
               </div>
               <div class="form-grid">
+                <label
+                  >Jenis mesin
+                  <select class="input" data-bind="printer.machineType">
+                    <option value="Tij">TIJ (Thermal Inkjet)</option>
+                    <option value="Cij">CIJ (Continuous Inkjet)</option>
+                  </select>
+                </label>
+                <label
+                  ><span
+                    >Nama mesin
+                    <span class="muted">(tampil di dashboard)</span></span
+                  ><input
+                    class="input"
+                    maxlength="40"
+                    data-bind="printer.machineName"
+                    placeholder="Printer 4.8"
+                /></label>
                 <label class="check"
                   ><input type="checkbox" data-bind="printer.enabled" />Teruskan
                   data ke printer (nonaktif = monitor saja)</label
@@ -1307,7 +1324,7 @@
             <div class="card settings-panel" data-panel="mapping">
               <div class="card-head">
                 <svg class="head-icon icon-green"><use href="#i-flow" /></svg>
-                <h2>Flow Mapping Data &rarr; Printer CIJ</h2>
+                <h2>Flow Mapping Data &rarr; Printer</h2>
               </div>
               <div class="flow">
                 <div class="flow-step">
