@@ -315,16 +315,67 @@ public sealed class GenericProtocolSettings
     public string StopCommand { get; set; } = "";
 }
 
+/// <summary>Cara menyusun data feedback ke server.</summary>
+public enum FeedbackFormat
+{
+    /// <summary>Data dipilih dari daftar (<see cref="FeedbackSettings.Fields"/>) lalu digabung dengan pemisah.</summary>
+    Fields,
+
+    /// <summary>Format bebas (<see cref="FeedbackSettings.Template"/>).</summary>
+    Custom,
+}
+
+/// <summary>Satu data yang dikirim balik ke server, mis. OPERATOR atau COUNTER dengan format D6.</summary>
+public sealed class FeedbackField
+{
+    /// <summary>Kunci placeholder: field Flow Mapping (OPERATOR, TEMPLATE, ...) atau bawaan (COUNTER, DATE, ...).</summary>
+    public string Key { get; set; } = "";
+
+    /// <summary>Format opsional seperti pada placeholder, mis. <c>D6</c> untuk <c>{COUNTER:D6}</c>.</summary>
+    public string Format { get; set; } = "";
+}
+
 /// <summary>Laporan ke server setiap printer selesai mencetak.</summary>
 public sealed class FeedbackSettings
 {
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Format data ke server. Placeholder berisi data yang tercetak.</summary>
+    /// <summary>
+    /// Cara menyusun data. Null hanya pada settings.json versi lama; <see cref="SettingsStore.Normalize"/>
+    /// memilih <see cref="FeedbackFormat.Fields"/> jika format lama sama dengan susunan data default.
+    /// </summary>
+    public FeedbackFormat? Format { get; set; }
+
+    /// <summary>Data yang dikirim, berurutan (mode <see cref="FeedbackFormat.Fields"/>).</summary>
+    public List<FeedbackField> Fields { get; set; } =
+    [
+        new() { Key = "OPERATOR" },
+        new() { Key = "TEMPLATE" },
+        new() { Key = "COUNTER" },
+    ];
+
+    /// <summary>Pemisah antar data (mode Fields), boleh token seperti <c>&lt;TAB&gt;</c>.</summary>
+    public string Delimiter { get; set; } = ",";
+
+    /// <summary>Akhiran setiap laporan (mode Fields). MQTT tidak mengirim CR/LF di akhir pesan.</summary>
+    public string Terminator { get; set; } = "<CR><LF>";
+
+    /// <summary>Format bebas (mode Custom). Placeholder berisi data yang tercetak.</summary>
     public string Template { get; set; } = "{OPERATOR},{TEMPLATE},{COUNTER}<CR><LF>";
 
     /// <summary>Jumlah laporan yang disimpan sementara saat server terputus.</summary>
     public int MaxQueued { get; set; } = 10000;
+
+    /// <summary>Format yang benar-benar dipakai untuk membuat data feedback.</summary>
+    public string EffectiveTemplate() =>
+        Format == FeedbackFormat.Custom ? Template : BuildTemplate(Fields, Delimiter, Terminator);
+
+    /// <summary>Susun format dari daftar data: <c>{KEY}</c> / <c>{KEY:FORMAT}</c> + pemisah + akhiran.</summary>
+    public static string BuildTemplate(IEnumerable<FeedbackField> fields, string delimiter, string terminator) =>
+        string.Join(delimiter, fields.Select(Placeholder)) + terminator;
+
+    public static string Placeholder(FeedbackField field) =>
+        field.Format.Length == 0 ? $"{{{field.Key}}}" : $"{{{field.Key}:{field.Format}}}";
 }
 
 public sealed class GeneralSettings

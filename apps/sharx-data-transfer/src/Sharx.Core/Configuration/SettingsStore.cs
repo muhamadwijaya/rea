@@ -67,7 +67,7 @@ public sealed class SettingsStore
         g.PrintDonePattern ??= "";
         g.StartCommand ??= "";
         g.StopCommand ??= "";
-        s.Feedback.Template ??= "";
+        NormalizeFeedback(s.Feedback);
         foreach (var field in s.Mapping.Fields)
         {
             field.Key = RecordParser.NormalizeKey(field.Key);
@@ -79,6 +79,25 @@ public sealed class SettingsStore
             field.Name ??= "";
             field.Value ??= "";
         }
+    }
+
+    private static void NormalizeFeedback(FeedbackSettings f)
+    {
+        f.Template ??= "";
+        f.Delimiter ??= "";
+        f.Terminator ??= "";
+        f.Fields ??= [];
+        f.Fields.RemoveAll(field => field is null);
+        foreach (var field in f.Fields)
+        {
+            field.Key = RecordParser.NormalizeKey(field.Key);
+            field.Format = field.Format?.Trim() ?? "";
+        }
+
+        // settings.json lama hanya punya Template: tetap dipakai apa adanya jika bukan susunan data default.
+        f.Format ??= f.Template == FeedbackSettings.BuildTemplate(f.Fields, f.Delimiter, f.Terminator)
+            ? FeedbackFormat.Fields
+            : FeedbackFormat.Custom;
     }
 }
 
@@ -279,15 +298,35 @@ public static partial class SettingsValidator
 
         if (s.Feedback.Enabled)
         {
-            foreach (var error in OutputFormatter.Validate(s.Feedback.Template, keys))
-            {
-                errors.Add($"Format feedback ke server: {error}");
-            }
+            ValidateFeedback(s.Feedback, keys, errors);
         }
 
         if (s.Feedback.MaxQueued is < 1 or > 1_000_000)
         {
             errors.Add("Antrean feedback 1-1000000");
+        }
+    }
+
+    private static void ValidateFeedback(FeedbackSettings f, string[] keys, List<string> errors)
+    {
+        if (f.Format == FeedbackFormat.Fields)
+        {
+            if (f.Fields.Count == 0)
+            {
+                errors.Add("Feedback ke server: pilih minimal satu data yang dikirim");
+                return;
+            }
+
+            if (f.Fields.Any(field => field.Key.Length == 0))
+            {
+                errors.Add("Feedback ke server: ada baris data yang belum dipilih");
+                return;
+            }
+        }
+
+        foreach (var error in OutputFormatter.Validate(f.EffectiveTemplate(), keys))
+        {
+            errors.Add($"Format feedback ke server: {error}");
         }
     }
 

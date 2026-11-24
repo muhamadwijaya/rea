@@ -13,7 +13,8 @@ Aplikasi C# (.NET 8) dengan UI web (HTML/CSS/JS) yang menjadi jembatan data
      memakai nama template dari server.
    - **Field data**: **field 0 = nama operator**, **field 1 = counter** (bisa ditambah / diubah).
 5. Setiap printer melapor **selesai cetak**, aplikasi mem-publish ke server (topic feedback,
-   default `sharx/printed`) data yang tercetak: `operator,template,counter` (format bisa diubah).
+   default `sharx/printed`) data yang tercetak, default `operator,template,counter`. Data yang dikirim
+   balik (dan urutannya) dipilih di **Settings → Flow Mapping Data → 6. Feedback after print**.
 
 ## MQTT
 
@@ -22,7 +23,7 @@ boleh wildcard `+`/`#`), topic feedback (publish), Client ID (harus unik per kom
 password, QoS 0/1/2, TLS, keep alive, clean session, retain.
 
 - Satu pesan MQTT = satu data job (beberapa baris dalam satu pesan = beberapa data). Tidak perlu CR/LF.
-- Feedback dikirim satu pesan per cetakan; akhiran `<CR><LF>` di format feedback tidak ikut dikirim.
+- Feedback dikirim satu pesan per cetakan; akhiran `<CR><LF>` dari susunan feedback tidak ikut dikirim.
 - Jika broker terputus, aplikasi menyambung ulang otomatis dan feedback yang tertunda dikirim
   setelah tersambung. Data job berikutnya ditahan di broker (QoS 1/2) jika printer lebih lambat.
 - **Test Koneksi Server** mencoba login ke broker.
@@ -44,6 +45,9 @@ run.bat publish     :: buat paket siap pakai di folder publish\
   PC produksi **tidak perlu** .NET SDK. Aplikasi desktop butuh **Microsoft Edge WebView2 Runtime**
   (sudah ada di Windows 10/11).
 - Settings, counter dan log disimpan di folder `data\` di samping `run.bat`.
+- Aplikasi desktop terbuka **fullscreen tanpa title bar**. Tombol minimize, fullscreen/restore dan
+  tutup ada di pojok kanan atas aplikasi (**F11** = fullscreen/restore). Saat restore, jendela digeser
+  dari bar menu atas dan ukurannya diubah dari tepi jendela.
 
 ## Aturan counter
 
@@ -108,19 +112,23 @@ Karakter kontrol: `<CR>` `<LF>` `<STX>` `<ETX>` `<ESC>` `<TAB>` `<ACK>` `<0x1B>`
   - Atas: menu (Dashboard, Log History, Settings, About) dan status **MQTT Broker**
     (ONLINE / CONNECTING / OFFLINE), **printer** (STARTED / NOT STARTED / OFFLINE) dan operator aktif.
   - Kiri: **Counter Terakhir** (besar), counter berikutnya, template aktif, grafik cetakan per detik;
-    **Control Panel** dengan tombol **Start Print / Start Transfer / Stop Print / Stop Transfer** dan
-    status print (menunggu printer, antrean).
+    **Control Panel** dengan pasangan **Start / Stop Print** dan **Start / Stop Transfer**. Seperti saklar:
+    tombol keadaan sekarang menyala (mis. Start Transfer menyala saat transfer berjalan), pasangannya
+    padam dan ditekan untuk mengganti keadaan. Di bawahnya status print (menunggu printer, antrean).
   - Diagram alur **Printer → Queue → Server** (kabel bergerak saat transfer berjalan) dengan
     Received (byte dari server), Sent (byte ke printer + feedback ke server), Tercetak, Gagal dan
     grafik lalu lintas.
   - **Incoming Data** (Source `Server` = data masuk, `Printer` = feedback cetak; kolom Counter & Status).
-  - **Transfer Log** kanan: semua kejadian. **Transfer Log** bawah: hasil cetak yang dilaporkan ke server.
+  - **Transfer Log** kanan: semua kejadian. **Transfer Log** bawah (_After Print → Server_): setiap
+    printer mengirim sinyal selesai cetak, data yang dikirim balik ke server dengan statusnya
+    (`OK` = diterima server, `MENUNGGU` = server terputus / antre, `DIBUANG` = antrean penuh).
   - **Counter per Template** (ubah / reset) dan tombol Reset Counter.
 - **Log History**: log per hari (filter status, cari, download file lengkap).
 - **Settings**:
   - _Koneksi_: IP + port server dan IP + port printer (atau RS232), timeout, tombol test.
   - _Flow Mapping Data_: contoh data, delimiter / lebar tetap, posisi tiap field, protokol printer,
-    nama template (change template), field data, format feedback, preview HEX perintah.
+    nama template (change template), field data, data feedback ke server (pilih data, urutan, format,
+    pemisah, akhiran; atau format custom), preview HEX perintah.
   - _Counter_: mode, nilai awal, step, digit, batas maksimum, jam ganti hari.
 
 Semua tampilan live dan Log History hanya menampilkan **50 baris terakhir** agar UI tetap ringan
@@ -179,7 +187,7 @@ run.bat                 menjalankan / mem-publish aplikasi
 src/Sharx.Core          logika: parser, counter, driver printer (TIJ, Generic), koneksi
 src/Sharx.Web           REST API + WebSocket + UI (wwwroot: index.html, css, js, font)
 src/Sharx.Host          exe mode browser / service
-src/Sharx.Desktop       exe Windows (WinForms + WebView2, terbuka maximize)
+src/Sharx.Desktop       exe Windows (WinForms + WebView2, fullscreen tanpa title bar)
 tools/Sharx.Simulator   simulator server & printer TIJ
 tests/Sharx.Core.Tests  xUnit (termasuk contoh checksum dari dokumen protokol)
 ```

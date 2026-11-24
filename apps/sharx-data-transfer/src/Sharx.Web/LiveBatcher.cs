@@ -5,7 +5,7 @@ namespace Sharx.Web;
 
 /// <summary>
 /// Menggabungkan event live (data, log, status, statistik, counter) dan mengirimnya ke UI paling sering
-/// setiap 250 ms, maksimal 50 data + 50 log per kiriman. Seberapa pun derasnya data, beban UI tetap kecil.
+/// setiap 250 ms, maksimal 50 data + 50 log + 50 feedback per kiriman. Seberapa pun derasnya data, beban UI tetap kecil.
 /// </summary>
 public sealed class LiveBatcher : IAsyncDisposable
 {
@@ -16,6 +16,7 @@ public sealed class LiveBatcher : IAsyncDisposable
     private readonly object _gate = new();
     private readonly Queue<TransferRecord> _records = new();
     private readonly Queue<LogEntry> _logs = new();
+    private readonly Queue<FeedbackRecord> _feedback = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
     private TransferStatus? _status;
@@ -31,6 +32,7 @@ public sealed class LiveBatcher : IAsyncDisposable
         service.Counter.Changed += () => Set(() => _counterChanged = true);
         service.RecordProcessed += record => Set(() => Keep(_records, record));
         service.Log.Added += entry => Set(() => Keep(_logs, entry));
+        service.FeedbackChanged += record => Set(() => Keep(_feedback, record));
         _loop = Task.Run(() => LoopAsync(_cts.Token));
     }
 
@@ -75,6 +77,7 @@ public sealed class LiveBatcher : IAsyncDisposable
             StatsSnapshot? stats;
             TransferRecord[] records;
             LogEntry[] logs;
+            FeedbackRecord[] feedback;
             bool counter;
             lock (_gate)
             {
@@ -82,16 +85,19 @@ public sealed class LiveBatcher : IAsyncDisposable
                 stats = _stats;
                 records = [.. _records];
                 logs = [.. _logs];
+                feedback = [.. _feedback];
                 counter = _counterChanged;
                 _status = null;
                 _stats = null;
                 _records.Clear();
                 _logs.Clear();
+                _feedback.Clear();
                 _counterChanged = false;
             }
 
             if (_hub.ClientCount == 0
-                || (status is null && stats is null && records.Length == 0 && logs.Length == 0 && !counter))
+                || (status is null && stats is null && records.Length == 0 && logs.Length == 0
+                    && feedback.Length == 0 && !counter))
             {
                 continue;
             }
@@ -104,6 +110,8 @@ public sealed class LiveBatcher : IAsyncDisposable
                     stats,
                     records,
                     logs,
+                    // Urutan lama → baru; Seq yang sama = perubahan status (Queued → Sent / Dropped).
+                    feedback,
                     counter = counter ? _counterView() : null,
                 });
             }

@@ -509,6 +509,16 @@ public class RobustnessTests
         settings.Server.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         settings.Server.Protocol = ServerProtocol.Tcp;
         settings.Server.ReconnectDelaySeconds = 1;
+        // Data feedback dipilih di Flow Mapping: urutan dan format bebas, pemisah "|".
+        settings.Feedback.Format = FeedbackFormat.Fields;
+        settings.Feedback.Fields =
+        [
+            new() { Key = "TEMPLATE" },
+            new() { Key = "COUNTER", Format = "D6" },
+            new() { Key = "OPERATOR" },
+        ];
+        settings.Feedback.Delimiter = "|";
+        Assert.Empty(SettingsValidator.Validate(settings));
         var time = TimeProvider.System;
         await using var service = new TransferService(settings, null, new CounterEngine(null, time),
             new TransferLog(null, time), new TransferStats(), time, _ => printer = new FakeTijLink(commands));
@@ -524,12 +534,19 @@ public class RobustnessTests
         printer!.Print();
         printer.Print();
         await WaitUntil(() => service.Status.FeedbackQueued == 2, "feedback diantrikan");
+        var queued = service.RecentFeedback(50);
+        Assert.Equal(["867892|000002|ANANDA02", "867892|000001|ANANDA02"], queued.Select(f => f.Data));
+        Assert.All(queued, f => Assert.Equal(FeedbackState.Queued, f.State));
+        Assert.All(queued, f => Assert.Null(f.SentAt));
 
         using var second = await listener.AcceptTcpClientAsync();
         var reader = new StreamReader(second.GetStream(), Encoding.UTF8);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Assert.Equal("ANANDA02,867892,001", await reader.ReadLineAsync(timeout.Token));
-        Assert.Equal("ANANDA02,867892,002", await reader.ReadLineAsync(timeout.Token));
+        Assert.Equal("867892|000001|ANANDA02", await reader.ReadLineAsync(timeout.Token));
+        Assert.Equal("867892|000002|ANANDA02", await reader.ReadLineAsync(timeout.Token));
+        await WaitUntil(() => service.RecentFeedback(50).All(f => f.State == FeedbackState.Sent), "feedback tercatat terkirim");
+        Assert.All(service.RecentFeedback(50), f => Assert.NotNull(f.SentAt));
+        Assert.Equal(["001", "002"], service.RecentFeedback(50).Reverse().Select(f => f.Counter));
         await service.StopAsync();
         listener.Stop();
     }

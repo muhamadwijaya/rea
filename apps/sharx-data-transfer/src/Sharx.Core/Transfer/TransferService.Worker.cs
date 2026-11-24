@@ -392,7 +392,8 @@ public sealed partial class TransferService
         }
 
         var remoteFields = fields.Select(f => new { f.Id, Value = ControlTokens.Visualize(f.Value) }).ToArray();
-        var feedback = OutputFormatter.Render(draft.Feedback.Template, context);
+        var feedbackTemplate = draft.Feedback.EffectiveTemplate();
+        var feedback = RenderOrEmpty(feedbackTemplate, context);
         return new
         {
             Fields = parsed.Record.Fields,
@@ -413,9 +414,27 @@ public sealed partial class TransferService
             Feedback = new
             {
                 draft.Feedback.Enabled,
+                Template = feedbackTemplate,
                 Text = ControlTokens.Visualize(feedback),
                 Hex = Convert.ToHexString(CommandEncoder.Encode(feedback, TextEncodings.Resolve(draft.Server.Encoding))),
+                // Contoh nilai tiap data yang dipilih (urutan sama dengan Feedback.Fields).
+                Fields = draft.Feedback.Fields
+                    .Select(f => ControlTokens.Visualize(RenderOrEmpty(FeedbackSettings.Placeholder(f), context)))
+                    .ToArray(),
             },
         };
+    }
+
+    /// <summary>Format yang belum valid (dilaporkan validator) menghasilkan teks kosong di preview.</summary>
+    private static string RenderOrEmpty(string template, OutputContext context)
+    {
+        try
+        {
+            return OutputFormatter.Render(template, context);
+        }
+        catch (FormatException)
+        {
+            return "";
+        }
     }
 }

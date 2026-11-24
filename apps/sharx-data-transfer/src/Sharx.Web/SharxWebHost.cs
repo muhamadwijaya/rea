@@ -260,6 +260,7 @@ public static class SharxWebHost
         Counter = CounterView(service),
         Records = service.RecentRecords(TransferLog.ViewLimit),
         Log = service.Log.Recent(TransferLog.ViewLimit),
+        Feedback = service.RecentFeedback(TransferLog.ViewLimit),
     };
 
     private static object CounterView(TransferService service)

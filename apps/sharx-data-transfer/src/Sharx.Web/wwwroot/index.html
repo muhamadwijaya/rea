@@ -192,6 +192,56 @@
           d="M3.5 12h16m-6.5-6.5 6.5 6.5-6.5 6.5"
         />
       </symbol>
+      <symbol id="i-min" viewBox="0 0 24 24">
+        <path stroke="currentColor" stroke-width="1.8" d="M5 12.5h14" />
+      </symbol>
+      <symbol id="i-max" viewBox="0 0 24 24">
+        <rect
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          x="5.5"
+          y="5.5"
+          width="13"
+          height="13"
+          rx="1"
+        />
+      </symbol>
+      <symbol id="i-restore" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="4.5" y="8" width="11.5" height="11.5" rx="1" />
+          <path
+            d="M8 8V5.5a1 1 0 0 1 1-1h9.5a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H16"
+          />
+        </g>
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path
+          stroke="currentColor"
+          stroke-width="1.8"
+          d="m6 6 12 12M18 6 6 18"
+        />
+      </symbol>
+      <symbol id="i-up" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="m6 15 6-6 6 6"
+        />
+      </symbol>
+      <symbol id="i-down" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="m6 9 6 6 6-6"
+        />
+      </symbol>
       <symbol id="i-plug" viewBox="0 0 24 24">
         <path
           fill="none"
@@ -204,6 +254,23 @@
       </symbol>
     </svg>
 
+    <div class="win-controls" id="winControls" hidden>
+      <button class="win-btn" data-win="minimize" title="Minimize">
+        <svg><use href="#i-min" /></svg>
+      </button>
+      <button
+        class="win-btn"
+        data-win="maximize"
+        id="winMaximize"
+        title="Restore (F11)"
+      >
+        <svg><use href="#i-restore" /></svg>
+      </button>
+      <button class="win-btn win-close" data-win="close" title="Tutup">
+        <svg><use href="#i-close" /></svg>
+      </button>
+    </div>
+
     <div class="offline-banner" id="offlineBanner" hidden>
       Koneksi ke aplikasi terputus &mdash; menyambung ulang...
     </div>
@@ -211,7 +278,7 @@
     <div class="app" id="app">
       <!-- ===================== KOLOM KIRI ===================== -->
       <aside class="side">
-        <div class="brand" aria-label="SHARX — Powered by wijaya CODE">
+        <div class="brand" aria-label="SHARX — TC+SM">
           <svg class="logo" viewBox="0 0 240 170" role="img">
             <g style="filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45))">
               <path
@@ -268,6 +335,7 @@
               <path d="m200.2 139.2 15 7-15 7" />
             </g>
           </svg>
+          <div class="brand-name">TC+SM</div>
         </div>
 
         <section class="card counter-card">
@@ -294,18 +362,23 @@
 
         <section class="card control-card">
           <h3 class="control-title">Control Panel</h3>
-          <button class="ctl ctl-go" id="btnPrintStart">
-            <svg><use href="#i-play" /></svg><span>Start Print</span>
-          </button>
-          <button class="ctl ctl-go" id="btnStart">
-            <svg><use href="#i-arrow-right" /></svg><span>Start Transfer</span>
-          </button>
-          <button class="ctl ctl-stop" id="btnPrintStop">
-            <svg><use href="#i-stop" /></svg><span>Stop Print</span>
-          </button>
-          <button class="ctl ctl-stop" id="btnStop">
-            <svg><use href="#i-stop" /></svg><span>Stop Transfer</span>
-          </button>
+          <div class="ctl-pair" id="pairPrint" data-on="">
+            <button class="ctl ctl-start" id="btnPrintStart">
+              <svg><use href="#i-play" /></svg><span>Start Print</span>
+            </button>
+            <button class="ctl ctl-stop" id="btnPrintStop">
+              <svg><use href="#i-stop" /></svg><span>Stop Print</span>
+            </button>
+          </div>
+          <div class="ctl-pair" id="pairTransfer" data-on="stop">
+            <button class="ctl ctl-start" id="btnStart">
+              <svg><use href="#i-arrow-right" /></svg
+              ><span>Start Transfer</span>
+            </button>
+            <button class="ctl ctl-stop" id="btnStop">
+              <svg><use href="#i-stop" /></svg><span>Stop Transfer</span>
+            </button>
+          </div>
           <div class="ctl-info">
             <div>Print: <b id="printState">-</b></div>
             <div id="jobQueue"></div>
@@ -895,6 +968,9 @@
               <div class="card-head">
                 <svg class="head-icon"><use href="#i-bars" /></svg>
                 <h2>Transfer Log</h2>
+                <span class="head-sub" id="feedbackSub"
+                  >After Print &rarr; Server</span
+                >
                 <div
                   class="log-stats"
                   title="Data diterima, dikirim ke printer, tercetak, gagal"
@@ -905,11 +981,9 @@
                   <b data-stat="failed">0</b>
                 </div>
               </div>
-              <div
-                class="log-box"
-                id="logPrinted"
-                title="Hasil cetak yang dilaporkan ke server (50 baris terakhir)"
-              ></div>
+              <div class="log-box" id="feedbackBox">
+                <div class="log-empty" id="feedbackEmpty"></div>
+              </div>
             </div>
 
             <div class="card card-counters">
@@ -1577,17 +1651,75 @@
                 server
               </div>
               <div class="form-grid">
-                <label class="check"
+                <label class="check span-2"
                   ><input type="checkbox" data-bind="feedback.enabled" />Setiap
-                  printer selesai cetak, kirim data yang tercetak ke
-                  server</label
+                  printer selesai cetak (sinyal after print), kirim data yang
+                  tercetak ke server</label
                 >
-                <label class="span-2"
+                <label
+                  >Susun data
+                  <select class="input" data-bind="feedback.format">
+                    <option value="Fields">
+                      Pilih data (urutan + pemisah)
+                    </option>
+                    <option value="Custom">Format custom (template)</option>
+                  </select>
+                </label>
+                <label data-show="feedback.format=Fields"
+                  >Pemisah antar data<input
+                    class="input mono"
+                    data-bind="feedback.delimiter"
+                    placeholder=","
+                /></label>
+                <label data-show="feedback.format=Fields"
+                  ><span
+                    >Akhiran
+                    <span class="muted">(MQTT: CR/LF tidak dikirim)</span></span
+                  ><input
+                    class="input mono"
+                    data-bind="feedback.terminator"
+                    placeholder="&lt;CR&gt;&lt;LF&gt;"
+                /></label>
+                <label class="span-2" data-show="feedback.format=Custom"
                   >Format data ke server<input
                     class="input mono"
                     data-bind="feedback.template"
                     placeholder="{OPERATOR},{TEMPLATE},{COUNTER}&lt;CR&gt;&lt;LF&gt;"
                 /></label>
+              </div>
+              <div class="show-group" data-show="feedback.format=Fields">
+                <div class="sub-title">
+                  Data yang dikirim balik ke server (berurutan)
+                </div>
+                <div class="table-wrap">
+                  <table class="data-table compact form-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 80px">Urutan</th>
+                        <th>Data</th>
+                        <th
+                          style="width: 170px"
+                          title="Contoh: D6, ddMMyy, L10"
+                        >
+                          Format (opsional)
+                        </th>
+                        <th style="width: 240px">Contoh</th>
+                        <th style="width: 124px"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="feedbackRows"></tbody>
+                  </table>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-sm" id="btnAddFeedback">
+                    <svg><use href="#i-plus" /></svg>Tambah data
+                  </button>
+                  <span class="hint"
+                    >Contoh: data COUNTER dengan format <code>D6</code> dikirim
+                    sebagai <code>000057</code>. Hasil lengkap ada di Preview
+                    hasil.</span
+                  >
+                </div>
               </div>
 
               <div class="token-help">

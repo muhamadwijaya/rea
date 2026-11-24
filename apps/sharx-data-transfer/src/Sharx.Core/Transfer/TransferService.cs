@@ -30,6 +30,7 @@ public sealed partial class TransferService : IAsyncDisposable
     private readonly object _lifecycle = new();
     private readonly object _recordsGate = new();
     private readonly LinkedList<TransferRecord> _records = new();
+    private readonly LinkedList<FeedbackRecord> _feedbackRecords = new();
     private readonly SemaphoreSlim _serverWriteGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCts = new();
 
@@ -46,7 +47,7 @@ public sealed partial class TransferService : IAsyncDisposable
     private SemaphoreSlim? _workSignal;
 
     /// <summary>Feedback ke server; dikirim task terpisah sehingga server lambat tidak menahan transfer.</summary>
-    private readonly Channel<byte[]> _feedback;
+    private readonly Channel<FeedbackItem> _feedback;
 
     private Task? _feedbackTask;
     private long _feedbackDropped;
@@ -79,13 +80,17 @@ public sealed partial class TransferService : IAsyncDisposable
         _time = time;
         _printerFactory = printerFactory ?? PrinterLinks.Create;
         _printerState = settings.Printer.Enabled ? PrinterState.Idle : PrinterState.Disabled;
-        _feedback = Channel.CreateBounded<byte[]>(
+        _feedback = Channel.CreateBounded<FeedbackItem>(
             new BoundedChannelOptions(Math.Clamp(settings.Feedback.MaxQueued, 1, 1_000_000))
             {
                 SingleReader = true,
                 FullMode = BoundedChannelFullMode.DropOldest,
             },
-            _ => Interlocked.Increment(ref _feedbackDropped));
+            dropped =>
+            {
+                Interlocked.Increment(ref _feedbackDropped);
+                UpdateFeedback(dropped.Seq, FeedbackState.Dropped, null);
+            });
     }
 
     public AppSettings Settings => _settings;
@@ -96,6 +101,9 @@ public sealed partial class TransferService : IAsyncDisposable
 
     public event Action<TransferStatus>? StatusChanged;
     public event Action<TransferRecord>? RecordProcessed;
+
+    /// <summary>Feedback baru (Queued) atau perubahan statusnya (Sent / Dropped), dengan Seq yang sama.</summary>
+    public event Action<FeedbackRecord>? FeedbackChanged;
     public event Action<StatsSnapshot>? StatsUpdated;
 
     public TransferStatus Status
@@ -132,7 +140,9 @@ public sealed partial class TransferService : IAsyncDisposable
                 WaitingForPrinter,
                 _waitingCount,
                 Printing.PrinterDrivers.For(s.Printer).SupportsPrintControl(s.Printer),
-                s.Server.Protocol.ToString());
+                s.Server.Protocol.ToString(),
+                s.Feedback.Enabled,
+                s.Feedback.EffectiveTemplate());
         }
     }
 
@@ -141,6 +151,15 @@ public sealed partial class TransferService : IAsyncDisposable
         lock (_recordsGate)
         {
             return _records.Take(count).ToArray();
+        }
+    }
+
+    /// <summary>Feedback terbaru (paling baru di depan) dengan status pengirimannya.</summary>
+    public IReadOnlyList<FeedbackRecord> RecentFeedback(int count)
+    {
+        lock (_recordsGate)
+        {
+            return _feedbackRecords.Take(count).ToArray();
         }
     }
 
@@ -648,6 +667,46 @@ public sealed partial class TransferService : IAsyncDisposable
 
         RecordProcessed?.Invoke(record);
     }
+
+    private void AddFeedback(FeedbackRecord record)
+    {
+        lock (_recordsGate)
+        {
+            _feedbackRecords.AddFirst(record);
+            while (_feedbackRecords.Count > TransferLog.ViewLimit)
+            {
+                _feedbackRecords.RemoveLast();
+            }
+        }
+
+        FeedbackChanged?.Invoke(record);
+    }
+
+    /// <summary>Ubah status feedback yang masih tampil (50 terakhir); yang lebih lama hanya tercatat di log.</summary>
+    private void UpdateFeedback(long seq, FeedbackState state, DateTimeOffset? sentAt)
+    {
+        FeedbackRecord? updated = null;
+        lock (_recordsGate)
+        {
+            for (var node = _feedbackRecords.First; node is not null; node = node.Next)
+            {
+                if (node.Value.Seq == seq)
+                {
+                    updated = node.Value with { State = state, SentAt = sentAt };
+                    node.Value = updated;
+                    break;
+                }
+            }
+        }
+
+        if (updated is not null)
+        {
+            FeedbackChanged?.Invoke(updated);
+        }
+    }
+
+    /// <summary>Satu laporan di antrean pengirim feedback.</summary>
+    private sealed record FeedbackItem(long Seq, byte[] Payload);
 
     private static bool IsTransportError(Exception ex) =>
         ex is IOException or SocketException or TimeoutException or InvalidOperationException

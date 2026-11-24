@@ -14,7 +14,7 @@
     counter: null,
     records: [],
     log: [],
-    printedLog: [],
+    feedback: [],
     serverKind: "MQTT",
     version: "1.0.0",
     settings: null,
@@ -198,7 +198,7 @@
     state.counter = data.counter;
     state.records = (data.records || []).slice(0, VIEW_LIMIT);
     state.log = (data.log || []).slice(-VIEW_LIMIT).reverse();
-    state.printedLog = state.log.filter(isPrintedEntry);
+    state.feedback = (data.feedback || []).slice(0, VIEW_LIMIT);
     state.lastSeq = state.records.length ? state.records[0].seq : 0;
     state.lastLogId = state.log.length ? state.log[0].id : 0;
     $("#aboutVersion").textContent = `v${data.version}`;
@@ -208,6 +208,7 @@
     renderCounter();
     renderAllRecords();
     renderLog();
+    renderFeedback();
   }
 
   /** Update gabungan dari server (maks. 4x per detik). */
@@ -226,6 +227,7 @@
     }
     if (batch.records?.length) addRecords(batch.records);
     if (batch.logs?.length) addLogs(batch.logs);
+    if (batch.feedback?.length) addFeedback(batch.feedback);
   }
 
   function setSystem(online) {
@@ -288,6 +290,11 @@
     const printerState = renderPrinterHud(s, short);
     renderFlowState(s, short, serverState, printerState);
     renderControls(s);
+    renderFeedbackEmpty();
+    setText(
+      $("#feedbackSub"),
+      s.feedbackEnabled ? "After Print \u2192 Server" : "Feedback nonaktif",
+    );
   }
 
   /** Chip MQTT Broker / TCP Server di kanan atas. Mengembalikan on / wait / off. */
@@ -345,11 +352,14 @@
     $("#incomingEmpty").innerHTML = s.running
       ? "Menunggu data dari server..."
       : "Belum ada data. Tekan <b>Start Transfer</b> untuk mulai menerima data dari server.";
-    $("#btnStart").disabled = s.running;
-    $("#btnStop").disabled = !s.running;
-    const noControl = !s.canControlPrint || s.printer === "Disabled";
-    $("#btnPrintStart").disabled = noControl;
-    $("#btnPrintStop").disabled = noControl;
+    setPair($("#pairTransfer"), s.running ? "start" : "stop", false);
+    const printOn =
+      { Started: "start", NotStarted: "stop" }[s.printState] || "";
+    setPair(
+      $("#pairPrint"),
+      printOn,
+      !s.canControlPrint || s.printer === "Disabled",
+    );
 
     const [label, kind] = PRINT_STATE_TEXT[s.printState] || ["-", ""];
     const printState = $("#printState");
@@ -360,6 +370,24 @@
     setText($("#jobNext"), s.job?.nextCounter || "-");
     setText($("#jobQueue"), queueText(s));
     setText($("#printerMsg"), s.printerMessage || "");
+  }
+
+  /**
+   * Pasangan Start / Stop seperti saklar: tombol keadaan sekarang menyala (tidak perlu ditekan lagi),
+   * pasangannya padam dan bisa ditekan. Keadaan belum diketahui: keduanya padam dan bisa ditekan.
+   */
+  function setPair(pair, on, locked) {
+    pair.dataset.on = on;
+    pair.classList.toggle("locked", locked);
+    for (const button of pair.querySelectorAll(".ctl")) {
+      const lit =
+        !locked &&
+        ((on === "start" && button.classList.contains("ctl-start")) ||
+          (on === "stop" && button.classList.contains("ctl-stop")));
+      button.classList.toggle("is-on", lit);
+      button.setAttribute("aria-pressed", String(lit));
+      button.disabled = locked || lit;
+    }
   }
 
   function queueText(s) {
@@ -625,12 +653,8 @@
     return div;
   }
 
-  /** Panel log kedua: hasil cetak yang dilaporkan ke server. */
-  const isPrintedEntry = (entry) => entry.message.startsWith("Printed:");
-
   function renderLog() {
     $("#logBox").replaceChildren(...state.log.map(logLine));
-    $("#logPrinted").replaceChildren(...state.printedLog.map(logLine));
   }
 
   function prependLines(box, entries) {
@@ -648,11 +672,6 @@
     const fresh = entries.slice(-VIEW_LIMIT).reverse();
     state.log = fresh.concat(state.log).slice(0, VIEW_LIMIT);
     prependLines($("#logBox"), fresh);
-    const printed = fresh.filter(isPrintedEntry);
-    if (printed.length) {
-      state.printedLog = printed.concat(state.printedLog).slice(0, VIEW_LIMIT);
-      prependLines($("#logPrinted"), printed);
-    }
 
     if (
       state.page === "logs" &&
@@ -671,6 +690,62 @@
         renderLogHistory();
       }
     }
+  }
+
+  // ---- Transfer balik ke server (feedback setelah sinyal after print)
+
+  const FEEDBACK_STATE = {
+    Sent: ["OK", "ok"],
+    Queued: ["MENUNGGU", "queued"],
+    Dropped: ["DIBUANG", "dropped"],
+  };
+
+  function feedbackLine(f) {
+    const div = document.createElement("div");
+    div.className = "log-line";
+    div.dataset.seq = f.seq;
+    const [label, kind] = FEEDBACK_STATE[f.state] || [f.state, "info"];
+    div.innerHTML = `[${esc(timeText(f.time))}] <span class="log-key">Printed</span>: ${esc(f.operator)} / ${esc(f.template)} / ${esc(f.counter)} -&gt; <span class="log-key">server</span>: ${esc(f.data)}  - <span class="log-status s-${kind}">${label}</span>`;
+    const sent = f.sentAt ? `\nTerkirim: ${timeText(f.sentAt)}` : "";
+    div.title = `Data ke server: ${f.data} (${f.bytes} byte)${sent}`;
+    return div;
+  }
+
+  function renderFeedbackEmpty() {
+    const empty = $("#feedbackEmpty");
+    const s = state.status;
+    empty.hidden = state.feedback.length > 0;
+    if (!s || empty.hidden) return;
+    empty.innerHTML = s.feedbackEnabled
+      ? `Belum ada data tercetak. Setiap printer mengirim sinyal selesai cetak (after print), data yang dikirim balik ke server tampil di sini.<br>Data dikirim: <code>${esc(s.feedbackFormat)}</code> &middot; ubah di <a href="#settings/mapping">Settings &rarr; Flow Mapping Data</a>.`
+      : `Feedback ke server <b>nonaktif</b>. Aktifkan di <a href="#settings/mapping">Settings &rarr; Flow Mapping Data</a> (bagian 6).`;
+  }
+
+  function renderFeedback() {
+    const box = $("#feedbackBox");
+    const empty = $("#feedbackEmpty");
+    box.replaceChildren(empty, ...state.feedback.map(feedbackLine));
+    renderFeedbackEmpty();
+  }
+
+  /** Feedback baru (urutan lama → baru) atau perubahan status dengan Seq yang sama. */
+  function addFeedback(items) {
+    const box = $("#feedbackBox");
+    for (const f of items) {
+      const index = state.feedback.findIndex((x) => x.seq === f.seq);
+      if (index >= 0) {
+        state.feedback[index] = f;
+        box
+          .querySelector(`[data-seq="${f.seq}"]`)
+          ?.replaceWith(feedbackLine(f));
+        continue;
+      }
+      state.feedback.unshift(f);
+      $("#feedbackEmpty").after(feedbackLine(f));
+    }
+    state.feedback.length = Math.min(state.feedback.length, VIEW_LIMIT);
+    while (box.children.length > VIEW_LIMIT + 1) box.lastChild.remove();
+    renderFeedbackEmpty();
   }
 
   // ------------------------------------------------------------------ counter & job
@@ -817,6 +892,7 @@
     fillBindings();
     renderFieldRows();
     renderRemoteRows();
+    renderFeedbackRows();
     renderTokenChips();
     requestPreview();
   }
@@ -860,23 +936,33 @@
     if (structural) {
       renderFieldRows();
       renderRemoteRows();
+      renderFeedbackRows();
     }
     requestPreview();
   }
 
-  document.addEventListener("input", (e) => {
+  function onBindingInput(e) {
     const el = e.target.closest("[data-bind]");
     if (!el || !state.draft) return;
-    setPath(state.draft, el.dataset.bind, readBinding(el));
-    onDraftChanged(el.dataset.bind === "mapping.mode");
-  });
+    const path = el.dataset.bind;
+    const value = readBinding(el);
+    // Pindah ke format custom: mulai dari susunan data yang sedang dipilih.
+    if (
+      path === "feedback.format" &&
+      value === "Custom" &&
+      state.draft.feedback.format !== "Custom" &&
+      state.preview?.feedback?.template
+    ) {
+      state.draft.feedback.template = state.preview.feedback.template;
+      const box = $('[data-bind="feedback.template"]');
+      if (box) box.value = state.draft.feedback.template;
+    }
+    setPath(state.draft, path, value);
+    onDraftChanged(path === "mapping.mode");
+  }
 
-  document.addEventListener("change", (e) => {
-    const el = e.target.closest("[data-bind]");
-    if (!el || !state.draft) return;
-    setPath(state.draft, el.dataset.bind, readBinding(el));
-    onDraftChanged(el.dataset.bind === "mapping.mode");
-  });
+  document.addEventListener("input", onBindingInput);
+  document.addEventListener("change", onBindingInput);
 
   document.addEventListener("focusin", (e) => {
     if (e.target.matches("#page-settings input.mono, #page-settings textarea"))
@@ -997,6 +1083,84 @@
     });
   }
 
+  const BUILT_IN_LABELS = {
+    COUNTER: "Counter yang tercetak",
+    DATE: "Tanggal",
+    TIME: "Jam",
+    PROD_DATE: "Tanggal produksi (hari counter)",
+    SEQ: "Nomor urut",
+    RAW: "Data asli dari server",
+  };
+
+  /** Pilihan data feedback: field Flow Mapping + data bawaan. */
+  function feedbackKeyOptions(selected) {
+    const options = [
+      ...state.draft.mapping.fields.map((f) => [f.key, f.label || f.key]),
+      ...(state.meta?.builtIns || []).map((k) => [k, BUILT_IN_LABELS[k] || k]),
+    ];
+    if (selected && !options.some(([k]) => k === selected))
+      options.push([selected, "(tidak ada di Flow Mapping)"]);
+    return options
+      .map(
+        ([key, label]) =>
+          `<option value="${esc(key)}"${key === selected ? " selected" : ""}>${esc(key)} — ${esc(label)}</option>`,
+      )
+      .join("");
+  }
+
+  function renderFeedbackRows() {
+    const fields = state.draft.feedback.fields;
+    $("#feedbackRows").replaceChildren(
+      ...fields.map((f, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="row-num">${index + 1}</td>
+          <td><select class="input" data-fb="key">${feedbackKeyOptions(f.key)}</select></td>
+          <td><input class="input mono" data-fb="format" value="${esc(f.format)}" placeholder="-" spellcheck="false" /></td>
+          <td class="value-cell" data-feedback="${index}"></td>
+          <td><div class="row-tools">
+            <button class="btn btn-sm btn-icon" data-fb="up" title="Naik"${index === 0 ? " disabled" : ""}><svg><use href="#i-up"/></svg></button>
+            <button class="btn btn-sm btn-icon" data-fb="down" title="Turun"${index === fields.length - 1 ? " disabled" : ""}><svg><use href="#i-down"/></svg></button>
+            <button class="btn btn-sm btn-icon" data-fb="delete" title="Hapus"><svg><use href="#i-trash"/></svg></button>
+          </div></td>`;
+        const update = (e) => {
+          const prop = e.target.dataset.fb;
+          if (prop !== "key" && prop !== "format") return;
+          f[prop] = e.target.value.trim();
+          onDraftChanged(false);
+        };
+        tr.addEventListener("input", update);
+        tr.addEventListener("change", update);
+        tr.querySelector('[data-fb="up"]').onclick = () =>
+          moveFeedbackField(index, -1);
+        tr.querySelector('[data-fb="down"]').onclick = () =>
+          moveFeedbackField(index, 1);
+        tr.querySelector('[data-fb="delete"]').onclick = () => {
+          fields.splice(index, 1);
+          onDraftChanged(true);
+        };
+        return tr;
+      }),
+    );
+    updateFeedbackResults();
+  }
+
+  function moveFeedbackField(index, delta) {
+    const fields = state.draft.feedback.fields;
+    const target = index + delta;
+    if (target < 0 || target >= fields.length) return;
+    [fields[index], fields[target]] = [fields[target], fields[index]];
+    onDraftChanged(true);
+  }
+
+  function updateFeedbackResults() {
+    const values = state.preview?.feedback?.fields || [];
+    $$("#feedbackRows [data-feedback]").forEach((cell) => {
+      const v = values[Number(cell.dataset.feedback)];
+      cell.textContent = v ?? "";
+    });
+  }
+
   let lastTemplateBox = null;
 
   function renderTokenChips() {
@@ -1096,6 +1260,7 @@
         : "";
     updateFieldResults();
     updateRemoteResults();
+    updateFeedbackResults();
     renderTokenChips();
 
     const rows = [];
@@ -1198,6 +1363,50 @@
       loadLogDates().catch((err) => toast(err.message, true));
   }
 
+  // ------------------------------------------------------------------ jendela desktop
+
+  /**
+   * Aplikasi desktop (WebView2) tanpa title bar: tombol minimize / maximize-restore / close ada di UI,
+   * bar atas dipakai untuk menggeser jendela saat tidak fullscreen. Di browser biasa tidak tampil.
+   */
+  function setupWindowControls() {
+    const webview = window.chrome?.webview;
+    if (!webview) return;
+    const send = (cmd) => webview.postMessage({ cmd });
+    document.body.classList.add("desktop");
+    $("#winControls").hidden = false;
+    $$(".win-btn").forEach((b) => (b.onclick = () => send(b.dataset.win)));
+    webview.addEventListener("message", (e) => {
+      const maximized = e.data?.window === "maximized";
+      if (!e.data?.window) return;
+      $("#winMaximize").title = maximized
+        ? "Restore (F11)"
+        : "Fullscreen (F11)";
+      $("#winMaximize use").setAttribute(
+        "href",
+        maximized ? "#i-restore" : "#i-max",
+      );
+    });
+    send("state");
+
+    let lastDown = 0;
+    const onDragArea = (e) => {
+      if (e.button !== 0 || e.target.closest("a, button, input, select, label"))
+        return;
+      const now = Date.now();
+      send(now - lastDown < 400 ? "maximize" : "drag");
+      lastDown = now;
+    };
+    $(".topbar").addEventListener("mousedown", onDragArea);
+    $(".brand").addEventListener("mousedown", onDragArea);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "F11") {
+        e.preventDefault();
+        send("maximize");
+      }
+    });
+  }
+
   function bindUi() {
     window.addEventListener("hashchange", route);
     window.addEventListener("resize", debounce(layoutFlow, 150));
@@ -1267,6 +1476,17 @@
       });
       onDraftChanged(true);
     };
+    $("#btnAddFeedback").onclick = () => {
+      const fields = state.draft.feedback.fields;
+      const used = new Set(fields.map((f) => f.key));
+      const candidates = [
+        ...state.draft.mapping.fields.map((f) => f.key),
+        ...(state.meta?.builtIns || []),
+      ];
+      const key = candidates.find((k) => !used.has(k)) || "COUNTER";
+      fields.push({ key, format: "" });
+      onDraftChanged(true);
+    };
     $("#btnAddRemote").onclick = () => {
       const fields = state.draft.printer.fields;
       const next = fields.length
@@ -1292,6 +1512,7 @@
   }
 
   bindUi();
+  setupWindowControls();
   route();
   connectWs();
 })();

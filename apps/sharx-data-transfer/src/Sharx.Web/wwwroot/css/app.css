@@ -132,15 +132,26 @@ code {
 
 .brand {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   height: calc(var(--u) * 173);
-  padding-top: calc(var(--u) * 10);
+  padding-top: calc(var(--u) * 6);
   flex: none;
 }
 
 .logo {
-  width: calc(var(--u) * 232);
-  height: calc(var(--u) * 164);
+  width: calc(var(--u) * 186);
+  height: calc(var(--u) * 132);
+}
+
+.brand-name {
+  margin-top: calc(var(--u) * 2);
+  color: #eef3f9;
+  font-size: calc(var(--u) * 30);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-shadow: 0 0 calc(var(--u) * 10) rgba(95, 229, 116, 0.35);
 }
 
 .logo-powered {
@@ -310,40 +321,77 @@ code {
   font-size: calc(var(--u) * 25);
 }
 
+/* Start / Stop berpasangan seperti saklar: tombol keadaan sekarang menyala, pasangannya padam
+   (tetap bisa ditekan untuk mengganti keadaan). */
+.ctl-pair {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 5);
+  flex: none;
+  padding: calc(var(--u) * 5);
+  border: calc(var(--u) * 1.5) solid #2c3d57;
+  border-radius: calc(var(--u) * 11);
+  background: rgba(4, 10, 22, 0.45);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
 .ctl {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 16);
+  gap: calc(var(--u) * 14);
   flex: none;
-  height: calc(var(--u) * 80);
-  border: 0;
+  height: calc(var(--u) * 76);
+  padding: 0 calc(var(--u) * 6);
+  border: calc(var(--u) * 2) solid;
   border-radius: calc(var(--u) * 7);
-  color: #0f1828;
-  font-size: calc(var(--u) * 31);
+  background: #15253c;
+  font-size: calc(var(--u) * 30);
+  white-space: nowrap;
   font-weight: 400;
   cursor: pointer;
-  box-shadow:
-    inset 0 calc(var(--u) * 2) 0 rgba(255, 255, 255, 0.35),
-    inset 0 calc(var(--u) * -3) 0 rgba(0, 0, 0, 0.14),
-    0 calc(var(--u) * 3) calc(var(--u) * 8) rgba(0, 0, 0, 0.35);
   transition:
+    background 0.15s,
+    color 0.15s,
     filter 0.15s,
     transform 0.05s,
     opacity 0.15s;
 }
 
-.ctl svg {
-  width: calc(var(--u) * 28);
-  height: calc(var(--u) * 28);
-}
-
-.ctl-go {
-  background: linear-gradient(180deg, #d6fd7c 0%, #cefc68 45%, #c2f45a 100%);
+.ctl-start {
+  border-color: rgba(206, 252, 104, 0.42);
+  color: #cefc68;
 }
 
 .ctl-stop {
+  border-color: rgba(236, 67, 72, 0.5);
+  color: #ff7276;
+}
+
+.ctl.is-on {
+  color: #0f1828;
+  cursor: default;
+  box-shadow:
+    inset 0 calc(var(--u) * 2) 0 rgba(255, 255, 255, 0.35),
+    inset 0 calc(var(--u) * -3) 0 rgba(0, 0, 0, 0.14),
+    0 0 calc(var(--u) * 14) var(--on-glow);
+}
+
+.ctl-start.is-on {
+  --on-glow: rgba(206, 252, 104, 0.4);
+  border-color: #dafe8c;
+  background: linear-gradient(180deg, #d6fd7c 0%, #cefc68 45%, #c2f45a 100%);
+}
+
+.ctl-stop.is-on {
+  --on-glow: rgba(236, 67, 72, 0.45);
+  border-color: #f77a7e;
   background: linear-gradient(180deg, #f2555a 0%, #ec4348 45%, #df3a3f 100%);
+}
+
+.ctl svg {
+  width: calc(var(--u) * 28);
+  height: calc(var(--u) * 28);
 }
 
 .ctl-stop svg {
@@ -352,18 +400,17 @@ code {
 }
 
 .ctl:not(:disabled):hover {
-  filter: brightness(1.07);
+  background: #1d3250;
 }
 
 .ctl:not(:disabled):active {
   transform: translateY(1px);
 }
 
-.ctl:disabled {
-  cursor: default;
-  opacity: 0.38;
-  filter: saturate(0.55);
-  box-shadow: none;
+.ctl:disabled:not(.is-on) {
+  cursor: not-allowed;
+  opacity: 0.35;
+  filter: saturate(0.4);
 }
 
 .ctl-info {
@@ -1363,6 +1410,33 @@ code {
   color: #ff6b72;
 }
 
+.head-sub {
+  color: #8cc4ef;
+  font-size: calc(var(--u) * 17);
+  white-space: nowrap;
+}
+
+.log-empty {
+  padding: calc(var(--u) * 6) calc(var(--u) * 4);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: calc(var(--u) * 18);
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.log-empty code {
+  color: #d9f99d;
+}
+
+.log-status.s-queued {
+  color: var(--amber);
+}
+
+.log-status.s-dropped {
+  color: #ff6b72;
+}
+
 .head-date {
   color: #a9b4c2;
   font-size: calc(var(--u) * 18);
@@ -1890,6 +1964,18 @@ button.chip:hover {
   color: #ff8a90;
 }
 
+.row-tools {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.row-num {
+  color: var(--lime);
+  font-weight: 600;
+  text-align: center;
+}
+
 .token-help {
   display: flex;
   flex-direction: column;
@@ -2070,6 +2156,54 @@ button.chip:hover {
     transform: translateY(10px);
     opacity: 0;
   }
+}
+
+.win-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+}
+
+.win-controls[hidden] {
+  display: none;
+}
+
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: max(36px, calc(var(--u) * 48));
+  height: max(24px, calc(var(--u) * 30));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9aa6b6;
+  cursor: pointer;
+}
+
+.win-btn svg {
+  width: max(13px, calc(var(--u) * 17));
+  height: max(13px, calc(var(--u) * 17));
+}
+
+.win-btn:hover {
+  background: #22324a;
+  color: #fff;
+}
+
+.win-close:hover {
+  background: #c42b1c;
+}
+
+/* Beri ruang tombol jendela di atas chip status. */
+body.desktop .hud {
+  margin-top: max(24px, calc(var(--u) * 30));
+}
+
+body.desktop .topbar,
+body.desktop .brand {
+  cursor: default;
 }
 
 .offline-banner {

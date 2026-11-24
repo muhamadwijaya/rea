@@ -691,10 +691,21 @@ public sealed partial class TransferService
         if (s.Feedback.Enabled)
         {
             var context = new OutputContext(printed.Record, printed.Counter, printed.CounterText, printed.BusinessDate, now, seq);
-            feedback = OutputFormatter.Render(s.Feedback.Template, context);
+            feedback = OutputFormatter.Render(s.Feedback.EffectiveTemplate(), context);
             var payload = CommandEncoder.Encode(feedback, TextEncodings.Resolve(s.Server.Encoding));
             bytes = payload.Length;
-            note = QueueFeedback(payload);
+            // Catat dulu (Queued) supaya status Sent dari pengirim selalu menemukan laporannya.
+            AddFeedback(new FeedbackRecord(
+                seq,
+                now,
+                printed.Record.Operator,
+                printed.Record.Template,
+                printed.CounterText,
+                Trimmed(feedback),
+                bytes,
+                FeedbackState.Queued,
+                null));
+            note = QueueFeedback(new FeedbackItem(seq, payload));
         }
 
         var summary = $"{printed.Record.Operator} / {printed.Record.Template} / {printed.CounterText}";
@@ -750,9 +761,9 @@ public sealed partial class TransferService
     }
 
     /// <summary>Masukkan feedback ke antrean pengirim (tidak menunggu server).</summary>
-    private string? QueueFeedback(byte[] payload)
+    private string? QueueFeedback(FeedbackItem item)
     {
-        _feedback.Writer.TryWrite(payload);
+        _feedback.Writer.TryWrite(item);
         return _serverSender is null
             ? $"Server tidak terhubung: laporan diantrikan ({_feedback.Reader.Count})"
             : null;
@@ -770,7 +781,7 @@ public sealed partial class TransferService
         {
             while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
             {
-                while (reader.TryPeek(out var payload))
+                while (reader.TryPeek(out var item))
                 {
                     var send = _serverSender;
                     if (send is null)
@@ -783,9 +794,10 @@ public sealed partial class TransferService
                     timeout.CancelAfter(TimeSpan.FromSeconds(10));
                     try
                     {
-                        await send(payload, timeout.Token).ConfigureAwait(false);
-                        _stats.AddSent(payload.Length);
+                        await send(item.Payload, timeout.Token).ConfigureAwait(false);
+                        _stats.AddSent(item.Payload.Length);
                         reader.TryRead(out _);
+                        UpdateFeedback(item.Seq, FeedbackState.Sent, _time.GetLocalNow());
                         if (warned)
                         {
                             warned = false;

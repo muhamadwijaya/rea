@@ -177,3 +177,72 @@ public class MappingTests
         Assert.Equal(0x02 ^ 0x41 ^ 0x42, xor[^1]);
     }
 }
+
+public class FeedbackSettingsTests
+{
+    private static AppSettings LoadJson(string json)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"sharx-settings-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "settings.json");
+            File.WriteAllText(path, json);
+            var (settings, warning) = new SettingsStore(path).Load();
+            Assert.Null(warning);
+            return settings;
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Legacy_default_template_becomes_selectable_fields()
+    {
+        var s = LoadJson("""{"feedback":{"enabled":true,"template":"{OPERATOR},{TEMPLATE},{COUNTER}<CR><LF>"}}""");
+        Assert.Equal(FeedbackFormat.Fields, s.Feedback.Format);
+        Assert.Equal(["OPERATOR", "TEMPLATE", "COUNTER"], s.Feedback.Fields.Select(f => f.Key));
+        Assert.Equal("{OPERATOR},{TEMPLATE},{COUNTER}<CR><LF>", s.Feedback.EffectiveTemplate());
+    }
+
+    [Fact]
+    public void Legacy_custom_template_is_kept_as_custom()
+    {
+        var s = LoadJson("""{"feedback":{"enabled":true,"template":"PRINT;{OPERATOR};{COUNTER:D6}<CR>"}}""");
+        Assert.Equal(FeedbackFormat.Custom, s.Feedback.Format);
+        Assert.Equal("PRINT;{OPERATOR};{COUNTER:D6}<CR>", s.Feedback.EffectiveTemplate());
+        Assert.Empty(SettingsValidator.Validate(s));
+    }
+
+    [Fact]
+    public void Selected_fields_build_the_feedback_in_order()
+    {
+        var s = new AppSettings();
+        s.Feedback.Format = FeedbackFormat.Fields;
+        s.Feedback.Fields = [new() { Key = "counter", Format = "D5" }, new() { Key = "DATE", Format = "yyMMdd" }];
+        s.Feedback.Delimiter = "<TAB>";
+        s.Feedback.Terminator = "<CR>";
+        Assert.Empty(SettingsValidator.Validate(s)); // kunci dinormalkan ke huruf besar
+        Assert.Equal("{COUNTER:D5}<TAB>{DATE:yyMMdd}<CR>", s.Feedback.EffectiveTemplate());
+    }
+
+    [Fact]
+    public void Feedback_field_selection_is_validated()
+    {
+        var s = new AppSettings();
+        s.Feedback.Format = FeedbackFormat.Fields;
+        s.Feedback.Fields = [];
+        Assert.Contains(SettingsValidator.Validate(s), e => e.Contains("minimal satu data", StringComparison.Ordinal));
+
+        s.Feedback.Fields = [new() { Key = "TIDAK_ADA" }];
+        Assert.Contains(SettingsValidator.Validate(s), e => e.Contains("{TIDAK_ADA}", StringComparison.Ordinal));
+
+        s.Feedback.Fields = [new() { Key = "COUNTER", Format = "Q" }];
+        Assert.Contains(SettingsValidator.Validate(s), e => e.Contains("Format 'Q'", StringComparison.Ordinal));
+
+        s.Feedback.Enabled = false; // feedback nonaktif: susunan data tidak diperiksa
+        Assert.Empty(SettingsValidator.Validate(s));
+    }
+}

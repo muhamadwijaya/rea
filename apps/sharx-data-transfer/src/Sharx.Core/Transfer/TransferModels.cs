@@ -85,7 +85,34 @@ public sealed record TransferStatus(
     bool WaitingForPrinter,
     int WaitingRecords,
     bool CanControlPrint,
-    string ServerProtocol);
+    string ServerProtocol,
+    bool FeedbackEnabled,
+    string FeedbackFormat);
+
+/// <summary>Status pengiriman satu laporan feedback ke server.</summary>
+public enum FeedbackState
+{
+    /// <summary>Di antrean: server belum terhubung atau sedang dikirim.</summary>
+    Queued,
+
+    /// <summary>Diterima server (TCP terkirim / broker MQTT menerima publish).</summary>
+    Sent,
+
+    /// <summary>Dibuang karena antrean feedback penuh saat server lama terputus.</summary>
+    Dropped,
+}
+
+/// <summary>Data yang dikirim balik ke server setelah printer melapor selesai cetak.</summary>
+public sealed record FeedbackRecord(
+    long Seq,
+    DateTimeOffset Time,
+    string Operator,
+    string Template,
+    string Counter,
+    string Data,
+    int Bytes,
+    FeedbackState State,
+    DateTimeOffset? SentAt);
 
 public sealed record SettingsApplyResult(bool Ok, IReadOnlyList<string> Errors, bool Reconnecting);
 

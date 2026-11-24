@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Web.WebView2.Core;
@@ -10,14 +11,25 @@ using Sharx.Web;
 namespace Sharx.Desktop;
 
 /// <summary>
-/// Jendela Windows biasa (caption gelap, terbuka maximize) yang menampilkan UI web lewat WebView2.
-/// Minimize / maximize / close memakai tombol jendela Windows.
+/// Jendela tanpa title bar yang menampilkan UI web (WebView2) dan terbuka fullscreen.
+/// Tombol minimize / maximize-restore / close ada di dalam UI dan dikirim lewat
+/// <c>window.chrome.webview.postMessage</c>; saat restore, jendela bisa digeser dari bar atas UI
+/// dan diubah ukurannya dari tepinya.
 /// </summary>
 internal sealed class MainForm : Form
 {
-    private const int DwmUseImmersiveDarkMode = 20;
-    private const int DwmCaptionColor = 35;
-    private const int DwmTextColor = 36;
+    private const int ResizeBorder = 6;
+    private const int WmNcHitTest = 0x84;
+    private const int WmNcLButtonDown = 0xA1;
+    private const int HtCaption = 2;
+    private const int HtLeft = 10;
+    private const int HtRight = 11;
+    private const int HtTop = 12;
+    private const int HtTopLeft = 13;
+    private const int HtTopRight = 14;
+    private const int HtBottom = 15;
+    private const int HtBottomLeft = 16;
+    private const int HtBottomRight = 17;
 
     private static readonly Color Background = Color.FromArgb(10, 18, 34);
 
@@ -29,12 +41,15 @@ internal sealed class MainForm : Form
     {
         _app = app;
         Text = "SHARX Data Transfer";
+        FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Background;
         MinimumSize = new Size(1024, 640);
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 800);
         Size = new Size(Math.Min(1600, area.Width), Math.Min(900, area.Height));
+        // Tanpa border + maximize = menutupi seluruh layar (fullscreen, termasuk taskbar).
         WindowState = FormWindowState.Maximized;
+        DoubleBuffered = true;
         try
         {
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -58,32 +73,13 @@ internal sealed class MainForm : Form
                 Close();
             }
         };
+        Resize += (_, _) =>
+        {
+            // Area tepi untuk mengubah ukuran hanya saat jendela tidak fullscreen.
+            Padding = WindowState == FormWindowState.Normal ? new Padding(ResizeBorder) : Padding.Empty;
+            PostWindowState();
+        };
         FormClosing += OnFormClosing;
-    }
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        ApplyDarkCaption();
-    }
-
-    private void ApplyDarkCaption()
-    {
-        // Windows 10 1809+: caption gelap; Windows 11: warna caption sama dengan latar aplikasi.
-        // Versi Windows yang tidak mendukung atribut ini mengabaikannya.
-        try
-        {
-            var on = 1;
-            _ = DwmSetWindowAttribute(Handle, DwmUseImmersiveDarkMode, ref on, sizeof(int));
-            var caption = ColorTranslator.ToWin32(Background);
-            _ = DwmSetWindowAttribute(Handle, DwmCaptionColor, ref caption, sizeof(int));
-            var text = ColorTranslator.ToWin32(Color.FromArgb(223, 230, 238));
-            _ = DwmSetWindowAttribute(Handle, DwmTextColor, ref text, sizeof(int));
-        }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
-        {
-            // dwmapi tidak tersedia: caption standar.
-        }
     }
 
     private async Task StartAsync()
@@ -110,6 +106,7 @@ internal sealed class MainForm : Form
             settings.AreDefaultContextMenusEnabled = settings.AreDevToolsEnabled;
             settings.IsZoomControlEnabled = false;
             settings.IsStatusBarEnabled = false;
+            _web.CoreWebView2.WebMessageReceived += OnWebMessage;
             _web.CoreWebView2.NewWindowRequested += (_, e) =>
             {
                 e.Handled = true;
@@ -142,6 +139,52 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        string? command;
+        try
+        {
+            using var json = JsonDocument.Parse(e.WebMessageAsJson);
+            command = json.RootElement.TryGetProperty("cmd", out var cmd) ? cmd.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        switch (command)
+        {
+            case "state":
+                PostWindowState();
+                break;
+            case "minimize":
+                WindowState = FormWindowState.Minimized;
+                break;
+            case "maximize":
+                WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+                break;
+            case "close":
+                Close();
+                break;
+            case "drag" when WindowState == FormWindowState.Normal:
+                ReleaseCapture();
+                SendMessage(Handle, WmNcLButtonDown, HtCaption, 0);
+                break;
+        }
+    }
+
+    /// <summary>UI menampilkan ikon maximize atau restore sesuai keadaan jendela.</summary>
+    private void PostWindowState()
+    {
+        if (_web.CoreWebView2 is not { } core || WindowState == FormWindowState.Minimized)
+        {
+            return;
+        }
+
+        var state = WindowState == FormWindowState.Maximized ? "maximized" : "normal";
+        core.PostWebMessageAsJson($"{{\"window\":\"{state}\"}}");
+    }
+
     private async void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         if (_closing)
@@ -152,6 +195,7 @@ internal sealed class MainForm : Form
         if (e.CloseReason == CloseReason.UserClosing && TransferRunning())
         {
             var answer = MessageBox.Show(
+                this,
                 "Transfer sedang berjalan. Menutup aplikasi akan menghentikan transfer ke printer.\n\nTutup aplikasi?",
                 Text,
                 MessageBoxButtons.YesNo,
@@ -194,6 +238,39 @@ internal sealed class MainForm : Form
         }
     }
 
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmNcHitTest && WindowState == FormWindowState.Normal)
+        {
+            base.WndProc(ref m);
+            var point = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF)));
+            var left = point.X <= ResizeBorder;
+            var right = point.X >= ClientSize.Width - ResizeBorder;
+            var top = point.Y <= ResizeBorder;
+            var bottom = point.Y >= ClientSize.Height - ResizeBorder;
+            var hit = (top, bottom, left, right) switch
+            {
+                (true, _, true, _) => HtTopLeft,
+                (true, _, _, true) => HtTopRight,
+                (_, true, true, _) => HtBottomLeft,
+                (_, true, _, true) => HtBottomRight,
+                (true, _, _, _) => HtTop,
+                (_, true, _, _) => HtBottom,
+                (_, _, true, _) => HtLeft,
+                (_, _, _, true) => HtRight,
+                _ => 0,
+            };
+            if (hit != 0)
+            {
+                m.Result = hit;
+            }
+
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
     private static void OpenExternal(string url)
     {
         try
@@ -206,6 +283,9 @@ internal sealed class MainForm : Form
         }
     }
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
 }
