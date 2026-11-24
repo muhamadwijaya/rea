@@ -355,7 +355,8 @@
     setPair($("#pairTransfer"), s.running, false);
     setPair(
       $("#pairPrint"),
-      { Started: true, NotStarted: false }[s.printState] ?? null,
+      // Status printer belum terbaca dianggap belum start.
+      s.printState === "Started",
       !s.canControlPrint || s.printer === "Disabled",
     );
 
@@ -371,13 +372,12 @@
   }
 
   /**
-   * Pasangan Start / Stop: hanya tombol yang bisa mengubah keadaan yang menyala, pasangannya redup.
-   * running true = berjalan (Start redup), false = berhenti (Stop redup), null = belum diketahui
-   * (keduanya menyala). locked = tidak bisa dikendalikan (keduanya redup).
+   * Toggle Start / Stop: belum jalan = Start menyala, Stop mati; sudah jalan = Start mati, Stop menyala.
+   * locked = tidak bisa dikendalikan (keduanya mati).
    */
   function setPair(pair, running, locked) {
-    pair.querySelector(".ctl-start").disabled = locked || running === true;
-    pair.querySelector(".ctl-stop").disabled = locked || running === false;
+    pair.querySelector(".ctl-start").disabled = locked || running;
+    pair.querySelector(".ctl-stop").disabled = locked || !running;
   }
 
   function queueText(s) {
