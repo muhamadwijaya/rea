@@ -16,8 +16,8 @@ public sealed class SharxApplication : Application
     {
         base.OnCreate();
         CrashLog.Init(FilesDir?.AbsolutePath ?? System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal));
-        AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => CrashLog.Write("Unhandled (.NET)", e.Exception);
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write("Unhandled (AppDomain)", e.ExceptionObject);
+        AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => CrashLog.Write("Unhandled (.NET)", e.Exception, fatal: true);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write("Unhandled (AppDomain)", e.ExceptionObject, fatal: true);
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             CrashLog.Write("Unobserved task", e.Exception);
@@ -36,7 +36,7 @@ public sealed class SharxApplication : Application
         {
             var trace = new Java.IO.StringWriter();
             e.PrintStackTrace(new Java.IO.PrintWriter(trace));
-            CrashLog.Write($"Unhandled (Java, thread {t.Name})", trace.ToString());
+            CrashLog.Write($"Unhandled (Java, thread {t.Name})", trace.ToString(), fatal: true);
             previous?.UncaughtException(t, e);
         }
     }

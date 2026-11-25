@@ -128,7 +128,10 @@ internal static class CrashLog
 
     public static void Init(string filesDirectory) => _path = Path.Combine(filesDirectory, "last-crash.txt");
 
-    public static void Write(string kind, object? error)
+    private const string FatalMark = "[BERHENTI] ";
+
+    /// <param name="fatal">true = error ini menutup aplikasi; false = langkah gagal, aplikasi tetap berjalan.</param>
+    public static void Write(string kind, object? error, bool fatal = false)
     {
         if (_path is null)
         {
@@ -144,7 +147,7 @@ internal static class CrashLog
             {
                 File.AppendAllText(
                     _path,
-                    $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} {kind}\nAndroid {release} (API {api}), {device}\n{error}\n\n");
+                    $"{(fatal ? FatalMark : "")}{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} {kind}\nAndroid {release} (API {api}), {device}\n{error}\n\n");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -153,8 +156,8 @@ internal static class CrashLog
         }
     }
 
-    /// <summary>Isi laporan error terakhir (lalu dihapus), atau null.</summary>
-    public static string? TakeLast()
+    /// <summary>Isi laporan error terakhir (lalu dihapus) dan apakah ada error yang menutup aplikasi.</summary>
+    public static (string Text, bool Fatal)? TakeLast()
     {
         if (_path is null)
         {
@@ -172,7 +175,7 @@ internal static class CrashLog
 
                 var text = File.ReadAllText(_path);
                 File.Delete(_path);
-                return text.Length > 20000 ? text[^20000..] : text;
+                return (text.Length > 20000 ? text[^20000..] : text, text.Contains(FatalMark, StringComparison.Ordinal));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

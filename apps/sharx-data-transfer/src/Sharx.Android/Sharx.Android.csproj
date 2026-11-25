@@ -9,7 +9,7 @@
     <AssemblyName>SharxDataTransfer.Android</AssemblyName>
     <ApplicationId>com.wijayacode.sharxdatatransfer</ApplicationId>
     <ApplicationTitle>SHARX Data Transfer</ApplicationTitle>
-    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationVersion>3</ApplicationVersion>
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <!-- File .apk yang bisa langsung dipasang (bukan .aab untuk Play Store). -->
     <AndroidPackageFormat>apk</AndroidPackageFormat>

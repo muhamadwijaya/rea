@@ -32,12 +32,6 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        Guard("Layar penuh", () =>
-        {
-            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
-            EnterFullScreen();
-        });
-
         // Pesan "memuat" tampil dulu; WebView menggantikannya setelah UI siap.
         _status = new TextView(this)
         {
@@ -49,10 +43,18 @@ public sealed class MainActivity : Activity
         _status.SetBackgroundColor(Color.Rgb(6, 18, 42));
         SetContentView(_status);
 
-        var lastCrash = CrashLog.TakeLast();
-        if (lastCrash is not null)
+        // Setelah SetContentView: jendela sudah punya DecorView (Android 16 error jika sebelumnya).
+        Guard("Layar penuh", () =>
         {
-            ShowReport("Aplikasi sempat berhenti", "Kirim laporan ini ke pembuat aplikasi:\n\n" + lastCrash);
+            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+            EnterFullScreen();
+        });
+
+        if (CrashLog.TakeLast() is { } last)
+        {
+            ShowReport(
+                last.Fatal ? "Aplikasi sempat berhenti" : "Catatan error (aplikasi tetap berjalan)",
+                "Kirim laporan ini ke pembuat aplikasi:\n\n" + last.Text);
         }
 
         Guard("Izin notifikasi", RequestNotificationPermission);
@@ -206,6 +208,8 @@ public sealed class MainActivity : Activity
 
         if (OperatingSystem.IsAndroidVersionAtLeast(30))
         {
+            // InsetsController butuh DecorView; DecorView membuatnya jika belum ada.
+            _ = window.DecorView;
             window.SetDecorFitsSystemWindows(false);
             if (window.InsetsController is { } insets)
             {
