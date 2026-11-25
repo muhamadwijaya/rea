@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Aplikasi Android: logika (Sharx.App / Sharx.Core) dan UI (wwwroot) yang sama dengan aplikasi desktop. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Sharx.Android</RootNamespace>
+    <AssemblyName>SharxDataTransfer.Android</AssemblyName>
+    <ApplicationId>com.wijayacode.sharxdatatransfer</ApplicationId>
+    <ApplicationTitle>SHARX Data Transfer</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <!-- File .apk yang bisa langsung dipasang (bukan .aab untuk Play Store). -->
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <RuntimeIdentifiers>android-arm;android-arm64;android-x64</RuntimeIdentifiers>
+    <!-- API dan settings memakai System.Text.Json berbasis reflection (sama seperti desktop). -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sharx.App\Sharx.App.csproj" />
+  </ItemGroup>
+
+  <!-- UI yang sama persis dengan desktop: file wwwroot Sharx.Web dipaketkan sebagai asset. -->
+  <ItemGroup>
+    <AndroidAsset Include="..\Sharx.Web\wwwroot\**\*" Link="Assets\wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

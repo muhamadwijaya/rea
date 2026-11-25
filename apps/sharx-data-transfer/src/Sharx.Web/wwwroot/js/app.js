@@ -998,6 +998,12 @@
         .map((e) => `<option>${esc(e)}</option>`)
         .join("");
     });
+    // Android tidak punya port serial: pilihan RS232 dinonaktifkan.
+    const serial = $('[data-bind="printer.transport"] option[value="Serial"]');
+    serial.disabled = data.meta.serialSupported === false;
+    serial.textContent = serial.disabled
+      ? "Serial (RS232) — tidak tersedia di Android"
+      : "Serial (RS232)";
     $("#serialPorts").innerHTML = (data.meta.serialPorts || [])
       .map((p) => `<option value="${esc(p)}">`)
       .join("");

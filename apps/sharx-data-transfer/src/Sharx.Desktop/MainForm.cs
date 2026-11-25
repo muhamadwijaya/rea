@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Sharx.Core.Transfer;
+using Sharx.App;
 using Sharx.Web;
 
 namespace Sharx.Desktop;
@@ -68,7 +69,7 @@ internal sealed class MainForm : Form
             }
             catch (Exception ex)
             {
-                SharxWebHost.WriteCrash(SharxHostOptions.DefaultDataDirectory(), "Startup", ex);
+                SharxRuntime.WriteCrash(SharxHostOptions.DefaultDataDirectory(), "Startup", ex);
                 MessageBox.Show($"SHARX Data Transfer gagal dibuka:\n{ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Close();
             }

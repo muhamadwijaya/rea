@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sharx.Core\Sharx.Core.csproj" />
+    <ProjectReference Include="..\..\src\Sharx.App\Sharx.App.csproj" />
   </ItemGroup>
 
 </Project>

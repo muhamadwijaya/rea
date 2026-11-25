@@ -1,3 +1,4 @@
+using Sharx.App;
 using Sharx.Web;
 
 namespace Sharx.Desktop;
@@ -33,9 +34,9 @@ internal static class Program
             }
         }
 
-        SharxWebHost.InstallCrashGuards(options.DataDirectory);
+        SharxRuntime.InstallCrashGuards(options.DataDirectory);
         Application.ThreadException += (_, e) =>
-            SharxWebHost.WriteCrash(options.DataDirectory, "ThreadException", e.Exception);
+            SharxRuntime.WriteCrash(options.DataDirectory, "ThreadException", e.Exception);
 
         Microsoft.AspNetCore.Builder.WebApplication app;
         try

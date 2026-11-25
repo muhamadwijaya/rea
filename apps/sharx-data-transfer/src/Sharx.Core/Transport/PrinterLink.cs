@@ -96,6 +96,11 @@ public sealed class SerialPrinterLink(PrinterSettings settings) : IPrinterLink
 
     public Task ConnectAsync(CancellationToken ct)
     {
+        if (OperatingSystem.IsAndroid())
+        {
+            throw new IOException("Serial RS232 tidak tersedia di Android; gunakan koneksi TCP/IP (IP + port)");
+        }
+
         var port = new SerialPort(
             settings.SerialPort,
             settings.BaudRate,

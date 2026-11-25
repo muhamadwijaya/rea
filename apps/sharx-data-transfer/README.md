@@ -49,6 +49,27 @@ run.bat publish     :: buat paket siap pakai di folder publish\
   tutup ada di pojok kanan atas aplikasi (**F11** = fullscreen/restore). Saat restore, jendela digeser
   dari bar menu atas dan ukurannya diubah dari tepi jendela.
 
+## Aplikasi Android (APK)
+
+`SharxDataTransfer.apk` berisi aplikasi yang sama: logika transfer, counter, mapping, feedback
+(`Sharx.Core` + `Sharx.App`) dan file UI (`wwwroot`) yang sama dengan aplikasi desktop, jadi fitur dan
+tampilannya identik.
+
+- Pasang di tablet / HP **Android 8.0 ke atas** (izinkan instal dari sumber tidak dikenal). Perangkat harus
+  satu jaringan (Wi-Fi / LAN) dengan printer dan MQTT broker / server.
+- Layar penuh landscape. Tombol **Back** = tutup aplikasi (konfirmasi jika transfer berjalan, seperti
+  tombol tutup di desktop); tombol **Home** = aplikasi tetap berjalan di belakang.
+- Transfer tetap berjalan saat layar mati / aplikasi di belakang: notifikasi "Transfer data ke printer dan
+  server aktif" tampil selama aplikasi berjalan, CPU dan Wi-Fi dijaga tidak tidur.
+- Settings, counter dan log disimpan di penyimpanan aplikasi. **Download** di Log History menyimpan file ke
+  folder **Download** perangkat.
+- Perbedaan karena perangkat: Serial **RS232 tidak tersedia** di Android (pakai printer TCP/IP), dan tombol
+  minimize / fullscreen desktop digantikan tombol Home / Back Android. Di HP layar dashboard kecil;
+  cubit (pinch) untuk zoom.
+- Membuat APK sendiri: `run.bat android` (butuh .NET 8 SDK, `dotnet workload install android` dan JDK 17).
+  APK ditandatangani dengan kunci debug PC yang membuatnya; APK dari PC lain hanya bisa dipasang setelah
+  versi lama di-uninstall.
+
 ## Aturan counter
 
 | Kejadian                                  | Hasil                                                                     |
@@ -200,7 +221,9 @@ started_). Data **tidak dianggap error**: statusnya **MENUNGGU** (kuning) dan di
 ```
 run.bat                 menjalankan / mem-publish aplikasi
 src/Sharx.Core          logika: parser, counter, driver printer (TIJ, Generic), koneksi
-src/Sharx.Web           REST API + WebSocket + UI (wwwroot: index.html, css, js, font)
+src/Sharx.App           alur aplikasi bersama semua host: API, update live, server lokal (Android)
+src/Sharx.Web           host ASP.NET Core desktop / browser + UI (wwwroot: index.html, css, js, font)
+src/Sharx.Android       aplikasi Android (WebView + foreground service), UI = wwwroot yang sama
 src/Sharx.Host          exe mode browser / service
 src/Sharx.Desktop       exe Windows (WinForms + WebView2, fullscreen tanpa title bar)
 tools/Sharx.Simulator   simulator server & printer TIJ

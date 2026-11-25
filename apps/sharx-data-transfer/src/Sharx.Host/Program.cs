@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Hosting;
+using Sharx.App;
 using Sharx.Web;
 
 // Mode browser / server: menjalankan UI di http://127.0.0.1:5080 dan (opsional) membuka browser.
@@ -29,7 +30,7 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-SharxWebHost.InstallCrashGuards(options.DataDirectory);
+SharxRuntime.InstallCrashGuards(options.DataDirectory);
 Microsoft.AspNetCore.Builder.WebApplication app;
 try
 {
@@ -51,7 +52,7 @@ catch (IOException ex) when (ex.InnerException is Microsoft.AspNetCore.Connectio
     return 3;
 }
 var url = SharxWebHost.ListeningAddress(app);
-Console.WriteLine($"SHARX Data Transfer v{SharxWebHost.Version}");
+Console.WriteLine($"SHARX Data Transfer v{SharxRuntime.Version}");
 Console.WriteLine($"UI   : {url}");
 Console.WriteLine($"Data : {options.DataDirectory}");
 Console.WriteLine("Tekan Ctrl+C untuk berhenti.");

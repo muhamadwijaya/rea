@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="sharx_bg">#06122A</color>
+  <style name="SharxTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+    <item name="android:windowBackground">@color/sharx_bg</item>
+    <item name="android:colorBackground">@color/sharx_bg</item>
+    <item name="android:statusBarColor">@color/sharx_bg</item>
+    <item name="android:navigationBarColor">@color/sharx_bg</item>
+  </style>
+</resources>

@@ -3,7 +3,7 @@ using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
 
-namespace Sharx.Web;
+namespace Sharx.App;
 
 /// <summary>Mengirim event realtime ke semua tab UI melalui WebSocket.</summary>
 public sealed class LiveHub

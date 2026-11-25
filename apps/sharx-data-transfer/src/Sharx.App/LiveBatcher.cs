@@ -1,7 +1,7 @@
 using Sharx.Core.Logging;
 using Sharx.Core.Transfer;
 
-namespace Sharx.Web;
+namespace Sharx.App;
 
 /// <summary>
 /// Menggabungkan event live (data, log, status, statistik, counter) dan mengirimnya ke UI paling sering

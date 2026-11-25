@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Android 9+: pakai seluruh layar termasuk area notch. -->
+  <style name="SharxTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+    <item name="android:windowBackground">@color/sharx_bg</item>
+    <item name="android:colorBackground">@color/sharx_bg</item>
+    <item name="android:statusBarColor">@color/sharx_bg</item>
+    <item name="android:navigationBarColor">@color/sharx_bg</item>
+    <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+  </style>
+</resources>

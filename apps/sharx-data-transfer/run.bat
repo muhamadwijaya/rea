@@ -8,6 +8,8 @@ rem  run.bat             buka aplikasi desktop SHARX Data Transfer
 rem  run.bat browser     mode browser / service (http://127.0.0.1:5080)
 rem  run.bat simulator   jalankan simulator server + printer TIJ untuk uji coba
 rem  run.bat publish     buat paket siap pakai di folder publish\ (butuh .NET 8 SDK)
+rem  run.bat android     buat APK Android di publish\SharxDataTransfer.apk
+rem                      (butuh .NET 8 SDK + "dotnet workload install android" + JDK 17)
 rem
 rem  Paket siap pakai: run.bat + folder app\ (program). Settings, counter dan
 rem  log disimpan di folder data\ di samping run.bat.
@@ -21,8 +23,9 @@ if /i "%MODE%"=="desktop" goto desktop
 if /i "%MODE%"=="browser" goto browser
 if /i "%MODE%"=="simulator" goto simulator
 if /i "%MODE%"=="publish" goto publish
+if /i "%MODE%"=="android" goto android
 echo Mode tidak dikenal: %MODE%
-echo Pakai: run.bat [desktop ^| browser ^| simulator ^| publish]
+echo Pakai: run.bat [desktop ^| browser ^| simulator ^| publish ^| android]
 exit /b 1
 
 rem --------------------------------------------------------------- desktop
@@ -95,6 +98,22 @@ copy /y "README.md" "publish\README.md" >nul
 echo.
 echo Selesai. Salin folder publish\ ke PC produksi lalu jalankan publish\run.bat
 echo (tidak perlu .NET SDK di PC produksi; butuh WebView2 Runtime untuk aplikasi desktop).
+exit /b 0
+
+rem --------------------------------------------------------------- android
+:android
+call :hassdk
+if errorlevel 1 goto nosdk
+echo Membuat APK Android (fitur dan UI sama dengan aplikasi desktop)...
+rem Android SDK dipasang otomatis jika belum ada.
+dotnet build "src\Sharx.Android\Sharx.Android.csproj" -t:InstallAndroidDependencies -f net8.0-android -p:AcceptAndroidSdkLicenses=True -nologo -v quiet
+if errorlevel 1 goto failed
+dotnet publish "src\Sharx.Android\Sharx.Android.csproj" -c Release -f net8.0-android -nologo -o "publish\android"
+if errorlevel 1 goto failed
+copy /y "publish\android\com.wijayacode.sharxdatatransfer-Signed.apk" "publish\SharxDataTransfer.apk" >nul
+echo.
+echo Selesai: publish\SharxDataTransfer.apk
+echo Salin ke tablet / HP Android 8.0+ lalu pasang (izinkan instal dari sumber tidak dikenal).
 exit /b 0
 
 rem --------------------------------------------------------------- helper
