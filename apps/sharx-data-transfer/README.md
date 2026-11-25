@@ -66,6 +66,9 @@ tampilannya identik.
 - Perbedaan karena perangkat: Serial **RS232 tidak tersedia** di Android (pakai printer TCP/IP), dan tombol
   minimize / fullscreen desktop digantikan tombol Home / Back Android. Di HP layar dashboard kecil;
   cubit (pinch) untuk zoom.
+- Jika aplikasi sempat berhenti / gagal dibuka, saat dibuka lagi muncul **laporan error** dengan tombol
+  **Salin**; kirim teks itu ke pembuat aplikasi. Jika notifikasi / service latar ditolak sistem (beberapa
+  ROM membatasi), aplikasi tetap berjalan selama layarnya terbuka.
 - Membuat APK sendiri: `run.bat android` (butuh .NET 8 SDK, `dotnet workload install android` dan JDK 17).
   APK ditandatangani dengan kunci debug PC yang membuatnya; APK dari PC lain hanya bisa dipasang setelah
   versi lama di-uninstall.

@@ -11,11 +11,12 @@ using Android.Widget;
 namespace Sharx.Android;
 
 /// <summary>
-/// Layar penuh berisi UI yang sama dengan aplikasi desktop (WebView ke server lokal di <see cref="SharxService"/>).
+/// Layar penuh berisi UI yang sama dengan aplikasi desktop (WebView ke server lokal <see cref="AppHost"/>).
 /// </summary>
 [Activity(
     Label = "@string/app_name",
     MainLauncher = true,
+    Exported = true,
     Theme = "@style/SharxTheme",
     LaunchMode = LaunchMode.SingleTask,
     ScreenOrientation = ScreenOrientation.SensorLandscape,
@@ -24,33 +25,49 @@ namespace Sharx.Android;
         | ConfigChanges.Navigation | ConfigChanges.UiMode)]
 public sealed class MainActivity : Activity
 {
-    private static readonly Color Background = Color.ParseColor("#06122A");
     private WebView? _web;
+    private TextView? _status;
+    private bool _serviceRequested;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
-        EnterFullScreen();
+        Guard("Layar penuh", () =>
+        {
+            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+            EnterFullScreen();
+        });
 
-        var web = new WebView(this);
-        web.SetBackgroundColor(Background);
-        var settings = web.Settings;
-        settings.JavaScriptEnabled = true;
-        settings.DomStorageEnabled = true;
-        settings.TextZoom = 100; // ukuran font sistem tidak mengubah tata letak dashboard
-        settings.BuiltInZoomControls = true;
-        settings.DisplayZoomControls = false;
-        settings.SetSupportZoom(true);
-        settings.MediaPlaybackRequiresUserGesture = true;
-        web.SetWebViewClient(new LocalOnlyClient());
-        web.SetDownloadListener(new LogDownloadListener(this));
-        SetContentView(web);
-        _web = web;
+        // Pesan "memuat" tampil dulu; WebView menggantikannya setelah UI siap.
+        _status = new TextView(this)
+        {
+            Text = "SHARX Data Transfer\nMemuat...",
+            Gravity = GravityFlags.Center,
+            TextSize = 20,
+        };
+        _status.SetTextColor(Color.White);
+        _status.SetBackgroundColor(Color.Rgb(6, 18, 42));
+        SetContentView(_status);
 
-        RequestNotificationPermission();
-        SharxService.Begin(this);
+        var lastCrash = CrashLog.TakeLast();
+        if (lastCrash is not null)
+        {
+            ShowReport("Aplikasi sempat berhenti", "Kirim laporan ini ke pembuat aplikasi:\n\n" + lastCrash);
+        }
+
+        Guard("Izin notifikasi", RequestNotificationPermission);
         _ = LoadUiAsync();
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        // Foreground service dimulai setelah layar tampil (beberapa ROM menolaknya saat layar baru dibuat).
+        if (!_serviceRequested)
+        {
+            _serviceRequested = true;
+            SharxService.Begin(this);
+        }
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -58,7 +75,7 @@ public sealed class MainActivity : Activity
         base.OnWindowFocusChanged(hasFocus);
         if (hasFocus)
         {
-            EnterFullScreen();
+            Guard("Layar penuh", EnterFullScreen);
         }
     }
 
@@ -72,13 +89,14 @@ public sealed class MainActivity : Activity
 
         new AlertDialog.Builder(this)
             .SetTitle("Tutup aplikasi?")!
-            .SetMessage(SharxService.TransferRunning
+            .SetMessage(AppHost.TransferRunning
                 ? "Transfer sedang berjalan. Menutup aplikasi akan menghentikan transfer ke printer."
                 : "Aplikasi SHARX Data Transfer akan ditutup.")!
             .SetNegativeButton("Batal", (_, _) => { })!
             .SetPositiveButton("Tutup", (_, _) =>
             {
-                StopService(new Intent(this, typeof(SharxService)));
+                AppHost.Stop();
+                SharxService.End(this);
                 FinishAndRemoveTask();
             })!
             .Show();
@@ -87,7 +105,7 @@ public sealed class MainActivity : Activity
 
     protected override void OnDestroy()
     {
-        _web?.Destroy();
+        Guard("Tutup WebView", () => _web?.Destroy());
         _web = null;
         base.OnDestroy();
     }
@@ -96,17 +114,77 @@ public sealed class MainActivity : Activity
     {
         try
         {
-            var address = await SharxService.Ready.ConfigureAwait(true);
-            _web?.LoadUrl(address + "/");
+            var address = await AppHost.EnsureStarted(this).ConfigureAwait(true);
+            var web = CreateWebView();
+            SetContentView(web);
+            _web = web;
+            _status = null;
+            web.LoadUrl(address + "/");
         }
         catch (Exception ex)
         {
-            new AlertDialog.Builder(this)
-                .SetTitle("SHARX Data Transfer gagal dibuka")!
-                .SetMessage(ex.Message)!
-                .SetPositiveButton("Tutup", (_, _) => FinishAndRemoveTask())!
-                .Show();
+            CrashLog.Write("Memulai aplikasi", ex);
+            ShowReport("SHARX Data Transfer gagal dibuka", ex.ToString());
+            if (_status is not null)
+            {
+                _status.Text = "SHARX Data Transfer gagal dibuka.\nTutup lalu buka lagi aplikasi.";
+            }
         }
+    }
+
+    private WebView CreateWebView()
+    {
+        var web = new WebView(this);
+        web.SetBackgroundColor(Color.Rgb(6, 18, 42));
+        var settings = web.Settings;
+        settings.JavaScriptEnabled = true;
+        settings.DomStorageEnabled = true;
+        settings.TextZoom = 100; // ukuran font sistem tidak mengubah tata letak dashboard
+        settings.BuiltInZoomControls = true;
+        settings.DisplayZoomControls = false;
+        settings.SetSupportZoom(true);
+        web.SetWebViewClient(new LocalOnlyClient());
+        web.SetDownloadListener(new LogDownloadListener(this));
+        return web;
+    }
+
+    /// <summary>Langkah khusus Android yang gagal dicatat, tidak menutup aplikasi.</summary>
+    private static void Guard(string step, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(step, ex);
+        }
+    }
+
+    /// <summary>Tampilkan teks error yang bisa disalin.</summary>
+    private void ShowReport(string title, string text)
+    {
+        Guard("Tampilkan laporan", () =>
+        {
+            var body = new TextView(this) { Text = text, TextSize = 12 };
+            body.SetTextIsSelectable(true);
+            body.SetPadding(40, 24, 40, 24);
+            var scroll = new ScrollView(this);
+            scroll.AddView(body);
+            new AlertDialog.Builder(this)
+                .SetTitle(title)!
+                .SetView(scroll)!
+                .SetNegativeButton("Tutup", (_, _) => { })!
+                .SetPositiveButton("Salin", (_, _) =>
+                {
+                    if (GetSystemService(ClipboardService) is ClipboardManager clipboard)
+                    {
+                        clipboard.PrimaryClip = ClipData.NewPlainText("SHARX error", text);
+                        Toast.MakeText(this, "Laporan disalin", ToastLength.Short)?.Show();
+                    }
+                })!
+                .Show();
+        });
     }
 
     private void RequestNotificationPermission()
@@ -156,7 +234,15 @@ public sealed class MainActivity : Activity
                 return false;
             }
 
-            view?.Context?.StartActivity(new Intent(Intent.ActionView, url).AddFlags(ActivityFlags.NewTask));
+            try
+            {
+                view?.Context?.StartActivity(new Intent(Intent.ActionView, url).AddFlags(ActivityFlags.NewTask));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Buka tautan", ex);
+            }
+
             return true;
         }
     }
@@ -182,8 +268,9 @@ public sealed class MainActivity : Activity
                     var bytes = await http.GetByteArrayAsync(url).ConfigureAwait(false);
                     message = $"Tersimpan: {Save(name, bytes)}";
                 }
-                catch (Exception ex) when (ex is HttpRequestException or IOException or Java.Lang.Exception)
+                catch (Exception ex)
                 {
+                    CrashLog.Write("Download log", ex);
                     message = $"Download gagal: {ex.Message}";
                 }
 

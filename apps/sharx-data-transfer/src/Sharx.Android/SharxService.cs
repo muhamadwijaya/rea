@@ -3,13 +3,13 @@ using Android.Content;
 using Android.Content.PM;
 using Android.Net.Wifi;
 using Android.OS;
-using Sharx.App;
 
 namespace Sharx.Android;
 
 /// <summary>
-/// Foreground service yang memegang <see cref="SharxRuntime"/> dan server UI lokal: transfer ke printer dan
-/// server tetap berjalan saat layar mati atau aplikasi ada di belakang (seperti jendela desktop yang di-minimize).
+/// Foreground service yang menjaga proses tetap hidup: transfer ke printer dan server tetap berjalan saat
+/// layar mati atau aplikasi di belakang (seperti jendela desktop yang di-minimize). Runtime-nya sendiri
+/// dipegang <see cref="AppHost"/>; jika service ditolak sistem, aplikasi tetap berjalan selama terbuka.
 /// </summary>
 [Service(Exported = false, ForegroundServiceType = ForegroundService.TypeConnectedDevice)]
 public sealed class SharxService : Service
@@ -17,133 +17,83 @@ public sealed class SharxService : Service
     private const string ChannelId = "sharx_transfer";
     private const int NotificationId = 1;
 
-    private static readonly object Gate = new();
-    private static TaskCompletionSource<string> _ready = NewReady();
-    private static SharxRuntime? _runtime;
-    private static EmbeddedServer? _server;
-
     private PowerManager.WakeLock? _wakeLock;
     private WifiManager.WifiLock? _wifiLock;
 
-    /// <summary>Alamat UI lokal setelah service siap (atau error jika gagal dibuka).</summary>
-    public static Task<string> Ready
-    {
-        get
-        {
-            lock (Gate)
-            {
-                return _ready.Task;
-            }
-        }
-    }
-
-    /// <summary>Transfer sedang berjalan (untuk konfirmasi saat keluar).</summary>
-    public static bool TransferRunning
-    {
-        get
-        {
-            lock (Gate)
-            {
-                return _runtime?.Service.IsRunning == true;
-            }
-        }
-    }
-
-    public static string DataDirectory(Context context) =>
-        Path.Combine(context.FilesDir?.AbsolutePath ?? System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal), "data");
-
+    /// <summary>Minta service berjalan; gagal (dibatasi sistem / ROM) hanya dicatat.</summary>
     public static void Begin(Context context)
     {
-        context.StartForegroundService(new Intent(context, typeof(SharxService)));
+        try
+        {
+            context.StartForegroundService(new Intent(context, typeof(SharxService)));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Start foreground service", ex);
+        }
+    }
+
+    public static void End(Context context)
+    {
+        try
+        {
+            context.StopService(new Intent(context, typeof(SharxService)));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Stop service", ex);
+        }
     }
 
     public override IBinder? OnBind(Intent? intent) => null;
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
-        ShowNotification();
-        lock (Gate)
+        try
         {
-            if (_runtime is null)
-            {
-                StartRuntime();
-            }
+            ShowNotification();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Notifikasi foreground", ex);
         }
 
-        AcquireLocks();
+        try
+        {
+            AcquireLocks();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Wake / Wi-Fi lock", ex);
+        }
+
+        // Service dibuat ulang sistem tanpa layar terbuka: tetap jalankan transfer.
+        _ = AppHost.EnsureStarted(this);
         return StartCommandResult.Sticky;
     }
 
     public override void OnDestroy()
     {
-        lock (Gate)
-        {
-            var server = _server;
-            var runtime = _runtime;
-            _server = null;
-            _runtime = null;
-            if (_ready.Task.IsCompleted)
-            {
-                _ready = NewReady();
-            }
-
-            // Tutup koneksi printer / server dengan rapi (maks. 10 detik) sebelum proses berhenti.
-            Task.Run(async () =>
-            {
-                if (server is not null)
-                {
-                    await server.DisposeAsync().ConfigureAwait(false);
-                }
-
-                if (runtime is not null)
-                {
-                    await runtime.DisposeAsync().ConfigureAwait(false);
-                }
-            }).Wait(TimeSpan.FromSeconds(10));
-        }
-
-        _wifiLock?.Release();
-        _wakeLock?.Release();
-        _wifiLock = null;
-        _wakeLock = null;
-        base.OnDestroy();
-    }
-
-    private static TaskCompletionSource<string> NewReady() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private void StartRuntime()
-    {
-        var dataDirectory = DataDirectory(this);
         try
         {
-            SharxRuntime.InstallCrashGuards(dataDirectory);
-            var runtime = new SharxRuntime(dataDirectory);
-            var assets = Assets;
-            var server = new EmbeddedServer(runtime, path => OpenAsset(assets, path));
-            server.Start();
-            runtime.Start(server.Address);
-            _runtime = runtime;
-            _server = server;
-            _ready.TrySetResult(server.Address);
+            if (_wifiLock?.IsHeld == true)
+            {
+                _wifiLock.Release();
+            }
+
+            if (_wakeLock?.IsHeld == true)
+            {
+                _wakeLock.Release();
+            }
         }
         catch (Exception ex)
         {
-            SharxRuntime.WriteCrash(dataDirectory, "AndroidStartup", ex);
-            _ready.TrySetException(ex);
+            CrashLog.Write("Lepas wake / Wi-Fi lock", ex);
         }
-    }
 
-    /// <summary>File UI dari asset aplikasi (salinan wwwroot desktop).</summary>
-    private static Stream? OpenAsset(global::Android.Content.Res.AssetManager? assets, string path)
-    {
-        try
-        {
-            return assets?.Open($"wwwroot/{path}");
-        }
-        catch (Java.IO.IOException)
-        {
-            return null;
-        }
+        _wifiLock = null;
+        _wakeLock = null;
+        base.OnDestroy();
     }
 
     private void ShowNotification()
